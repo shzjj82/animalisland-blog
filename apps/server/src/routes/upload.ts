@@ -1,9 +1,8 @@
-import crypto from "node:crypto";
-import path from "node:path";
 import { Router } from "express";
 import multer from "multer";
 import { requireAuth } from "../auth.js";
-import { env } from "../env.js";
+import { ossConfigured } from "../env.js";
+import { uploadImageToOss } from "../oss.js";
 
 const allowed = new Map([
   ["image/jpeg", ".jpg"],
@@ -13,13 +12,7 @@ const allowed = new Map([
 ]);
 
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, env.uploadDir),
-    filename: (_req, file, cb) => {
-      const ext = allowed.get(file.mimetype) ?? path.extname(file.originalname);
-      cb(null, `${crypto.randomUUID()}${ext}`);
-    },
-  }),
+  storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (!allowed.has(file.mimetype)) {
@@ -32,11 +25,22 @@ const upload = multer({
 
 export const uploadRouter = Router();
 
-uploadRouter.post("/", requireAuth, upload.single("file"), (req, res) => {
-  if (!req.file) {
-    res.status(400).json({ error: "NO_FILE" });
-    return;
-  }
-  const url = `/uploads/${req.file.filename}`;
-  res.json({ url });
+uploadRouter.post("/", requireAuth, upload.single("file"), (req, res, next) => {
+  void (async () => {
+    if (!req.file?.buffer) {
+      res.status(400).json({ error: "NO_FILE" });
+      return;
+    }
+    if (!ossConfigured()) {
+      res.status(500).json({ error: "OSS_NOT_CONFIGURED" });
+      return;
+    }
+    const ext = allowed.get(req.file.mimetype) ?? ".bin";
+    const { url } = await uploadImageToOss({
+      buffer: req.file.buffer,
+      mimetype: req.file.mimetype,
+      ext,
+    });
+    res.json({ url });
+  })().catch(next);
 });

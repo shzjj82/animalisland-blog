@@ -32,7 +32,17 @@ export const env = {
   adminPassword: required("ADMIN_PASSWORD", "changeme"),
   jwtExpiresDays: Number(process.env.JWT_EXPIRES_DAYS ?? 7),
   isProd: (process.env.NODE_ENV ?? "development") === "production",
+  ossAccessKeyId: process.env.OSS_ACCESS_KEY_ID ?? "",
+  ossAccessKeySecret: process.env.OSS_ACCESS_KEY_SECRET ?? "",
+  ossRegion: process.env.OSS_REGION ?? "",
+  ossBucket: process.env.OSS_BUCKET ?? "",
+  ossPrefix: (process.env.OSS_PREFIX ?? "blog").replace(/^\/+|\/+$/g, ""),
+  ossPublicBase: (process.env.OSS_PUBLIC_BASE ?? "").replace(/\/$/, ""),
 };
+
+export function ossConfigured(): boolean {
+  return Boolean(env.ossAccessKeyId && env.ossAccessKeySecret && env.ossRegion && env.ossBucket);
+}
 
 export function ensureDataDirs(): void {
   fs.mkdirSync(path.dirname(env.databasePath), { recursive: true });

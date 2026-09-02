@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@myblog/shared": "workspace:*",
+    "ali-oss": "^6.23.0",
     "better-sqlite3": "^11.10.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
@@ -19,6 +20,7 @@
     "multer": "^2.0.1"
   },
   "devDependencies": {
+    "@types/ali-oss": "^6.23.3",
     "@types/better-sqlite3": "^7.6.13",
     "@types/cookie-parser": "^1.4.8",
     "@types/cors": "^2.8.18",

@@ -46,6 +46,10 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
     res.status(400).json({ error: message });
     return;
   }
+  if (message === "OSS_NOT_CONFIGURED") {
+    res.status(500).json({ error: message });
+    return;
+  }
   console.error(err);
   res.status(500).json({ error: "SERVER_ERROR" });
 });
