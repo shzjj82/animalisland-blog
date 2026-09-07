@@ -1,5 +1,10 @@
 import { Router } from "express";
-import { isSiteSkillColor, type SiteAbout, type SiteSkill } from "@myblog/shared";
+import {
+  isEditorJsDocument,
+  isSiteSkillColor,
+  type SiteAbout,
+  type SiteSkill,
+} from "@myblog/shared";
 import { requireAuth } from "../auth.js";
 import { getAbout, saveAbout } from "../site.js";
 
@@ -9,20 +14,20 @@ function readAbout(input: unknown): SiteAbout | null {
   if (!input || typeof input !== "object") {
     return null;
   }
-  const body = input as {
+  const raw = input as {
     name?: unknown;
     body?: unknown;
     avatar?: unknown;
     skills?: unknown;
   };
-  if (typeof body.name !== "string" || typeof body.body !== "string" || typeof body.avatar !== "string") {
+  if (typeof raw.name !== "string" || typeof raw.avatar !== "string" || !isEditorJsDocument(raw.body)) {
     return null;
   }
-  if (!Array.isArray(body.skills)) {
+  if (!Array.isArray(raw.skills)) {
     return null;
   }
   const skills: SiteSkill[] = [];
-  for (const item of body.skills.slice(0, 12)) {
+  for (const item of raw.skills.slice(0, 12)) {
     if (!item || typeof item !== "object") {
       continue;
     }
@@ -37,20 +42,25 @@ function readAbout(input: unknown): SiteAbout | null {
     skills.push({ name, color: row.color });
   }
   return {
-    name: body.name.trim(),
-    body: body.body.trim(),
-    avatar: body.avatar.trim() || "🦊",
+    name: raw.name.trim(),
+    body: {
+      time: typeof raw.body.time === "number" ? raw.body.time : Date.now(),
+      version: typeof raw.body.version === "string" ? raw.body.version : "2.30.7",
+      blocks: raw.body.blocks,
+    },
+    avatar: raw.avatar.trim() || "🦊",
     skills,
   };
 }
 
 siteRouter.get("/", (_req, res) => {
+  res.set("Cache-Control", "public, max-age=60");
   res.json({ about: getAbout() });
 });
 
 siteRouter.put("/", requireAuth, (req, res) => {
   const about = readAbout(req.body);
-  if (!about || !about.name || !about.body) {
+  if (!about || !about.name) {
     res.status(400).json({ error: "INVALID_INPUT" });
     return;
   }

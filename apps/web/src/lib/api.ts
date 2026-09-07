@@ -1,4 +1,15 @@
-import type { Post, PostListItem, PostType, SiteAbout, UpsertPostInput } from "@myblog/shared";
+import type {
+  AiChatInput,
+  AiChatResult,
+  AiToEditorInput,
+  AiToEditorResult,
+  Category,
+  Post,
+  PostListItem,
+  SiteAbout,
+  UpsertCategoryInput,
+  UpsertPostInput,
+} from "@myblog/shared";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -24,8 +35,49 @@ export const api = {
       body: JSON.stringify({ username, password }),
     }),
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
-  listPosts: (type?: PostType) =>
-    request<{ posts: PostListItem[] }>(type ? `/api/posts?type=${type}` : "/api/posts"),
+  listCategories: () => request<{ categories: Category[] }>("/api/categories"),
+  getCategory: (slug: string) => request<{ category: Category }>(`/api/categories/${slug}`),
+  createCategory: (input: UpsertCategoryInput) =>
+    request<{ category: Category }>("/api/categories", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  updateCategory: (id: string, input: UpsertCategoryInput) =>
+    request<{ category: Category }>(`/api/categories/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
+  deleteCategory: (id: string) =>
+    request<{ ok: boolean }>(`/api/categories/${id}`, { method: "DELETE" }),
+  listPosts: (query?: string | {
+    type?: string;
+    kind?: "article" | "photos";
+    limit?: number;
+    page?: number;
+    pageSize?: number;
+  }) => {
+    const opts = typeof query === "string" ? { type: query } : (query ?? {});
+    const params = new URLSearchParams();
+    if (opts.type) {
+      params.set("type", opts.type);
+    }
+    if (opts.kind) {
+      params.set("kind", opts.kind);
+    }
+    if (opts.limit) {
+      params.set("limit", String(opts.limit));
+    }
+    if (opts.page) {
+      params.set("page", String(opts.page));
+    }
+    if (opts.pageSize) {
+      params.set("pageSize", String(opts.pageSize));
+    }
+    const qs = params.toString();
+    return request<{ posts: PostListItem[]; total: number; page: number; pageSize: number }>(
+      qs ? `/api/posts?${qs}` : "/api/posts",
+    );
+  },
   getBySlug: (slug: string) => request<{ post: Post }>(`/api/posts/${slug}`),
   getById: (id: string) => request<{ post: Post }>(`/api/posts/id/${id}`),
   createPost: (input: UpsertPostInput) =>
@@ -63,4 +115,16 @@ export const api = {
     body.append("file", file);
     return request<{ url: string }>("/api/upload", { method: "POST", body });
   },
+  aiStatus: () =>
+    request<{ enabled: boolean; model: string | null; base: string | null }>("/api/ai/status"),
+  aiChat: (input: AiChatInput) =>
+    request<AiChatResult>("/api/ai/chat", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  aiToEditor: (input: AiToEditorInput) =>
+    request<AiToEditorResult>("/api/ai/to-editor", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
 };

@@ -33,4 +33,22 @@ db.exec(`
     about_avatar TEXT NOT NULL,
     skills TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS categories (
+    id TEXT PRIMARY KEY,
+    slug TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    hint TEXT NOT NULL DEFAULT '',
+    color TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    nav INTEGER NOT NULL DEFAULT 1,
+    sort INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_categories_sort
+    ON categories (sort, created_at);
 `);
+
+db.prepare("UPDATE posts SET type = 'photos' WHERE type = 'photo'").run();

@@ -1,6 +1,6 @@
-* {
-    margin: 0;
-    padding: 0;
+*,
+*::before,
+*::after {
     box-sizing: border-box;
 }
 
@@ -52,11 +52,13 @@ html.blog-dark-root {
 }
 
 body {
+    margin: 0;
     font-family: "M PLUS Rounded 1c", "Zen Maru Gothic", Nunito, "HarmonyOS Sans SC", "MiSans", -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
     font-size: 14px;
     line-height: 1.5;
     color: var(--blog-ink);
     background: var(--blog-paper);
+    min-height: 100dvh;
 }
 
 html.blog-dark-root,
@@ -65,13 +67,19 @@ html.blog-dark-root body {
     color: var(--blog-ink);
 }
 
+html,
 #root {
     width: 100%;
+    min-height: 100dvh;
 }
 
 .animal-cursor {
-    min-height: 0;
+    min-height: 100dvh;
     overflow-x: clip;
+}
+
+.route-fallback {
+    min-height: 40vh;
 }
 
 .animal-divider-ZBhpE,

@@ -1,6 +1,8 @@
 import type { EditorJsBlock, EditorJsDocument } from "@myblog/shared";
-import { Card, CodeBlock, Divider, Image } from "animal-island-ui";
+import { Card, Divider, Image } from "animal-island-ui";
 import DOMPurify from "dompurify";
+import { codeLanguageLabel } from "@/components/editor/CodeTool";
+import { highlightCode } from "@/lib/highlight";
 
 function html(text: unknown): string {
   return DOMPurify.sanitize(typeof text === "string" ? text : "");
@@ -60,9 +62,14 @@ function BlockView({ block }: { block: EditorJsBlock }) {
   }
 
   if (type === "code") {
+    const language = typeof data.language === "string" ? data.language : "plaintext";
+    const code = String(data.code ?? "");
     return (
       <div className="block-code">
-        <CodeBlock code={String(data.code ?? "")} />
+        <span className="block-code-lang">{codeLanguageLabel(language)}</span>
+        <pre className="block-code-pre">
+          <code className="hljs" dangerouslySetInnerHTML={{ __html: highlightCode(code, language) }} />
+        </pre>
       </div>
     );
   }
@@ -83,6 +90,24 @@ function BlockView({ block }: { block: EditorJsBlock }) {
         {typeof data.caption === "string" && data.caption ? (
           <figcaption>{data.caption}</figcaption>
         ) : null}
+      </figure>
+    );
+  }
+
+  if (type === "embed") {
+    const src = typeof data.embed === "string" ? data.embed : "";
+    if (!src) {
+      return null;
+    }
+    return (
+      <figure className="block-embed">
+        <iframe
+          src={src}
+          title={typeof data.caption === "string" && data.caption ? data.caption : "嵌入内容"}
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+        />
+        {typeof data.caption === "string" && data.caption ? <figcaption>{data.caption}</figcaption> : null}
       </figure>
     );
   }

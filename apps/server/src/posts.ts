@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
-import type { EditorJsDocument, Post, PostListItem, PostType } from "@myblog/shared";
-import { emptyEditorDocument, isPostType } from "@myblog/shared";
+import type { CategoryKind, EditorJsDocument, Post, PostListItem, SiteSkillColor } from "@myblog/shared";
+import { emptyEditorDocument } from "@myblog/shared";
+import { getCategoryBySlug, listCategorySlugs } from "./categories.js";
 import { db } from "./db.js";
 
 type PostRow = {
@@ -29,12 +30,26 @@ function parseBody(raw: string): EditorJsDocument {
   }
 }
 
+function categoryMeta(type: string): {
+  categoryName: string;
+  categoryColor: SiteSkillColor;
+  categoryKind: CategoryKind;
+} {
+  const category = getCategoryBySlug(type);
+  return {
+    categoryName: category?.name ?? type,
+    categoryColor: category?.color ?? "app-yellow",
+    categoryKind: category?.kind ?? "article",
+  };
+}
+
 function toPost(row: PostRow): Post {
   return {
     id: row.id,
     slug: row.slug,
     title: row.title,
-    type: row.type as PostType,
+    type: row.type,
+    ...categoryMeta(row.type),
     summary: row.summary,
     coverUrl: row.cover_url,
     body: parseBody(row.body),
@@ -45,9 +60,9 @@ function toPost(row: PostRow): Post {
   };
 }
 
-function toListItem(row: PostRow): PostListItem {
-  const { body: _body, ...rest } = toPost(row);
-  return rest;
+function toListItem(row: Omit<PostRow, "body">): PostListItem {
+  const { body: _body, ...post } = toPost({ ...row, body: "{}" });
+  return post;
 }
 
 export function slugify(input: string): string {
@@ -75,7 +90,14 @@ function uniqueSlug(base: string, excludeId?: string): string {
   }
 }
 
-export function listPosts(opts: { type?: string; includeDrafts: boolean }): PostListItem[] {
+export function listPosts(opts: {
+  type?: string;
+  kind?: CategoryKind;
+  limit?: number;
+  page?: number;
+  pageSize?: number;
+  includeDrafts: boolean;
+}): { posts: PostListItem[]; total: number } {
   const clauses: string[] = [];
   const params: unknown[] = [];
 
@@ -83,22 +105,52 @@ export function listPosts(opts: { type?: string; includeDrafts: boolean }): Post
     clauses.push("draft = 0");
   }
   if (opts.type) {
-    if (!isPostType(opts.type)) {
-      return [];
+    if (!getCategoryBySlug(opts.type)) {
+      return { posts: [], total: 0 };
     }
     clauses.push("type = ?");
     params.push(opts.type);
+  } else if (opts.kind) {
+    const slugs = listCategorySlugs(opts.kind);
+    if (slugs.length === 0) {
+      return { posts: [], total: 0 };
+    }
+    clauses.push(`type IN (${slugs.map(() => "?").join(",")})`);
+    params.push(...slugs);
   }
 
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  const rows = db
-    .prepare(
-      `SELECT * FROM posts ${where}
-       ORDER BY COALESCE(published_at, created_at) DESC`,
-    )
-    .all(...params) as PostRow[];
+  const totalRow = db.prepare(`SELECT COUNT(*) AS count FROM posts ${where}`).get(...params) as {
+    count: number;
+  };
+  const total = Number(totalRow?.count ?? 0);
 
-  return rows.map(toListItem);
+  let limit: number | undefined;
+  let offset: number | undefined;
+  if (opts.pageSize && opts.pageSize > 0) {
+    const pageSize = Math.min(Math.floor(opts.pageSize), 100);
+    const page = Math.max(1, Math.floor(opts.page ?? 1));
+    limit = pageSize;
+    offset = (page - 1) * pageSize;
+  } else if (opts.limit && opts.limit > 0) {
+    limit = Math.min(opts.limit, 100);
+  }
+
+  const sql = `SELECT id, slug, title, type, summary, cover_url, draft, published_at, created_at, updated_at
+       FROM posts ${where}
+       ORDER BY COALESCE(published_at, created_at) DESC${limit != null ? " LIMIT ?" : ""}${
+         offset != null ? " OFFSET ?" : ""
+       }`;
+  const bind = [...params];
+  if (limit != null) {
+    bind.push(limit);
+  }
+  if (offset != null) {
+    bind.push(offset);
+  }
+  const rows = db.prepare(sql).all(...bind) as Omit<PostRow, "body">[];
+
+  return { posts: rows.map(toListItem), total };
 }
 
 export function getPostBySlug(slug: string, includeDrafts: boolean): Post | undefined {
@@ -121,7 +173,7 @@ export function getPostById(id: string): Post | undefined {
 type PostWriteInput = {
   title: string;
   slug?: string;
-  type: PostType;
+  type: string;
   summary: string;
   coverUrl: string;
   body: EditorJsDocument;
@@ -129,6 +181,9 @@ type PostWriteInput = {
 };
 
 export function createPost(input: PostWriteInput): Post {
+  if (!getCategoryBySlug(input.type)) {
+    throw new Error("INVALID_CATEGORY");
+  }
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
   const slug = uniqueSlug(input.slug || input.title);
@@ -159,6 +214,9 @@ export function updatePost(id: string, input: PostWriteInput): Post | undefined 
   const existing = getPostById(id);
   if (!existing) {
     return undefined;
+  }
+  if (!getCategoryBySlug(input.type)) {
+    throw new Error("INVALID_CATEGORY");
   }
 
   const now = new Date().toISOString();

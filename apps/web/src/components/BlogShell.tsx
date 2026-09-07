@@ -10,8 +10,10 @@ export function BlogShell({ children }: { children: ReactNode }) {
   return (
     <div className={`blog ${dark ? "blog--dark" : ""}`}>
       <BlogHeader />
-      {children}
-      <Footer type="sea" />
+      <div className="blog-frame">{children}</div>
+      <div className="blog-sea">
+        <Footer type="sea" />
+      </div>
     </div>
   );
 }

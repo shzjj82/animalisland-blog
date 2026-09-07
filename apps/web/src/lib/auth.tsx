@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 import { api } from "./api";
 
 type AuthState = {
@@ -11,9 +12,15 @@ type AuthState = {
 
 const AuthContext = createContext<AuthState | null>(null);
 
+function needsSession(pathname: string) {
+  return pathname.startsWith("/admin") || pathname === "/login";
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation();
+  const sessionPage = needsSession(pathname);
   const [username, setUsername] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(sessionPage);
 
   const refresh = async () => {
     try {
@@ -27,8 +34,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    if (!sessionPage) {
+      setLoading(false);
+      return;
+    }
     void refresh();
-  }, []);
+  }, [sessionPage]);
 
   const value = useMemo<AuthState>(
     () => ({

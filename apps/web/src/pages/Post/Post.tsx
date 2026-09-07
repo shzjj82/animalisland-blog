@@ -1,11 +1,11 @@
-import { POST_TYPE_LABEL, type Post as BlogPost, type PostListItem } from "@myblog/shared";
+import { SITE_DESCRIPTION, type Post as BlogPost, type PostListItem } from "@myblog/shared";
 import { Button, Card, Divider, Loading } from "animal-island-ui";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { BlockRenderer } from "@/components/BlockRenderer";
 import { BlogShell } from "@/components/BlogShell";
+import { Seo } from "@/components/Seo";
 import { api } from "@/lib/api";
-import { postColor, postCover } from "../Home/posts";
 import "./Post.less";
 
 function Post() {
@@ -20,26 +20,66 @@ function Post() {
     window.scrollTo({ top: 0, behavior: "auto" });
     setLoading(true);
     setMissing(false);
+    setSiblings([]);
+    let cancelled = false;
     void api
       .getBySlug(slug)
-      .then(async (detail) => {
+      .then((detail) => {
+        if (cancelled) {
+          return;
+        }
         setPost(detail.post);
-        const list = await api.listPosts(detail.post.type);
-        setSiblings(list.posts);
+        setLoading(false);
+        return api.listPosts(detail.post.type).then((list) => {
+          if (!cancelled) {
+            setSiblings(list.posts);
+          }
+        });
       })
       .catch(() => {
+        if (cancelled) {
+          return;
+        }
         setPost(null);
         setMissing(true);
-      })
-      .finally(() => setLoading(false));
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [slug]);
 
   const currentIndex = post ? siblings.findIndex((item) => item.slug === post.slug) : -1;
   const prev = currentIndex > 0 ? siblings[currentIndex - 1] : null;
   const next = currentIndex >= 0 && currentIndex < siblings.length - 1 ? siblings[currentIndex + 1] : null;
+  const published = post ? (post.publishedAt ?? post.updatedAt).slice(0, 10) : "";
 
   return (
     <BlogShell>
+      {missing || (!loading && !post) ? (
+        <Seo title="没有找到这篇文章" description={SITE_DESCRIPTION} path={`/post/${slug}`} noindex />
+      ) : post ? (
+        <Seo
+          title={post.title}
+          description={post.summary || SITE_DESCRIPTION}
+          path={`/post/${post.slug}`}
+          image={post.coverUrl || undefined}
+          type="article"
+          jsonLd={{
+            "@context": "https://schema.org",
+            "@type": "BlogPosting",
+            headline: post.title,
+            description: post.summary || SITE_DESCRIPTION,
+            image: post.coverUrl || undefined,
+            datePublished: post.publishedAt ?? post.createdAt,
+            dateModified: post.updatedAt,
+            inLanguage: "zh-CN",
+            mainEntityOfPage: `${window.location.origin}/post/${post.slug}`,
+            publisher: { "@type": "Organization", name: "小岛日记" },
+          }}
+        />
+      ) : null}
+
       <Loading
         active={loading}
         style={{ position: "fixed", left: 0, top: 0, zIndex: 9999999, height: "100vh", width: "100vw" }}
@@ -49,29 +89,39 @@ function Post() {
         <div className="post-page">
           <Button onClick={() => navigate("/")}>← 返回首页</Button>
           <Card color="app-pink">
-            <h2>没有找到这篇文章</h2>
+            <h1>没有找到这篇文章</h1>
             <p>可能已经删掉了，或者链接写错了。</p>
           </Card>
         </div>
       ) : post ? (
-        <div className="post-page">
+        <article className="post-page">
           <div className="post-back">
             <Button type="text" onClick={() => navigate("/")}>
               ← 返回文章列表
             </Button>
           </div>
 
-          <Card color={postColor[post.type]} className="post-hero">
+          <Card color={post.categoryColor} className="post-hero">
             {post.coverUrl ? (
-              <img src={post.coverUrl} alt="" className="post-hero-photo" />
+              <img
+                src={post.coverUrl}
+                alt={post.title}
+                className="post-hero-photo"
+                width={96}
+                height={96}
+                decoding="async"
+                fetchPriority="high"
+              />
             ) : (
-              <div className="post-hero-cover">{postCover[post.type]}</div>
+              <div className="post-hero-cover" aria-hidden>
+                {post.categoryKind === "photos" ? "📷" : "🌿"}
+              </div>
             )}
             <div className="post-hero-text">
-              <span className="post-tag">#{POST_TYPE_LABEL[post.type]}</span>
+              <span className="post-tag">#{post.categoryName}</span>
               <h1>{post.title}</h1>
               <div className="post-meta">
-                <span>🗓 {(post.publishedAt ?? post.updatedAt).slice(0, 10)}</span>
+                <time dateTime={published}>🗓 {published}</time>
               </div>
             </div>
           </Card>
@@ -86,7 +136,7 @@ function Post() {
 
           <Divider type="wave-yellow" />
 
-          <div className="post-nav">
+          <nav className="post-nav" aria-label="相邻文章">
             {prev ? (
               <Button onClick={() => navigate(`/post/${prev.slug}`)}>← {prev.title}</Button>
             ) : (
@@ -99,8 +149,8 @@ function Post() {
             ) : (
               <span />
             )}
-          </div>
-        </div>
+          </nav>
+        </article>
       ) : (
         <div className="post-page" />
       )}

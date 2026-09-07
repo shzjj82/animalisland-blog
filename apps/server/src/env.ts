@@ -38,10 +38,20 @@ export const env = {
   ossBucket: process.env.OSS_BUCKET ?? "",
   ossPrefix: (process.env.OSS_PREFIX ?? "blog").replace(/^\/+|\/+$/g, ""),
   ossPublicBase: (process.env.OSS_PUBLIC_BASE ?? "").replace(/\/$/, ""),
+  siteUrl: (process.env.SITE_URL ?? "").replace(/\/$/, ""),
+  /** OpenAI 兼容接口（也可填 DeepSeek / 通义 / 本地代理等） */
+  aiApiBase: (process.env.AI_API_BASE ?? "https://api.openai.com/v1").replace(/\/$/, ""),
+  aiApiKey: process.env.AI_API_KEY ?? "",
+  aiModel: process.env.AI_MODEL ?? "gpt-4o-mini",
+  aiTimeoutMs: Number(process.env.AI_TIMEOUT_MS ?? 90_000),
 };
 
 export function ossConfigured(): boolean {
   return Boolean(env.ossAccessKeyId && env.ossAccessKeySecret && env.ossRegion && env.ossBucket);
+}
+
+export function aiConfigured(): boolean {
+  return Boolean(env.aiApiKey.trim());
 }
 
 export function ensureDataDirs(): void {

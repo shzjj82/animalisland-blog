@@ -1,6 +1,7 @@
 import { Router } from "express";
-import { isPostType, type EditorJsDocument, type PostType } from "@myblog/shared";
+import type { EditorJsDocument } from "@myblog/shared";
 import { optionalAuth, requireAuth } from "../auth.js";
+import { getCategoryBySlug } from "../categories.js";
 import {
   createPost,
   deletePost,
@@ -18,7 +19,7 @@ type ParsedUpsert =
       value: {
         title: string;
         slug?: string;
-        type: PostType;
+        type: string;
         summary: string;
         coverUrl: string;
         body: EditorJsDocument;
@@ -49,7 +50,7 @@ function parseUpsert(raw: unknown): ParsedUpsert {
     draft?: boolean;
   };
 
-  if (!title?.trim() || !type || !isPostType(type)) {
+  if (!title?.trim() || !type || !getCategoryBySlug(type)) {
     return { ok: false, error: "INVALID_INPUT" };
   }
   const doc = readBody(body);
@@ -73,11 +74,25 @@ function parseUpsert(raw: unknown): ParsedUpsert {
 
 postsRouter.get("/", optionalAuth, (req, res) => {
   const type = typeof req.query.type === "string" ? req.query.type : undefined;
-  const posts = listPosts({
+  const kind = req.query.kind === "article" || req.query.kind === "photos" ? req.query.kind : undefined;
+  const parsedLimit = Number(req.query.limit);
+  const limit = Number.isFinite(parsedLimit) ? parsedLimit : undefined;
+  const parsedPage = Number(req.query.page);
+  const parsedPageSize = Number(req.query.pageSize);
+  const page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : undefined;
+  const pageSize = Number.isFinite(parsedPageSize) && parsedPageSize > 0 ? parsedPageSize : undefined;
+  const { posts, total } = listPosts({
     type,
+    kind,
+    limit,
+    page,
+    pageSize,
     includeDrafts: Boolean(req.authed),
   });
-  res.json({ posts });
+  if (!req.authed) {
+    res.set("Cache-Control", "public, max-age=30");
+  }
+  res.json({ posts, total, page: page ?? 1, pageSize: pageSize ?? posts.length });
 });
 
 postsRouter.get("/id/:id", requireAuth, (req, res) => {
@@ -94,6 +109,9 @@ postsRouter.get("/:slug", optionalAuth, (req, res) => {
   if (!post) {
     res.status(404).json({ error: "NOT_FOUND" });
     return;
+  }
+  if (!req.authed) {
+    res.set("Cache-Control", "public, max-age=60");
   }
   res.json({ post });
 });

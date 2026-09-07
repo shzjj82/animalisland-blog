@@ -1,17 +1,19 @@
-import { ARTICLE_TYPES, POST_TYPE_LABEL, type ArticleType } from "@myblog/shared";
-import { Button } from "animal-island-ui";
+import type { Category } from "@myblog/shared";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 type TypeChipsProps = {
   className?: string;
+  categories: Category[];
 } & (
-  | { includeAll?: false; value: ArticleType; onChange: (value: ArticleType) => void }
-  | { includeAll: true; value: ArticleType | "all"; onChange: (value: ArticleType | "all") => void }
+  | { includeAll?: false; value: string; onChange: (value: string) => void }
+  | { includeAll: true; value: string | "all"; onChange: (value: string | "all") => void }
 );
 
 export function TypeChips(props: TypeChipsProps) {
-  const { value, className } = props;
+  const { value, className, categories } = props;
 
-  const select = (next: ArticleType | "all") => {
+  const select = (next: string | "all") => {
     if (props.includeAll) {
       props.onChange(next);
       return;
@@ -22,28 +24,30 @@ export function TypeChips(props: TypeChipsProps) {
   };
 
   return (
-    <div className={["type-row", className].filter(Boolean).join(" ")} role="radiogroup" aria-label="文章类型">
+    <div
+      className={cn("flex flex-wrap items-center gap-2", className)}
+      role="radiogroup"
+      aria-label="文章类型"
+    >
       {props.includeAll ? (
         <Button
-          size="small"
-          type={value === "all" ? "primary" : "default"}
-          htmlType="button"
-          className={value === "all" ? "type-chip is-on" : "type-chip"}
+          type="button"
+          size="sm"
+          variant={value === "all" ? "default" : "outline"}
           onClick={() => select("all")}
         >
           全部
         </Button>
       ) : null}
-      {ARTICLE_TYPES.map((item) => (
+      {categories.map((item) => (
         <Button
-          key={item}
-          size="small"
-          type={value === item ? "primary" : "default"}
-          htmlType="button"
-          className={value === item ? "type-chip is-on" : "type-chip"}
-          onClick={() => select(item)}
+          key={item.id}
+          type="button"
+          size="sm"
+          variant={value === item.slug ? "default" : "outline"}
+          onClick={() => select(item.slug)}
         >
-          {POST_TYPE_LABEL[item]}
+          {item.name}
         </Button>
       ))}
     </div>

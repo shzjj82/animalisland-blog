@@ -1,11 +1,12 @@
-import { POST_TYPE_LABEL, type PostListItem } from "@myblog/shared";
+import type { PostListItem } from "@myblog/shared";
 import { Card } from "animal-island-ui";
-import { useNavigate } from "react-router-dom";
-import { postColor } from "@/pages/Home/posts";
+import { Link } from "react-router-dom";
+
+function prefetchPostPage() {
+  void import("@/pages/Post/Post");
+}
 
 export function PostCards({ posts, empty }: { posts: PostListItem[]; empty: string }) {
-  const navigate = useNavigate();
-
   if (posts.length === 0) {
     return (
       <Card color="app-yellow">
@@ -19,21 +20,25 @@ export function PostCards({ posts, empty }: { posts: PostListItem[]; empty: stri
   return (
     <div className="blog-posts-grid">
       {posts.map((post) => (
-        <Card
+        <Link
           key={post.id}
-          color={postColor[post.type]}
-          hoverable
-          className="blog-post-card"
-          onClick={() => navigate(`/post/${post.slug}`)}
+          to={`/post/${post.slug}`}
+          className="blog-post-card-link"
+          onMouseEnter={prefetchPostPage}
+          onFocus={prefetchPostPage}
         >
-          <div className="blog-post-tag">#{POST_TYPE_LABEL[post.type]}</div>
-          <h3 className="blog-post-title">{post.title}</h3>
-          <p className="blog-post-excerpt">{post.summary || "点进去看全文。"}</p>
-          <div className="blog-post-meta">
-            <span>{(post.publishedAt ?? post.updatedAt).slice(0, 10)}</span>
-            <span className="blog-post-more">阅读 →</span>
-          </div>
-        </Card>
+          <Card color={post.categoryColor} hoverable className="blog-post-card">
+            <div className="blog-post-tag">#{post.categoryName}</div>
+            <h3 className="blog-post-title">{post.title}</h3>
+            <p className="blog-post-excerpt">{post.summary || "点进去看全文。"}</p>
+            <div className="blog-post-meta">
+              <time dateTime={(post.publishedAt ?? post.updatedAt).slice(0, 10)}>
+                {(post.publishedAt ?? post.updatedAt).slice(0, 10)}
+              </time>
+              <span className="blog-post-more">阅读 →</span>
+            </div>
+          </Card>
+        </Link>
       ))}
     </div>
   );

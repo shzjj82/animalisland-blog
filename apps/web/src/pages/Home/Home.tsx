@@ -1,29 +1,40 @@
-import { ARTICLE_TYPES, DEFAULT_ABOUT, isArticleType, type PostListItem } from "@myblog/shared";
+import { DEFAULT_ABOUT, SITE_DESCRIPTION, SITE_NAME, type PostListItem } from "@myblog/shared";
 import { Button, Card, Divider, Modal, Typewriter } from "animal-island-ui";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { BlogShell } from "@/components/BlogShell";
+import { BlockRenderer } from "@/components/BlockRenderer";
 import { PostCards } from "@/components/PostCards";
+import { Seo } from "@/components/Seo";
 import { api } from "@/lib/api";
+import { useCategories } from "@/lib/categories";
 import type { BlogColor } from "./posts";
 
 function Home() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [introOpen, setIntroOpen] = useState(() => !localStorage.getItem("hasSeenWelcomeModal"));
+  const { articleCategories } = useCategories();
+  const [introOpen, setIntroOpen] = useState(false);
   const [posts, setPosts] = useState<PostListItem[]>([]);
   const [about, setAbout] = useState(DEFAULT_ABOUT);
 
   useEffect(() => {
-    if (!introOpen) {
-      localStorage.setItem("hasSeenWelcomeModal", "true");
+    if (localStorage.getItem("hasSeenWelcomeModal")) {
+      return;
     }
-  }, [introOpen]);
+    const timer = window.setTimeout(() => setIntroOpen(true), 400);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const closeIntro = () => {
+    localStorage.setItem("hasSeenWelcomeModal", "true");
+    setIntroOpen(false);
+  };
 
   useEffect(() => {
     void api
-      .listPosts()
-      .then((data) => setPosts(data.posts.filter((post) => isArticleType(post.type))))
+      .listPosts({ kind: "article", limit: 12 })
+      .then((data) => setPosts(data.posts))
       .catch(() => setPosts([]));
     void api
       .getSite()
@@ -44,20 +55,34 @@ function Home() {
 
   const stats: { label: string; value: string; color: BlogColor }[] = [
     { label: "文章", value: String(posts.length), color: "app-yellow" },
-    { label: "分类", value: String(ARTICLE_TYPES.length), color: "app-orange" },
+    { label: "分类", value: String(articleCategories.length), color: "app-orange" },
     { label: "岛民", value: "1", color: "app-teal" },
     { label: "更新节奏", value: "慢", color: "yellow-green" },
   ];
 
   return (
     <BlogShell>
+      <Seo
+        title={SITE_NAME}
+        description={SITE_DESCRIPTION}
+        path="/"
+        jsonLd={{
+          "@context": "https://schema.org",
+          "@type": "WebSite",
+          name: SITE_NAME,
+          url: window.location.origin,
+          description: SITE_DESCRIPTION,
+          inLanguage: "zh-CN",
+          author: { "@type": "Person", name: about.name },
+        }}
+      />
       <section className="blog-hero">
         <div className="blog-hero-text">
-          <div className="blog-hero-title">
+          <h1 className="blog-hero-title">
             <Typewriter speed={70} trigger={0}>
               你好，这里是小岛日记。一座慢慢写的小岛。
             </Typewriter>
-          </div>
+          </h1>
           <div className="blog-hero-copy">
             <p>
               用来记 <b>生活</b> 里碰到的小事、<b>编程</b> 时踩过的坑、<b>闲聊</b> 时冒出来的念头，以及路上顺手拍下的 <b>照片</b>。
@@ -69,7 +94,11 @@ function Home() {
             </p>
           </div>
           <div className="blog-hero-actions">
-            <Button type="primary" size="large" onClick={() => navigate("/life")}>
+            <Button
+              type="primary"
+              size="large"
+              onClick={() => navigate(articleCategories[0] ? `/${articleCategories[0].slug}` : "/")}
+            >
               开始阅读
             </Button>
             <Button
@@ -115,7 +144,9 @@ function Home() {
             <div className="blog-avatar">{about.avatar}</div>
             <div>
               <h3>{about.name}</h3>
-              <p>{about.body}</p>
+              <div className="blog-about-body">
+                <BlockRenderer document={about.body} />
+              </div>
               <div className="blog-skills">
                 {about.skills.map((s, index) => (
                   <Card key={`${s.name}-${index}`} color={s.color}>
@@ -131,14 +162,14 @@ function Home() {
       <Modal
         open={introOpen}
         title="欢迎来到小岛日记"
-        onClose={() => setIntroOpen(false)}
-        onOk={() => setIntroOpen(false)}
+        onClose={closeIntro}
+        onOk={closeIntro}
         typewriter
         typeSpeed={60}
         footer={
           <>
-            <Button onClick={() => setIntroOpen(false)}>稍后再看</Button>
-            <Button type="primary" onClick={() => setIntroOpen(false)}>
+            <Button onClick={closeIntro}>稍后再看</Button>
+            <Button type="primary" onClick={closeIntro}>
               开始逛
             </Button>
           </>

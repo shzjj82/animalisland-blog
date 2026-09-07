@@ -1,10 +1,24 @@
-import { DEFAULT_ABOUT, SITE_SKILL_COLORS, type SiteAbout, type SiteSkillColor } from "@myblog/shared";
-import { Button, Card, Input } from "animal-island-ui";
-import { FormEvent, useEffect, useState } from "react";
+import {
+  DEFAULT_ABOUT,
+  SITE_SKILL_COLORS,
+  emptyEditorDocument,
+  type SiteAbout,
+  type SiteSkillColor,
+} from "@myblog/shared";
+import EditorJS from "@editorjs/editorjs";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { PostEditor, saveEditor } from "@/components/PostEditor";
+import { AdminPageHeader } from "@/components/AdminPageHeader";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 
 export function AdminAboutPage() {
+  const editorRef = useRef<EditorJS | null>(null);
   const [about, setAbout] = useState<SiteAbout>(DEFAULT_ABOUT);
+  const [loaded, setLoaded] = useState(false);
   const [skillName, setSkillName] = useState("");
   const [skillColor, setSkillColor] = useState<SiteSkillColor>("app-yellow");
   const [saving, setSaving] = useState(false);
@@ -14,8 +28,14 @@ export function AdminAboutPage() {
   useEffect(() => {
     void api
       .getSite()
-      .then((data) => setAbout(data.about))
-      .catch(() => setAbout(DEFAULT_ABOUT));
+      .then((data) => {
+        setAbout(data.about);
+        setLoaded(true);
+      })
+      .catch(() => {
+        setAbout(DEFAULT_ABOUT);
+        setLoaded(true);
+      });
   }, []);
 
   const addSkill = () => {
@@ -43,7 +63,11 @@ export function AdminAboutPage() {
     setError("");
     setOk(false);
     try {
-      const saved = await api.saveSite(about);
+      const body = await saveEditor(editorRef.current);
+      const saved = await api.saveSite({
+        ...about,
+        body: body.blocks.length ? body : emptyEditorDocument(),
+      });
       setAbout(saved.about);
       setOk(true);
     } catch {
@@ -53,42 +77,46 @@ export function AdminAboutPage() {
     }
   };
 
+  if (!loaded) {
+    return <p className="muted">加载中…</p>;
+  }
+
   return (
-    <section className="admin-page">
-      <div className="admin-head">
-        <div>
-          <h1 className="page-title">关于</h1>
-          <p className="section-copy">改的是首页「关于」那一块：名字、自我介绍和标签。</p>
-        </div>
-      </div>
-      <Card color="default" className="write-card">
+    <section className="flex min-h-full flex-1 flex-col">
+      <AdminPageHeader title="关于" description="介绍正文用 Editor.js，和文章一样可排版。" />
+      <Card className="write-card about-edit-card">
+        <CardContent className="pt-6">
         <form className="write-form" onSubmit={(e) => void onSubmit(e)}>
-          <label className="login-field">
-            <span>头像（一个表情就好）</span>
+          <div className="login-field">
+            <Label htmlFor="about-avatar">头像（一个表情就好）</Label>
             <Input
+              id="about-avatar"
               value={about.avatar}
               onChange={(e) => setAbout((prev) => ({ ...prev, avatar: e.currentTarget.value }))}
               placeholder="🦊"
             />
-          </label>
-          <label className="login-field">
-            <span>标题</span>
+          </div>
+          <div className="login-field">
+            <Label htmlFor="about-name">标题</Label>
             <Input
+              id="about-name"
               value={about.name}
               onChange={(e) => setAbout((prev) => ({ ...prev, name: e.currentTarget.value }))}
               placeholder="小岛日记"
             />
-          </label>
-          <label className="login-field">
-            <span>介绍</span>
-            <textarea
-              className="about-body"
-              rows={6}
-              value={about.body}
-              onChange={(e) => setAbout((prev) => ({ ...prev, body: e.currentTarget.value }))}
-              placeholder="用几句话介绍这座岛。"
-            />
-          </label>
+          </div>
+          <div className="login-field">
+            <Label>介绍</Label>
+            <div className="about-editor">
+              <PostEditor
+                key="about-editor"
+                initial={about.body}
+                onReady={(instance) => {
+                  editorRef.current = instance;
+                }}
+              />
+            </div>
+          </div>
           <div>
             <p className="section-copy" style={{ marginBottom: 8 }}>
               标签
@@ -122,7 +150,7 @@ export function AdminAboutPage() {
                   </option>
                 ))}
               </select>
-              <Button htmlType="button" onClick={addSkill}>
+              <Button type="button" variant="outline" onClick={addSkill}>
                 加上
               </Button>
             </div>
@@ -130,11 +158,12 @@ export function AdminAboutPage() {
           {error ? <p className="error">{error}</p> : null}
           {ok ? <p className="muted">已写上首页。</p> : null}
           <div className="write-actions">
-            <Button type="primary" htmlType="submit" loading={saving}>
-              保存关于
+            <Button type="submit" disabled={saving}>
+              {saving ? "保存中…" : "保存关于"}
             </Button>
           </div>
         </form>
+        </CardContent>
       </Card>
     </section>
   );

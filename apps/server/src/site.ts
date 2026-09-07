@@ -1,4 +1,10 @@
-import { DEFAULT_ABOUT, isSiteSkillColor, type SiteAbout, type SiteSkill } from "@myblog/shared";
+import {
+  DEFAULT_ABOUT,
+  isSiteSkillColor,
+  normalizeEditorDocument,
+  type SiteAbout,
+  type SiteSkill,
+} from "@myblog/shared";
 import { db } from "./db.js";
 
 type SiteRow = {
@@ -37,7 +43,7 @@ function parseSkills(raw: string): SiteSkill[] {
 function toAbout(row: SiteRow): SiteAbout {
   return {
     name: row.about_name,
-    body: row.about_body,
+    body: normalizeEditorDocument(row.about_body),
     avatar: row.about_avatar,
     skills: parseSkills(row.skills),
   };
@@ -53,7 +59,7 @@ function seedIfEmpty() {
      VALUES (1, ?, ?, ?, ?)`,
   ).run(
     DEFAULT_ABOUT.name,
-    DEFAULT_ABOUT.body,
+    JSON.stringify(DEFAULT_ABOUT.body),
     DEFAULT_ABOUT.avatar,
     JSON.stringify(DEFAULT_ABOUT.skills),
   );
@@ -70,6 +76,6 @@ export function saveAbout(input: SiteAbout): SiteAbout {
   db.prepare(
     `UPDATE site SET about_name = ?, about_body = ?, about_avatar = ?, skills = ?
      WHERE id = 1`,
-  ).run(input.name, input.body, input.avatar, JSON.stringify(input.skills));
+  ).run(input.name, JSON.stringify(input.body), input.avatar, JSON.stringify(input.skills));
   return getAbout();
 }

@@ -6,16 +6,35 @@ type FilePickProps = {
   fileName?: string;
   previewUrl?: string;
   compact?: boolean;
+  accept?: string;
+  multiple?: boolean;
   onFile: (file: File) => void;
+  onFiles?: (files: File[]) => void;
 };
 
-export function FilePick({ label, hint, fileName, previewUrl, compact, onFile }: FilePickProps) {
+export function FilePick({
+  label,
+  hint,
+  fileName,
+  previewUrl,
+  compact,
+  accept = "image/*",
+  multiple,
+  onFile,
+  onFiles,
+}: FilePickProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
 
-  const take = (file: File | undefined) => {
-    if (file) {
-      onFile(file);
+  const take = (list: FileList | File[] | null | undefined) => {
+    const files = list ? Array.from(list) : [];
+    if (!files.length) {
+      return;
+    }
+    if (onFiles) {
+      onFiles(files);
+    } else {
+      onFile(files[0]);
     }
     if (inputRef.current) {
       inputRef.current.value = "";
@@ -23,13 +42,13 @@ export function FilePick({ label, hint, fileName, previewUrl, compact, onFile }:
   };
 
   const onChange = (e: ChangeEvent<HTMLInputElement>) => {
-    take(e.target.files?.[0]);
+    take(e.target.files);
   };
 
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     setOver(false);
-    take(e.dataTransfer.files[0]);
+    take(e.dataTransfer.files);
   };
 
   return (
@@ -38,7 +57,8 @@ export function FilePick({ label, hint, fileName, previewUrl, compact, onFile }:
         ref={inputRef}
         className="file-pick-input"
         type="file"
-        accept="image/*"
+        accept={accept}
+        multiple={multiple}
         onChange={onChange}
       />
       <button
@@ -57,7 +77,7 @@ export function FilePick({ label, hint, fileName, previewUrl, compact, onFile }:
         ) : null}
         <span className="file-pick-copy">
           <strong>{label}</strong>
-          <em>{fileName || hint || "也可以把图片拖进来"}</em>
+          <em>{fileName || hint || "也可以把文件拖进来"}</em>
         </span>
       </button>
     </div>
