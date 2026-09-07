@@ -164,7 +164,7 @@ export function WriteEditor({ postId, defaultType, onClose, onSaved }: Props) {
       </div>
 
       <div className="flex min-h-0 flex-1">
-        <div className="write-paper min-h-0 min-w-0 flex-1 overflow-y-auto px-3 py-2 sm:px-5">
+        <div className="write-paper min-h-0 min-w-0 flex-1 overflow-y-auto px-3 py-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden sm:px-5">
           <PostEditor
             key={post?.id ?? `new-${defaultType ?? "blank"}`}
             initial={initial}
