@@ -452,6 +452,14 @@
 
 .write-paper .editor-holder {
   min-height: 360px;
+  color: var(--foreground, var(--blog-ink));
+}
+
+.write-editor .editor-holder,
+.write-editor .editor-holder .ce-paragraph,
+.write-editor .editor-holder .ce-header,
+.write-editor .editor-holder .cdx-block {
+  color: var(--foreground, var(--blog-ink));
 }
 
 .write-foot {
@@ -1462,14 +1470,6 @@
 .error {
   color: var(--blog-danger);
   font-weight: 700;
-}
-
-.cover-preview {
-  width: 100%;
-  border-radius: 20px;
-  max-height: 280px;
-  object-fit: cover;
-  margin: 12px 0;
 }
 
 .file-pick-input {

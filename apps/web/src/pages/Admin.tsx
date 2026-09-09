@@ -1,8 +1,9 @@
 import type { Post, PostListItem } from "@myblog/shared";
-import { FileText, Plus } from "lucide-react";
+import { FileText, Plus, Tags } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AdminPageHeader } from "@/components/AdminPageHeader";
+import { CategoryManagerDialog } from "@/components/CategoryManagerDialog";
 import { TypeChips } from "@/components/TypeChips";
 import { WriteEditor } from "@/components/WriteEditor";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +40,7 @@ export function AdminPage() {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [loading, setLoading] = useState(true);
   const [writeTarget, setWriteTarget] = useState<WriteTarget | null>(null);
+  const [categoryOpen, setCategoryOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -125,12 +127,18 @@ export function AdminPage() {
     <section className="flex min-h-full flex-1 flex-col">
       <AdminPageHeader
         title="文章"
-        description="管理已发布和草稿。点「新文章」或「编辑」会弹出写作窗。"
+        description="写文章、按分类筛选。分类在这里管，照片墙在「照片」里。"
         actions={
-          <Button onClick={() => openCreate()}>
-            <Plus className="size-4" />
-            新文章
-          </Button>
+          <>
+            <Button variant="outline" onClick={() => setCategoryOpen(true)}>
+              <Tags className="size-4" />
+              分类
+            </Button>
+            <Button onClick={() => openCreate()}>
+              <Plus className="size-4" />
+              新文章
+            </Button>
+          </>
         }
       />
 
@@ -166,7 +174,9 @@ export function AdminPage() {
                 <Card className="border border-border bg-card shadow-sm transition-colors hover:bg-muted/20">
                   <CardContent className="flex items-center justify-between gap-4 py-4">
                     <div className="min-w-0 space-y-2">
-                      <h2 className="truncate text-base font-semibold tracking-tight text-foreground">{post.title}</h2>
+                      <h2 className="truncate text-base font-semibold tracking-tight text-foreground">
+                        {post.title}
+                      </h2>
                       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         <Badge variant="secondary">{post.categoryName}</Badge>
                         {post.draft ? (
@@ -234,6 +244,8 @@ export function AdminPage() {
           </div>
         </>
       )}
+
+      <CategoryManagerDialog open={categoryOpen} onOpenChange={setCategoryOpen} />
 
       <Dialog
         open={modalOpen}

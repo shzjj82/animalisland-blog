@@ -1,5 +1,5 @@
 import { SITE_DESCRIPTION, type Post as BlogPost, type PostListItem } from "@myblog/shared";
-import { Button, Card, Divider, Loading } from "animal-island-ui";
+import { Button, Card, Loading } from "animal-island-ui";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { BlockRenderer } from "@/components/BlockRenderer";
@@ -80,10 +80,10 @@ function Post() {
         />
       ) : null}
 
-      <Loading
-        active={loading}
-        style={{ position: "fixed", left: 0, top: 0, zIndex: 9999999, height: "100vh", width: "100vw" }}
-      />
+      {/* Loading 脱离文档流；仅加载中接收点击，结束后绝不能挡住返回/导航 */}
+      <div className={`post-loading${loading ? " is-active" : ""}`} aria-hidden={!loading}>
+        <Loading active={loading} />
+      </div>
 
       {missing || (!loading && !post) ? (
         <div className="post-page">
@@ -101,40 +101,17 @@ function Post() {
             </Button>
           </div>
 
-          <Card color={post.categoryColor} className="post-hero">
-            {post.coverUrl ? (
-              <img
-                src={post.coverUrl}
-                alt={post.title}
-                className="post-hero-photo"
-                width={96}
-                height={96}
-                decoding="async"
-                fetchPriority="high"
-              />
-            ) : (
-              <div className="post-hero-cover" aria-hidden>
-                {post.categoryKind === "photos" ? "📷" : "🌿"}
-              </div>
-            )}
-            <div className="post-hero-text">
+          <header className="post-head">
+            <div className="post-head-meta">
               <span className="post-tag">#{post.categoryName}</span>
-              <h1>{post.title}</h1>
-              <div className="post-meta">
-                <time dateTime={published}>🗓 {published}</time>
-              </div>
+              <time dateTime={published}>{published}</time>
             </div>
-          </Card>
-
-          {post.summary ? <p className="post-excerpt">{post.summary}</p> : null}
-
-          <Divider type="line-teal" />
+            <h1 className="post-title">{post.title}</h1>
+          </header>
 
           <div className="post-body">
-            <BlockRenderer document={post.body} />
+            <BlockRenderer document={post.body} skipLeadingTitle={post.title} />
           </div>
-
-          <Divider type="wave-yellow" />
 
           <nav className="post-nav" aria-label="相邻文章">
             {prev ? (

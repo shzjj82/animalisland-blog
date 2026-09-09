@@ -75,7 +75,11 @@ function BlockView({ block }: { block: EditorJsBlock }) {
   }
 
   if (type === "delimiter") {
-    return <Divider type="dashed-brown" />;
+    return (
+      <div className="block-delimiter">
+        <Divider type="dashed-brown" />
+      </div>
+    );
   }
 
   if (type === "image") {
@@ -115,13 +119,41 @@ function BlockView({ block }: { block: EditorJsBlock }) {
   return null;
 }
 
-export function BlockRenderer({ document }: { document: EditorJsDocument }) {
+export function BlockRenderer({
+  document,
+  skipLeadingTitle,
+}: {
+  document: EditorJsDocument;
+  /** 页面已展示标题时，跳过正文里同名的首个标题块，避免重复 */
+  skipLeadingTitle?: string;
+}) {
   if (!document.blocks?.length) {
     return <p className="muted">这篇还没有内容。</p>;
   }
+
+  const titlePlain = skipLeadingTitle?.trim() ?? "";
+  let skipped = false;
+  const blocks = document.blocks.filter((block) => {
+    if (skipped || !titlePlain || block.type !== "header") {
+      return true;
+    }
+    const text = String(block.data.text ?? "")
+      .replace(/<[^>]+>/g, "")
+      .trim();
+    if (text === titlePlain) {
+      skipped = true;
+      return false;
+    }
+    return true;
+  });
+
+  if (!blocks.length) {
+    return <p className="muted">这篇还没有内容。</p>;
+  }
+
   return (
     <article className="block-article">
-      {document.blocks.map((block, index) => (
+      {blocks.map((block, index) => (
         <BlockView key={block.id ?? index} block={block} />
       ))}
     </article>

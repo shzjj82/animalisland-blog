@@ -248,7 +248,7 @@ export function AiAssistPanel({ editor, className }: Props) {
   return (
     <aside
       className={cn(
-        "ai-side flex h-full min-h-0 w-[360px] shrink-0 flex-col border-l border-border bg-[#f7f8fa] dark:bg-muted/40",
+        "ai-side flex h-full min-h-0 w-[360px] shrink-0 flex-col border-l border-border/60 bg-background",
         className,
       )}
       aria-label="AI 写作助手"
@@ -279,8 +279,8 @@ export function AiAssistPanel({ editor, className }: Props) {
                 className={cn(
                   "max-w-[88%] px-3.5 py-2.5 text-[13px] leading-6",
                   isUser
-                    ? "rounded-[18px] rounded-tr-md bg-[#2f6bff] text-white"
-                    : "rounded-[18px] rounded-tl-md bg-white text-foreground shadow-sm ring-1 ring-black/5 dark:bg-background dark:ring-white/10",
+                    ? "rounded-[18px] rounded-tr-md bg-foreground text-background"
+                    : "rounded-[18px] rounded-tl-md bg-muted/70 text-foreground",
                 )}
               >
                 <p className="whitespace-pre-wrap break-words">{item.content}</p>
@@ -291,7 +291,7 @@ export function AiAssistPanel({ editor, className }: Props) {
 
         {busy ? (
           <div className="flex justify-start">
-            <div className="rounded-[18px] rounded-tl-md bg-white px-4 py-3 shadow-sm ring-1 ring-black/5 dark:bg-background">
+            <div className="rounded-[18px] rounded-tl-md bg-muted/70 px-4 py-3">
               <div className="flex items-center gap-1">
                 <span className="ai-dot size-1.5 rounded-full bg-muted-foreground/70" />
                 <span className="ai-dot ai-dot-delay-1 size-1.5 rounded-full bg-muted-foreground/70" />
@@ -307,7 +307,7 @@ export function AiAssistPanel({ editor, className }: Props) {
           <button
             type="button"
             disabled={!enabled || busy || skillBusy}
-            className="inline-flex h-7 items-center rounded-full border border-border/80 bg-white px-2.5 text-[11px] font-medium text-muted-foreground transition hover:bg-muted disabled:opacity-45 dark:bg-background"
+            className="inline-flex h-7 items-center rounded-full border border-border bg-background px-2.5 text-[11px] font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-45"
             onClick={() => void runToEditorSkill("replace")}
           >
             {skillBusy ? "写入中…" : "写入正文"}
@@ -315,7 +315,7 @@ export function AiAssistPanel({ editor, className }: Props) {
           <button
             type="button"
             disabled={!enabled || busy || skillBusy}
-            className="inline-flex h-7 items-center rounded-full border border-border/80 bg-white px-2.5 text-[11px] font-medium text-muted-foreground transition hover:bg-muted disabled:opacity-45 dark:bg-background"
+            className="inline-flex h-7 items-center rounded-full border border-border bg-background px-2.5 text-[11px] font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-45"
             onClick={() => void runToEditorSkill("append")}
           >
             追加到文末
@@ -325,20 +325,20 @@ export function AiAssistPanel({ editor, className }: Props) {
         {error ? <p className="px-1 text-xs text-destructive">{error}</p> : null}
         {note ? <p className="px-1 text-xs text-muted-foreground">{note}</p> : null}
 
-        <div className="rounded-[22px] border border-black/5 bg-white p-2 shadow-[0_8px_24px_-16px_rgba(15,23,42,0.35)] dark:border-white/10 dark:bg-background">
+        <div className="rounded-[22px] border border-border bg-muted/40 p-2">
           {attachments.length ? (
             <div className="mb-2 flex flex-wrap gap-1.5 px-1 pt-1">
               {attachments.map((item) => (
                 <span
                   key={item.id}
-                  className="inline-flex max-w-full items-center gap-1 rounded-full bg-muted px-2 py-1 text-[11px] text-muted-foreground"
+                  className="inline-flex max-w-full items-center gap-1 rounded-full bg-background px-2 py-1 text-[11px] text-muted-foreground ring-1 ring-border"
                 >
                   <span className="truncate">
                     {item.kind === "image" ? "图" : "文"} · {item.name}
                   </span>
                   <button
                     type="button"
-                    className="rounded-full p-0.5 hover:bg-background hover:text-foreground"
+                    className="rounded-full p-0.5 hover:bg-muted hover:text-foreground"
                     onClick={() => setAttachments((prev) => prev.filter((x) => x.id !== item.id))}
                     aria-label={`移除 ${item.name}`}
                   >
@@ -399,7 +399,7 @@ export function AiAssistPanel({ editor, className }: Props) {
               className={cn(
                 "inline-flex size-8 items-center justify-center rounded-full transition",
                 canSend
-                  ? "bg-[#2f6bff] text-white shadow-sm hover:bg-[#2557d6]"
+                  ? "bg-foreground text-background hover:opacity-90"
                   : "bg-muted text-muted-foreground/50",
               )}
               aria-label="发送"

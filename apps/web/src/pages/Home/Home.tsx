@@ -141,7 +141,13 @@ function Home() {
         <h2 className="blog-section-title">关于</h2>
         <Card color="app-yellow">
           <div className="blog-about-inner">
-            <div className="blog-avatar">{about.avatar}</div>
+            <div className="blog-avatar" aria-hidden={!about.avatar}>
+              {/^(https?:\/\/|\/|data:)/i.test(about.avatar.trim()) ? (
+                <img src={about.avatar.trim()} alt="" />
+              ) : (
+                about.avatar
+              )}
+            </div>
             <div>
               <h3>{about.name}</h3>
               <div className="blog-about-body">

@@ -73,9 +73,36 @@ html,
     min-height: 100dvh;
 }
 
-.animal-cursor {
+/* 只给应用根 Cursor 撑满视口；Drawer portal 里也有 .animal-cursor，再写 min-height 会在 body 下多出一截空白 */
+#root > .animal-cursor {
     min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
     overflow-x: clip;
+}
+
+#root > .animal-cursor > .blog {
+    flex: 1 0 auto;
+    width: 100%;
+    min-height: 100%;
+}
+
+/* 抽屉 portal 挂在 body 上，必须脱离文档流，否则海浪下方会多出一整屏可滚动空白 */
+[data-animal-drawer-portal] {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+[data-animal-drawer-portal] .animal-cursor {
+    min-height: 0 !important;
+    height: 100%;
+    overflow: visible;
+    pointer-events: none;
 }
 
 .route-fallback {

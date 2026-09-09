@@ -1,6 +1,6 @@
 import { Cursor } from "animal-island-ui";
 import { lazy, Suspense } from "react";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "@/lib/auth";
 import { CategoriesProvider } from "@/lib/categories";
 import { ThemeProvider } from "@/lib/theme";
@@ -20,9 +20,6 @@ const AdminPhotosPage = lazy(() =>
 const AdminAboutPage = lazy(() =>
   import("@/pages/AdminAbout").then((mod) => ({ default: mod.AdminAboutPage })),
 );
-const AdminCategoriesPage = lazy(() =>
-  import("@/pages/AdminCategories").then((mod) => ({ default: mod.AdminCategoriesPage })),
-);
 const WritePage = lazy(() => import("@/pages/Write").then((mod) => ({ default: mod.WritePage })));
 
 function App() {
@@ -40,7 +37,7 @@ function App() {
                   <Route element={<AdminLayout />}>
                     <Route path="/admin" element={<AdminPage />} />
                     <Route path="/admin/photos" element={<AdminPhotosPage />} />
-                    <Route path="/admin/categories" element={<AdminCategoriesPage />} />
+                    <Route path="/admin/categories" element={<Navigate to="/admin" replace />} />
                     <Route path="/admin/about" element={<AdminAboutPage />} />
                     <Route path="/admin/write" element={<WritePage />} />
                     <Route path="/admin/write/:id" element={<WritePage />} />

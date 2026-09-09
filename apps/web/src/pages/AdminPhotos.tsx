@@ -10,8 +10,7 @@ import { api } from "@/lib/api";
 import { useCategories } from "@/lib/categories";
 
 export function AdminPhotosPage() {
-  const { categories } = useCategories();
-  const photosCategory = categories.find((item) => item.kind === "photos");
+  const { photosCategory } = useCategories();
   const [photos, setPhotos] = useState<PostListItem[]>([]);
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -44,7 +43,7 @@ export function AdminPhotosPage() {
   const addPhoto = async (e: FormEvent) => {
     e.preventDefault();
     if (!photosCategory) {
-      setError("还没有照片墙分类，先去「分类」里建一个。");
+      setError("还没有照片墙分类，请检查数据库种子数据。");
       return;
     }
     if (!file) {

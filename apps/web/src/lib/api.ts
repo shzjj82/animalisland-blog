@@ -35,7 +35,8 @@ export const api = {
       body: JSON.stringify({ username, password }),
     }),
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
-  listCategories: () => request<{ categories: Category[] }>("/api/categories"),
+  listCategories: () =>
+    request<{ categories: Category[] }>("/api/categories", { cache: "no-store" }),
   getCategory: (slug: string) => request<{ category: Category }>(`/api/categories/${slug}`),
   createCategory: (input: UpsertCategoryInput) =>
     request<{ category: Category }>("/api/categories", {

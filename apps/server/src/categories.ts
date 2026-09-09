@@ -131,9 +131,13 @@ export function createCategory(input: UpsertCategoryInput): Category {
   const id = crypto.randomUUID();
   const slug = uniqueCategorySlug(input.slug || input.name);
   const sort =
-    typeof input.sort === "number"
-      ? input.sort
-      : ((db.prepare("SELECT COALESCE(MAX(sort), -1) AS n FROM categories").get() as { n: number }).n + 1);
+    input.kind === "photos"
+      ? 1000
+      : typeof input.sort === "number"
+        ? input.sort
+        : ((db
+            .prepare("SELECT COALESCE(MAX(sort), -1) AS n FROM categories WHERE kind = 'article'")
+            .get() as { n: number }).n + 1);
 
   db.prepare(
     `INSERT INTO categories
@@ -160,12 +164,21 @@ export function updateCategory(id: string, input: UpsertCategoryInput): Category
   if (!existing) {
     return undefined;
   }
-  if (input.kind === "photos" && existing.kind !== "photos" && listCategorySlugs("photos").length > 0) {
+  // 照片墙分类固定：不允许改成文章栏
+  const kind = existing.kind === "photos" ? "photos" : input.kind;
+  if (kind === "photos" && existing.kind !== "photos" && listCategorySlugs("photos").length > 0) {
     throw new Error("PHOTOS_EXISTS");
   }
 
   const slug = uniqueCategorySlug(input.slug || input.name, id);
   const now = new Date().toISOString();
+  // 照片墙 sort 固定靠后，不参与文章分类排序
+  const sort =
+    existing.kind === "photos"
+      ? 1000
+      : typeof input.sort === "number"
+        ? input.sort
+        : existing.sort;
 
   db.prepare(
     `UPDATE categories SET
@@ -176,9 +189,9 @@ export function updateCategory(id: string, input: UpsertCategoryInput): Category
     input.name.trim(),
     input.hint?.trim() ?? "",
     input.color,
-    input.kind,
+    kind,
     input.nav === false ? 0 : 1,
-    typeof input.sort === "number" ? input.sort : existing.sort,
+    sort,
     now,
     id,
   );
@@ -195,6 +208,9 @@ export function deleteCategory(id: string): boolean {
   if (!existing) {
     return false;
   }
+  if (existing.kind === "photos") {
+    throw new Error("PHOTOS_FIXED");
+  }
   if (countPostsInCategory(existing.slug) > 0) {
     throw new Error("CATEGORY_IN_USE");
   }
@@ -206,3 +222,5 @@ export function deleteCategory(id: string): boolean {
 }
 
 ensureDefaultCategories();
+// 既有库也把照片墙 sort 钉在文章分类之后
+db.prepare("UPDATE categories SET sort = 1000 WHERE kind = 'photos' AND sort != 1000").run();

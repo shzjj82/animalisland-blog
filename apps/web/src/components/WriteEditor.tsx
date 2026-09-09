@@ -111,8 +111,8 @@ export function WriteEditor({ postId, defaultType, onClose, onSaved }: Props) {
   const selected = articleCategories.find((item) => item.slug === type);
 
   return (
-    <div className="write-editor flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-5 py-3">
+    <div className="write-editor flex h-full min-h-0 flex-col bg-background">
+      <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border/70 bg-background px-5 py-3">
         <div className="mr-auto min-w-0 space-y-1.5">
           <p className="text-xs font-medium text-muted-foreground">发布到分类</p>
           <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="文章分类">
@@ -128,7 +128,7 @@ export function WriteEditor({ postId, defaultType, onClose, onSaved }: Props) {
                   className={cn(
                     "inline-flex h-8 items-center rounded-full border px-3 text-sm font-medium transition-colors",
                     active
-                      ? "border-primary bg-primary text-primary-foreground"
+                      ? "border-foreground/80 bg-foreground text-background"
                       : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
                   )}
                   onClick={() => setType(item.slug)}
@@ -163,8 +163,8 @@ export function WriteEditor({ postId, defaultType, onClose, onSaved }: Props) {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1">
-        <div className="write-paper min-h-0 min-w-0 flex-1 overflow-y-auto px-3 py-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden sm:px-5">
+      <div className="flex min-h-0 flex-1 bg-background">
+        <div className="write-paper min-h-0 min-w-0 flex-1 overflow-y-auto bg-background px-3 py-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden sm:px-5">
           <PostEditor
             key={post?.id ?? `new-${defaultType ?? "blank"}`}
             initial={initial}

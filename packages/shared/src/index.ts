@@ -182,7 +182,7 @@ export const DEFAULT_CATEGORIES: Array<
     color: "warm-peach-pink",
     kind: "photos",
     nav: true,
-    sort: 3,
+    sort: 1000,
   },
 ];
 

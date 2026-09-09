@@ -1,6 +1,5 @@
 import { SITE_DESCRIPTION, SITE_NAME } from "@myblog/shared";
 import {
-  CategoryManagement,
   Home,
   Info,
   Logout,
@@ -49,11 +48,6 @@ const navItems: DeskNavItem[] = [
     to: "/admin/photos",
     label: "照片",
     icon: <Picture {...iconProps} />,
-  },
-  {
-    to: "/admin/categories",
-    label: "分类",
-    icon: <CategoryManagement {...iconProps} />,
   },
   {
     to: "/admin/about",

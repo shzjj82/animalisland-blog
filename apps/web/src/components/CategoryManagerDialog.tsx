@@ -1,15 +1,12 @@
 import {
   SITE_SKILL_COLORS,
   type Category,
-  type CategoryKind,
   type SiteSkillColor,
 } from "@myblog/shared";
 import { ArrowDownWideNarrow, ArrowUpWideNarrow, Pencil, Plus, Trash2 } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
-import { AdminPageHeader } from "@/components/AdminPageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -19,22 +16,10 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { useCategories } from "@/lib/categories";
 import { cn } from "@/lib/utils";
-
-const kindLabel: Record<CategoryKind, string> = {
-  article: "文章",
-  photos: "照片墙",
-};
 
 const COLOR_HEX: Record<SiteSkillColor, string> = {
   "app-pink": "#f8a6b2",
@@ -57,36 +42,49 @@ function emptyForm() {
     slug: "",
     hint: "",
     color: "app-blue" as SiteSkillColor,
-    kind: "article" as CategoryKind,
     nav: true,
   };
 }
 
-export function AdminCategoriesPage() {
+type Props = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+};
+
+/** 文章分类管理（不含照片墙；照片墙固定由「照片」页使用） */
+export function CategoryManagerDialog({ open, onOpenChange }: Props) {
   const { categories, reload } = useCategories();
   const [form, setForm] = useState(emptyForm);
   const [editing, setEditing] = useState<Category | null>(null);
-  const [open, setOpen] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const ordered = useMemo(
-    () => [...categories].sort((a, b) => a.sort - b.sort),
+    () =>
+      [...categories]
+        .filter((item) => item.kind === "article")
+        .sort((a, b) => a.sort - b.sort || a.createdAt.localeCompare(b.createdAt)),
     [categories],
   );
 
-  const reset = () => {
+  const resetForm = () => {
     setEditing(null);
     setForm(emptyForm());
     setError("");
-    setOpen(false);
+    setFormOpen(false);
+  };
+
+  const closeAll = () => {
+    resetForm();
+    onOpenChange(false);
   };
 
   const openCreate = () => {
     setEditing(null);
     setForm(emptyForm());
     setError("");
-    setOpen(true);
+    setFormOpen(true);
   };
 
   const startEdit = (category: Category) => {
@@ -96,11 +94,10 @@ export function AdminCategoriesPage() {
       slug: category.slug,
       hint: category.hint,
       color: category.color,
-      kind: category.kind,
       nav: category.nav,
     });
     setError("");
-    setOpen(true);
+    setFormOpen(true);
   };
 
   const onSubmit = async (event: FormEvent) => {
@@ -113,19 +110,18 @@ export function AdminCategoriesPage() {
     setError("");
     try {
       if (editing) {
-        await api.updateCategory(editing.id, { ...form, sort: editing.sort });
+        await api.updateCategory(editing.id, {
+          ...form,
+          kind: "article",
+          sort: editing.sort,
+        });
       } else {
-        await api.createCategory(form);
+        await api.createCategory({ ...form, kind: "article" });
       }
       await reload();
-      reset();
-    } catch (err) {
-      const code = err instanceof Error ? err.message : "";
-      if (code === "PHOTOS_EXISTS") {
-        setError("照片墙只能有一个。");
-      } else {
-        setError("没存上，再试一次。");
-      }
+      resetForm();
+    } catch {
+      setError("没存上，再试一次。");
     } finally {
       setSaving(false);
     }
@@ -139,12 +135,13 @@ export function AdminCategoriesPage() {
       await api.deleteCategory(category.id);
       await reload();
       if (editing?.id === category.id) {
-        reset();
+        resetForm();
       }
+      setError("");
     } catch (err) {
       const code = err instanceof Error ? err.message : "";
       if (code === "CATEGORY_IN_USE") {
-        setError("这个分类里还有文章或照片，先挪走再删。");
+        setError("这个分类里还有文章，先挪走再删。");
       } else if (code === "LAST_ARTICLE_CATEGORY") {
         setError("至少留一个文章分类。");
       } else {
@@ -155,133 +152,139 @@ export function AdminCategoriesPage() {
 
   const move = async (category: Category, dir: -1 | 1) => {
     const index = ordered.findIndex((item) => item.id === category.id);
-    const swap = ordered[index + dir];
-    if (!swap) {
+    const swapIndex = index + dir;
+    if (index < 0 || swapIndex < 0 || swapIndex >= ordered.length) {
       return;
     }
-    await Promise.all([
-      api.updateCategory(category.id, {
-        name: category.name,
-        slug: category.slug,
-        hint: category.hint,
-        color: category.color,
-        kind: category.kind,
-        nav: category.nav,
-        sort: swap.sort,
-      }),
-      api.updateCategory(swap.id, {
-        name: swap.name,
-        slug: swap.slug,
-        hint: swap.hint,
-        color: swap.color,
-        kind: swap.kind,
-        nav: swap.nav,
-        sort: category.sort,
-      }),
-    ]);
-    await reload();
+
+    const next = [...ordered];
+    const current = next[index];
+    const swap = next[swapIndex];
+    next[index] = swap;
+    next[swapIndex] = current;
+
+    try {
+      for (let i = 0; i < next.length; i += 1) {
+        const item = next[i];
+        if (item.sort === i) {
+          continue;
+        }
+        await api.updateCategory(item.id, {
+          name: item.name,
+          slug: item.slug,
+          hint: item.hint,
+          color: item.color,
+          kind: "article",
+          nav: item.nav,
+          sort: i,
+        });
+      }
+      await reload();
+      setError("");
+    } catch {
+      setError("排序没改成功，再试一次。");
+    }
   };
 
   return (
-    <section className="flex min-h-full flex-1 flex-col">
-      <AdminPageHeader
-        title="分类"
-        description="管理顶栏栏目。照片墙只能有一个。"
-        actions={
-          <Button onClick={openCreate}>
-            <Plus className="size-4" />
-            新建分类
-          </Button>
-        }
-      />
-
-      {error && !open ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
-
-      <ul className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3.5">
-        {ordered.map((category, index) => (
-          <li key={category.id}>
-            <Card className="overflow-hidden py-0 transition-shadow hover:shadow-md">
-              <div className="flex min-h-[132px]">
+    <>
+      <Dialog
+        open={open && !formOpen}
+        onOpenChange={(next) => {
+          if (!next) closeAll();
+        }}
+      >
+        <DialogContent className="max-w-lg sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>文章分类</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            用来给文章归类，也会出现在前台导航。照片墙不在这里，位置固定在「照片」页。
+          </p>
+          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          <ul className="max-h-[min(52vh,420px)] space-y-2 overflow-y-auto pr-1">
+            {ordered.map((category, index) => (
+              <li
+                key={category.id}
+                className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2.5"
+              >
                 <span
-                  className="w-1.5 shrink-0"
+                  className="size-2.5 shrink-0 rounded-full"
                   style={{ background: COLOR_HEX[category.color] }}
                   aria-hidden
                 />
-                <CardContent className="flex min-w-0 flex-1 flex-col gap-2.5 py-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span
-                        className="size-2.5 shrink-0 rounded-full ring-3 ring-background"
-                        style={{ background: COLOR_HEX[category.color] }}
-                        aria-hidden
-                      />
-                      <h2 className="truncate text-lg font-bold tracking-tight">{category.name}</h2>
-                    </div>
-                    <div className="flex shrink-0 gap-0.5">
-                      <Button
-                        type="button"
-                        size="icon-sm"
-                        variant="ghost"
-                        title="上移"
-                        disabled={index === 0}
-                        onClick={() => void move(category, -1)}
-                      >
-                        <ArrowUpWideNarrow className="size-3.5" />
-                      </Button>
-                      <Button
-                        type="button"
-                        size="icon-sm"
-                        variant="ghost"
-                        title="下移"
-                        disabled={index === ordered.length - 1}
-                        onClick={() => void move(category, 1)}
-                      >
-                        <ArrowDownWideNarrow className="size-3.5" />
-                      </Button>
-                      <Button
-                        type="button"
-                        size="icon-sm"
-                        variant="ghost"
-                        title="编辑"
-                        onClick={() => startEdit(category)}
-                      >
-                        <Pencil className="size-3.5" />
-                      </Button>
-                      <Button
-                        type="button"
-                        size="icon-sm"
-                        variant="ghost"
-                        className="text-destructive hover:text-destructive"
-                        title="删除"
-                        onClick={() => void remove(category)}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                  <p className="min-h-5 text-sm text-muted-foreground">
-                    {category.hint || "还没有短句"}
-                  </p>
-                  <div className="mt-auto flex flex-wrap items-center gap-2">
-                    <code className="rounded-md bg-muted px-2 py-0.5 text-xs font-semibold opacity-70">
-                      /{category.slug}
-                    </code>
-                    <Badge variant="secondary">{kindLabel[category.kind]}</Badge>
-                    <Badge variant={category.nav ? "default" : "outline"}>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="truncate font-semibold">{category.name}</span>
+                    <Badge variant={category.nav ? "default" : "outline"} className="text-[10px]">
                       {category.nav ? "导航" : "隐藏"}
                     </Badge>
                   </div>
-                </CardContent>
-              </div>
-            </Card>
-          </li>
-        ))}
-      </ul>
+                  <p className="truncate text-xs text-muted-foreground">
+                    /{category.slug}
+                    {category.hint ? ` · ${category.hint}` : ""}
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-0.5">
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    title="上移"
+                    disabled={index === 0}
+                    onClick={() => void move(category, -1)}
+                  >
+                    <ArrowUpWideNarrow className="size-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    title="下移"
+                    disabled={index === ordered.length - 1}
+                    onClick={() => void move(category, 1)}
+                  >
+                    <ArrowDownWideNarrow className="size-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    title="编辑"
+                    onClick={() => startEdit(category)}
+                  >
+                    <Pencil className="size-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    className="text-destructive hover:text-destructive"
+                    title="删除"
+                    onClick={() => void remove(category)}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <DialogFooter className="mx-0 mb-0 border-0 bg-transparent p-0">
+            <Button type="button" variant="outline" onClick={closeAll}>
+              完成
+            </Button>
+            <Button type="button" onClick={openCreate}>
+              <Plus className="size-4" />
+              新建分类
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
-        open={open}
+        open={formOpen}
         onOpenChange={(next) => {
-          if (!next) reset();
+          if (!next) resetForm();
         }}
       >
         <DialogContent className="max-w-lg sm:max-w-lg">
@@ -317,21 +320,6 @@ export function AdminCategoriesPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>形态</Label>
-              <Select
-                value={form.kind}
-                onValueChange={(key) => setForm((prev) => ({ ...prev, kind: key as CategoryKind }))}
-              >
-                <SelectTrigger className="w-full" aria-label="分类形态">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="article">文章栏</SelectItem>
-                  <SelectItem value="photos">照片墙（全站仅一个）</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
               <Label>颜色</Label>
               <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="分类颜色">
                 {SITE_SKILL_COLORS.map((color) => (
@@ -362,7 +350,7 @@ export function AdminCategoriesPage() {
             </div>
             {error ? <p className="text-sm text-destructive">{error}</p> : null}
             <DialogFooter className="mx-0 mb-0 rounded-none border-0 bg-transparent p-0 pt-1">
-              <Button type="button" variant="outline" onClick={reset}>
+              <Button type="button" variant="outline" onClick={resetForm}>
                 取消
               </Button>
               <Button type="submit" disabled={saving}>
@@ -372,6 +360,6 @@ export function AdminCategoriesPage() {
           </form>
         </DialogContent>
       </Dialog>
-    </section>
+    </>
   );
 }

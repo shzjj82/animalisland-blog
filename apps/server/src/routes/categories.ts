@@ -45,7 +45,8 @@ function parseUpsert(raw: unknown): UpsertCategoryInput | null {
 }
 
 categoriesRouter.get("/", (_req, res) => {
-  res.set("Cache-Control", "public, max-age=30");
+  // 管理端会改排序/显隐，不能公共缓存，否则上移下移后仍读到旧列表
+  res.set("Cache-Control", "private, no-store");
   res.json({ categories: listCategories() });
 });
 
@@ -55,7 +56,7 @@ categoriesRouter.get("/:slug", (req, res) => {
     res.status(404).json({ error: "NOT_FOUND" });
     return;
   }
-  res.set("Cache-Control", "public, max-age=30");
+  res.set("Cache-Control", "private, no-store");
   res.json({ category });
 });
 
@@ -109,7 +110,7 @@ categoriesRouter.delete("/:id", requireAuth, (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : "SERVER_ERROR";
-    if (message === "CATEGORY_IN_USE" || message === "LAST_ARTICLE_CATEGORY") {
+    if (message === "CATEGORY_IN_USE" || message === "LAST_ARTICLE_CATEGORY" || message === "PHOTOS_FIXED") {
       res.status(400).json({ error: message });
       return;
     }
