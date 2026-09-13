@@ -1,18 +1,25 @@
 import { SITE_DESCRIPTION, type Post as BlogPost, type PostListItem } from "@myblog/shared";
+import { ArrowLeft, ArrowRight } from "@icon-park/react";
 import { Button, Card, Loading } from "animal-island-ui";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { BlockRenderer } from "@/components/BlockRenderer";
+import { BlogContent } from "@/content";
 import { BlogShell } from "@/components/BlogShell";
 import { Seo } from "@/components/Seo";
 import { api } from "@/lib/api";
+import { useCategories } from "@/lib/categories";
+import { iconParkOutline, PageLinkIcon } from "@/lib/iconPark";
+import { ancestorsOf, pageTitle } from "@/lib/pageTree";
 import "./Post.less";
 
 function Post() {
   const { slug = "" } = useParams();
   const navigate = useNavigate();
+  const { categories } = useCategories();
   const [post, setPost] = useState<BlogPost | null>(null);
+  const [allPages, setAllPages] = useState<PostListItem[]>([]);
   const [siblings, setSiblings] = useState<PostListItem[]>([]);
+  const [children, setChildren] = useState<PostListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [missing, setMissing] = useState(false);
 
@@ -21,6 +28,8 @@ function Post() {
     setLoading(true);
     setMissing(false);
     setSiblings([]);
+    setChildren([]);
+    setAllPages([]);
     let cancelled = false;
     void api
       .getBySlug(slug)
@@ -28,11 +37,26 @@ function Post() {
         if (cancelled) {
           return;
         }
+        if (detail.post.pageKind !== "article") {
+          setPost(null);
+          setMissing(true);
+          setLoading(false);
+          return;
+        }
         setPost(detail.post);
         setLoading(false);
-        return api.listPosts(detail.post.type).then((list) => {
+        return Promise.all([
+          api.listPosts({ pageKind: "article" }),
+          api.listPosts({
+            pageKind: "article",
+            parentId: detail.post.parentId ?? null,
+          }),
+          api.listPosts({ pageKind: "article", parentId: detail.post.id }),
+        ]).then(([all, list, childList]) => {
           if (!cancelled) {
+            setAllPages(all.posts);
             setSiblings(list.posts);
+            setChildren(childList.posts.filter((item) => !item.draft));
           }
         });
       })
@@ -53,6 +77,14 @@ function Post() {
   const prev = currentIndex > 0 ? siblings[currentIndex - 1] : null;
   const next = currentIndex >= 0 && currentIndex < siblings.length - 1 ? siblings[currentIndex + 1] : null;
   const published = post ? (post.publishedAt ?? post.updatedAt).slice(0, 10) : "";
+  const crumbs = post ? ancestorsOf(post.id, allPages) : [];
+  const linkedChildIds = new Set(
+    (post?.body.blocks ?? [])
+      .filter((block) => block.type === "pageLink")
+      .map((block) => String((block.data as { pageId?: string }).pageId ?? ""))
+      .filter(Boolean),
+  );
+  const looseChildren = children.filter((child) => !linkedChildIds.has(child.id));
 
   return (
     <BlogShell>
@@ -80,14 +112,18 @@ function Post() {
         />
       ) : null}
 
-      {/* Loading 脱离文档流；仅加载中接收点击，结束后绝不能挡住返回/导航 */}
       <div className={`post-loading${loading ? " is-active" : ""}`} aria-hidden={!loading}>
         <Loading active={loading} />
       </div>
 
       {missing || (!loading && !post) ? (
         <div className="post-page">
-          <Button onClick={() => navigate("/")}>← 返回首页</Button>
+          <Button onClick={() => navigate("/notes")}>
+            <span className="blog-inline-icon">
+              <ArrowLeft {...iconParkOutline} size={14} aria-hidden />
+              返回笔记
+            </span>
+          </Button>
           <Card color="app-pink">
             <h1>没有找到这篇文章</h1>
             <p>可能已经删掉了，或者链接写错了。</p>
@@ -96,32 +132,106 @@ function Post() {
       ) : post ? (
         <article className="post-page">
           <div className="post-back">
-            <Button type="text" onClick={() => navigate("/")}>
-              ← 返回文章列表
+            <Button type="text" onClick={() => navigate("/notes")}>
+              <span className="blog-inline-icon">
+                <ArrowLeft {...iconParkOutline} size={14} aria-hidden />
+                返回笔记
+              </span>
             </Button>
           </div>
 
           <header className="post-head">
+            {crumbs.length > 0 ? (
+              <nav className="post-breadcrumb" aria-label="页面路径">
+                {crumbs.map((item, index) => (
+                  <span key={item.id} className="post-crumb-wrap">
+                    {index > 0 ? (
+                      <span className="post-crumb-sep" aria-hidden>
+                        /
+                      </span>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="post-crumb"
+                      onClick={() => navigate(`/post/${item.slug}`)}
+                    >
+                      {pageTitle(item)}
+                    </button>
+                  </span>
+                ))}
+                <span className="post-crumb-wrap">
+                  <span className="post-crumb-sep" aria-hidden>
+                    /
+                  </span>
+                  <span className="post-crumb is-current">{pageTitle(post)}</span>
+                </span>
+              </nav>
+            ) : null}
             <div className="post-head-meta">
-              <span className="post-tag">#{post.categoryName}</span>
               <time dateTime={published}>{published}</time>
+              {post.tags?.length ? (
+                <ul className="post-tags" aria-label="分类">
+                  {post.tags.map((tag) => {
+                    const name =
+                      categories.find((item) => item.slug === tag)?.name ??
+                      (tag === post.type ? post.categoryName : tag);
+                    return (
+                      <li key={tag}>
+                        <button type="button" className="post-tag" onClick={() => navigate(`/${tag}`)}>
+                          {name}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
             </div>
             <h1 className="post-title">{post.title}</h1>
           </header>
 
           <div className="post-body">
-            <BlockRenderer document={post.body} skipLeadingTitle={post.title} />
+            <BlogContent document={post.body} skipLeadingTitle={post.title} />
           </div>
 
-          <nav className="post-nav" aria-label="相邻文章">
+          {looseChildren.length > 0 ? (
+            <section className="post-children" aria-label="子页面">
+              <p className="post-children-label">子页面</p>
+              <ul className="post-children-list">
+                {looseChildren.map((child) => (
+                  <li key={child.id}>
+                    <button
+                      type="button"
+                      className="block-page-link"
+                      onClick={() => navigate(`/post/${child.slug}`)}
+                    >
+                      <span className="block-page-link-icon" aria-hidden>
+                        <PageLinkIcon size={18} />
+                      </span>
+                      <span className="block-page-link-title">{pageTitle(child)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          <nav className="post-nav" aria-label="相邻页面">
             {prev ? (
-              <Button onClick={() => navigate(`/post/${prev.slug}`)}>← {prev.title}</Button>
+              <Button onClick={() => navigate(`/post/${prev.slug}`)}>
+                <span className="blog-inline-icon">
+                  <ArrowLeft {...iconParkOutline} size={14} aria-hidden />
+                  {pageTitle(prev)}
+                </span>
+              </Button>
             ) : (
               <span />
             )}
             {next ? (
               <Button type="primary" onClick={() => navigate(`/post/${next.slug}`)}>
-                {next.title} →
+                <span className="blog-inline-icon">
+                  {pageTitle(next)}
+                  <ArrowRight {...iconParkOutline} size={14} aria-hidden />
+                </span>
               </Button>
             ) : (
               <span />

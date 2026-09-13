@@ -48,7 +48,7 @@ function readAbout(input: unknown): SiteAbout | null {
       version: typeof raw.body.version === "string" ? raw.body.version : "2.30.7",
       blocks: raw.body.blocks,
     },
-    avatar: raw.avatar.trim() || "🦊",
+    avatar: raw.avatar.trim(),
     skills,
   };
 }

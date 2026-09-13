@@ -13,8 +13,8 @@ export function PostListPage({ category }: { category: Category }) {
     window.scrollTo({ top: 0, behavior: "auto" });
     setError("");
     void api
-      .listPosts(category.slug)
-      .then((data) => setPosts(data.posts))
+      .listPosts({ type: category.slug, pageKind: "article", parentId: null })
+      .then((data) => setPosts(data.posts.filter((item) => !item.draft)))
       .catch(() => {
         setPosts([]);
         setError("文章暂时读不出来。");
@@ -23,13 +23,13 @@ export function PostListPage({ category }: { category: Category }) {
 
   return (
     <BlogShell>
-      <Seo title={category.name} description={category.hint} path={`/${category.slug}`} />
+      <Seo title={category.name} description={category.hint || `${category.name}相关笔记`} path={`/${category.slug}`} />
       <section className="blog-section post-list">
         <h1 className="blog-section-title">{category.name}</h1>
-        <p className="blog-section-sub">{category.hint}</p>
+        <p className="blog-section-sub">{category.hint || "这一分类下的笔记。"}</p>
         {error ? <p className="blog-section-sub">{error}</p> : null}
         {!error ? (
-          <PostCards posts={posts} empty={`这一栏还是空的。去写作台发一篇「${category.name}」吧。`} />
+          <PostCards posts={posts} empty={`还没有归到「${category.name}」的笔记。`} />
         ) : null}
       </section>
     </BlogShell>

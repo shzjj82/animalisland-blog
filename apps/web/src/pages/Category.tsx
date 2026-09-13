@@ -1,10 +1,10 @@
-import { useParams } from "react-router-dom";
+import { Navigate, useParams } from "react-router-dom";
 import { BlogShell } from "@/components/BlogShell";
 import { useCategories } from "@/lib/categories";
 import { NotFoundPage } from "@/pages/NotFound";
-import { PhotosPage } from "@/pages/Photos";
 import { PostListPage } from "@/pages/PostList";
 
+/** 分类路径：按发布时选的分类筛选顶层文章 */
 export function CategoryPage() {
   const { slug = "" } = useParams();
   const { categories, loading } = useCategories();
@@ -18,13 +18,13 @@ export function CategoryPage() {
     );
   }
 
+  if (category?.kind === "article") {
+    return <PostListPage category={category} />;
+  }
+
   if (!category) {
     return <NotFoundPage />;
   }
 
-  if (category.kind === "photos") {
-    return <PhotosPage category={category} />;
-  }
-
-  return <PostListPage category={category} />;
+  return <Navigate to="/notes" replace />;
 }

@@ -27,7 +27,7 @@ export function TypeChips(props: TypeChipsProps) {
     <div
       className={cn("flex flex-wrap items-center gap-2", className)}
       role="radiogroup"
-      aria-label="文章类型"
+      aria-label="文章分类"
     >
       {props.includeAll ? (
         <Button

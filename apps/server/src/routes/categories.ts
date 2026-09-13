@@ -66,16 +66,7 @@ categoriesRouter.post("/", requireAuth, (req, res) => {
     res.status(400).json({ error: "INVALID_INPUT" });
     return;
   }
-  try {
-    res.status(201).json({ category: createCategory(parsed) });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "SERVER_ERROR";
-    if (message === "PHOTOS_EXISTS") {
-      res.status(400).json({ error: message });
-      return;
-    }
-    throw err;
-  }
+  res.status(201).json({ category: createCategory(parsed) });
 });
 
 categoriesRouter.put("/:id", requireAuth, (req, res) => {
@@ -84,21 +75,12 @@ categoriesRouter.put("/:id", requireAuth, (req, res) => {
     res.status(400).json({ error: "INVALID_INPUT" });
     return;
   }
-  try {
-    const category = updateCategory(req.params.id, parsed);
-    if (!category) {
-      res.status(404).json({ error: "NOT_FOUND" });
-      return;
-    }
-    res.json({ category });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "SERVER_ERROR";
-    if (message === "PHOTOS_EXISTS") {
-      res.status(400).json({ error: message });
-      return;
-    }
-    throw err;
+  const category = updateCategory(req.params.id, parsed);
+  if (!category) {
+    res.status(404).json({ error: "NOT_FOUND" });
+    return;
   }
+  res.json({ category });
 });
 
 categoriesRouter.delete("/:id", requireAuth, (req, res) => {
@@ -110,7 +92,7 @@ categoriesRouter.delete("/:id", requireAuth, (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : "SERVER_ERROR";
-    if (message === "CATEGORY_IN_USE" || message === "LAST_ARTICLE_CATEGORY" || message === "PHOTOS_FIXED") {
+    if (message === "CATEGORY_IN_USE" || message === "LAST_ARTICLE_CATEGORY") {
       res.status(400).json({ error: message });
       return;
     }

@@ -1,8 +1,10 @@
 import type { Category } from "@myblog/shared";
+import { ArrowRight } from "@icon-park/react";
 import { Card, Drawer, Switch } from "animal-island-ui";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useCategories } from "@/lib/categories";
+import { iconParkOutline } from "@/lib/iconPark";
 import { useTheme } from "@/lib/theme";
 
 type NavItem = {
@@ -13,25 +15,26 @@ type NavItem = {
   hash?: string;
 };
 
-function toNavItems(categories: Category[]): NavItem[] {
-  return [
-    ...categories.map((item) => ({
-      to: `/${item.slug}`,
-      label: item.name,
-      hint: item.hint,
-      color: item.color,
-    })),
-    { to: "/", label: "关于", hint: "这座岛从哪来", color: "app-yellow", hash: "about" },
-  ];
-}
-
 export function BlogHeader() {
   const { dark, setDark } = useTheme();
   const { navCategories } = useCategories();
   const location = useLocation();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
-  const nav = toNavItems(navCategories);
+
+  const nav = useMemo<NavItem[]>(() => {
+    const categoryItems: NavItem[] = navCategories.map((item) => ({
+      to: `/${item.slug}`,
+      label: item.name,
+      hint: item.hint?.trim() || "标签笔记",
+      color: item.color,
+    }));
+    return [
+      { to: "/notes", label: "笔记", hint: "全部笔记", color: "app-blue" as const },
+      ...categoryItems,
+      { to: "/", label: "关于", hint: "这座岛从哪来", color: "app-yellow" as const, hash: "about" },
+    ];
+  }, [navCategories]);
 
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 769px)");
@@ -70,8 +73,16 @@ export function BlogHeader() {
     if (item.hash) {
       return location.pathname === "/" && location.hash === `#${item.hash}`;
     }
-    return location.pathname === item.to;
+    if (item.to === "/notes") {
+      return location.pathname === "/notes";
+    }
+    return location.pathname === item.to || location.pathname.startsWith(`${item.to}/`);
   };
+
+  const drawerFoot = useMemo(() => {
+    const names = ["笔记", ...navCategories.map((item) => item.name), "关于"];
+    return names.join(" · ");
+  }, [navCategories]);
 
   return (
     <header className="blog-header">
@@ -92,7 +103,7 @@ export function BlogHeader() {
         <nav className="blog-nav" aria-label="页面导航">
           {nav.map((item) => (
             <a
-              key={item.label}
+              key={`${item.to}:${item.hash ?? ""}`}
               href={item.hash ? `/#${item.hash}` : item.to}
               className={isActive(item) ? "is-active" : undefined}
               onClick={(e) => {
@@ -141,16 +152,12 @@ export function BlogHeader() {
             </span>
           </div>
         }
-        footer={
-          <p className="blog-drawer-foot">
-            {navCategories.map((item) => item.name).join(" · ") || "小岛日记"}
-          </p>
-        }
+        footer={<p className="blog-drawer-foot">{drawerFoot}</p>}
       >
         <nav className="blog-drawer-nav" aria-label="侧边导航">
           {nav.map((item) => (
             <a
-              key={item.label}
+              key={`${item.to}:${item.hash ?? ""}`}
               href={item.hash ? `/#${item.hash}` : item.to}
               className="blog-drawer-link"
               onClick={(event) => {
@@ -167,8 +174,8 @@ export function BlogHeader() {
                   <strong>{item.label}</strong>
                   <span>{item.hint}</span>
                 </span>
-                <span className="blog-drawer-item-go" aria-hidden>
-                  →
+                <span className="blog-drawer-item-go blog-inline-icon" aria-hidden>
+                  <ArrowRight {...iconParkOutline} size={16} />
                 </span>
               </Card>
             </a>

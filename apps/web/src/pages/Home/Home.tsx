@@ -1,19 +1,20 @@
 import { DEFAULT_ABOUT, SITE_DESCRIPTION, SITE_NAME, type PostListItem } from "@myblog/shared";
+import { ArrowRight } from "@icon-park/react";
 import { Button, Card, Divider, Modal, Typewriter } from "animal-island-ui";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { AboutAvatar } from "@/components/AboutAvatar";
 import { BlogShell } from "@/components/BlogShell";
-import { BlockRenderer } from "@/components/BlockRenderer";
+import { BlogContent } from "@/content";
 import { PostCards } from "@/components/PostCards";
 import { Seo } from "@/components/Seo";
 import { api } from "@/lib/api";
-import { useCategories } from "@/lib/categories";
+import { iconParkOutline } from "@/lib/iconPark";
 import type { BlogColor } from "./posts";
 
 function Home() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { articleCategories } = useCategories();
   const [introOpen, setIntroOpen] = useState(false);
   const [posts, setPosts] = useState<PostListItem[]>([]);
   const [about, setAbout] = useState(DEFAULT_ABOUT);
@@ -32,9 +33,10 @@ function Home() {
   };
 
   useEffect(() => {
+    // 前台只列顶层文章；子文从主文里的页面链接进入（Notion 同款）
     void api
-      .listPosts({ kind: "article", limit: 12 })
-      .then((data) => setPosts(data.posts))
+      .listPosts({ pageKind: "article", parentId: null })
+      .then((data) => setPosts(data.posts.filter((item) => !item.draft)))
       .catch(() => setPosts([]));
     void api
       .getSite()
@@ -55,7 +57,6 @@ function Home() {
 
   const stats: { label: string; value: string; color: BlogColor }[] = [
     { label: "文章", value: String(posts.length), color: "app-yellow" },
-    { label: "分类", value: String(articleCategories.length), color: "app-orange" },
     { label: "岛民", value: "1", color: "app-teal" },
     { label: "更新节奏", value: "慢", color: "yellow-green" },
   ];
@@ -85,20 +86,13 @@ function Home() {
           </h1>
           <div className="blog-hero-copy">
             <p>
-              用来记 <b>生活</b> 里碰到的小事、<b>编程</b> 时踩过的坑、<b>闲聊</b> 时冒出来的念头，以及路上顺手拍下的 <b>照片</b>。
-              白天写代码，其余时间看看路；有些话当时说不清，过几天写下来才明白。
+              用来记生活里碰到的小事，以及写代码时踩过的坑。
+              白天写代码，其余时间看看路。
             </p>
-            <p>
-              这里不赶热点，也不为更新而更新。写完、自己觉得值得留下，才拿出来。
-              可以从生活、编程或闲聊读起，也可以去照片页逛逛。
-            </p>
+            <p>这里不赶热点。写完、自己觉得值得留下，才拿出来。</p>
           </div>
           <div className="blog-hero-actions">
-            <Button
-              type="primary"
-              size="large"
-              onClick={() => navigate(articleCategories[0] ? `/${articleCategories[0].slug}` : "/")}
-            >
+            <Button type="primary" size="large" onClick={() => navigate("/notes")}>
               开始阅读
             </Button>
             <Button
@@ -106,7 +100,10 @@ function Home() {
               size="large"
               onClick={() => document.getElementById("about")?.scrollIntoView({ behavior: "smooth" })}
             >
-              关于小岛 →
+              <span className="blog-inline-icon">
+                关于小岛
+                <ArrowRight {...iconParkOutline} size={16} aria-hidden />
+              </span>
             </Button>
           </div>
         </div>
@@ -131,8 +128,8 @@ function Home() {
 
       <section className="blog-section">
         <h2 className="blog-section-title">最近写下的</h2>
-        <p className="blog-section-sub">点进去看全文。生活、编程、闲聊在顶栏分流。</p>
-        <PostCards posts={posts} empty="还没有文章。去写作台写一篇吧。" />
+        <p className="blog-section-sub">点进去看全文。有子页面时会出现在文末。</p>
+        <PostCards posts={posts} empty="还没有文章。去工作区写一篇吧。" />
       </section>
 
       <Divider type="dashed-brown" />
@@ -141,17 +138,13 @@ function Home() {
         <h2 className="blog-section-title">关于</h2>
         <Card color="app-yellow">
           <div className="blog-about-inner">
-            <div className="blog-avatar" aria-hidden={!about.avatar}>
-              {/^(https?:\/\/|\/|data:)/i.test(about.avatar.trim()) ? (
-                <img src={about.avatar.trim()} alt="" />
-              ) : (
-                about.avatar
-              )}
+            <div className="blog-avatar">
+              <AboutAvatar value={about.avatar} iconSize={36} />
             </div>
             <div>
               <h3>{about.name}</h3>
               <div className="blog-about-body">
-                <BlockRenderer document={about.body} />
+                <BlogContent document={about.body} />
               </div>
               <div className="blog-skills">
                 {about.skills.map((s, index) => (
@@ -181,7 +174,7 @@ function Home() {
           </>
         }
       >
-        你好。这里记录生活、编程、闲聊和照片。一张卡片是一件事，一条分隔线后面是另一段路。
+        你好。这里记录生活与想法。一张卡片是一件事，一条分隔线后面是另一段路。
       </Modal>
     </BlogShell>
   );

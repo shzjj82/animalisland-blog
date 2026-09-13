@@ -24,7 +24,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes("node_modules/@editorjs") || id.includes("/components/editor/")) {
+          if (id.includes("node_modules/@editorjs") || id.includes("/content/editor/") || id.includes("/components/editor/")) {
             return "editor";
           }
           if (id.includes("node_modules/animal-island-ui")) {

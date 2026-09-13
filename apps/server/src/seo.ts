@@ -1,6 +1,5 @@
 import type { Request } from "express";
 import { SITE_DESCRIPTION, SITE_NAME, siteTitle } from "@myblog/shared";
-import { getCategoryBySlug, listCategories } from "./categories.js";
 import { env } from "./env.js";
 import { getPostBySlug, listPosts } from "./posts.js";
 import { getAbout } from "./site.js";
@@ -79,7 +78,7 @@ export function metaForRequest(req: Request): PageMeta {
   if (path.startsWith("/post/")) {
     const slug = decodeURIComponent(path.slice("/post/".length)).split("/")[0] ?? "";
     const post = slug ? getPostBySlug(slug, false) : undefined;
-    if (!post) {
+    if (!post || post.pageKind !== "article") {
       return {
         status: 404,
         title: "没有找到这篇文章",
@@ -126,13 +125,12 @@ export function metaForRequest(req: Request): PageMeta {
     };
   }
 
-  const category = getCategoryBySlug(path.replace(/^\//, ""));
-  if (category) {
+  if (path === "/notes") {
     return {
       status: 200,
-      title: category.name,
-      description: category.hint || SITE_DESCRIPTION,
-      path: `/${category.slug}`,
+      title: "笔记",
+      description: "按层级整理的页面",
+      path: "/notes",
       type: "website",
     };
   }
@@ -193,15 +191,10 @@ export function robotsTxt(origin: string): string {
 }
 
 export function sitemapXml(origin: string): string {
-  const { posts } = listPosts({ includeDrafts: false });
+  const { posts } = listPosts({ includeDrafts: false, pageKind: "article" });
   const staticPages = [
     { loc: "/", lastmod: undefined as string | undefined, changefreq: "daily", priority: "1.0" },
-    ...listCategories().map((category) => ({
-      loc: `/${category.slug}`,
-      lastmod: undefined as string | undefined,
-      changefreq: "weekly",
-      priority: category.kind === "photos" ? "0.7" : "0.8",
-    })),
+    { loc: "/notes", lastmod: undefined as string | undefined, changefreq: "daily", priority: "0.9" },
   ];
   const urls = [
     ...staticPages.map((page) => urlEntry(`${origin}${page.loc}`, page.lastmod, page.changefreq, page.priority)),

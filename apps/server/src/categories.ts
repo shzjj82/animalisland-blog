@@ -1,9 +1,13 @@
 import crypto from "node:crypto";
 import {
   DEFAULT_CATEGORIES,
+  SITE_SKILL_COLORS,
   isCategoryKind,
   isReservedPath,
   isSiteSkillColor,
+  normalizeTags,
+  tagsFromProps,
+  propsWithTags,
   type Category,
   type CategoryKind,
   type SiteSkillColor,
@@ -96,6 +100,20 @@ export function ensureDefaultCategories(): void {
   }
 }
 
+/** 去掉站点照片墙：分类与 photo/photos 页面 */
+export function removePhotosFeature(): void {
+  db.prepare("DELETE FROM posts WHERE page_kind IN ('photos', 'photo')").run();
+  db.prepare("DELETE FROM categories WHERE kind = 'photos' OR slug = 'photos'").run();
+  const fallback =
+    (db
+      .prepare("SELECT slug FROM categories WHERE kind = 'article' ORDER BY sort ASC LIMIT 1")
+      .get() as { slug: string } | undefined)?.slug ?? "life";
+  db.prepare(
+    `UPDATE posts SET type = ?
+     WHERE type NOT IN (SELECT slug FROM categories)`,
+  ).run(fallback);
+}
+
 export function listCategories(): Category[] {
   const rows = db
     .prepare("SELECT * FROM categories ORDER BY sort ASC, created_at ASC")
@@ -119,25 +137,78 @@ export function getCategoryBySlug(slug: string): Category | undefined {
   return row ? toCategory(row) : undefined;
 }
 
+export function getCategoryByName(name: string): Category | undefined {
+  const key = name.trim().toLocaleLowerCase();
+  if (!key) {
+    return undefined;
+  }
+  return listCategories().find(
+    (item) => item.name.toLocaleLowerCase() === key || item.slug.toLocaleLowerCase() === key,
+  );
+}
+
+/**
+ * 自定义标签即分类：按名字/slug 解析，没有就创建（默认进导航）。
+ * 返回规范化后的 category.slug 列表。
+ */
+export function ensureCategoriesFromLabels(labels: string[]): string[] {
+  const out: string[] = [];
+  for (const label of normalizeTags(labels)) {
+    const existing = getCategoryBySlug(label) ?? getCategoryByName(label);
+    if (existing) {
+      out.push(existing.slug);
+      continue;
+    }
+    const created = createCategory({
+      name: label,
+      hint: "",
+      color: SITE_SKILL_COLORS[listCategories().length % SITE_SKILL_COLORS.length] ?? "app-yellow",
+      kind: "article",
+      nav: true,
+    });
+    out.push(created.slug);
+  }
+  return normalizeTags(out);
+}
+
 export function countPostsInCategory(slug: string): number {
-  return (db.prepare("SELECT COUNT(*) AS n FROM posts WHERE type = ?").get(slug) as { n: number }).n;
+  const byType = (db.prepare("SELECT COUNT(*) AS n FROM posts WHERE type = ?").get(slug) as { n: number })
+    .n;
+  if (byType > 0) {
+    return byType;
+  }
+  // 多标签文章：props.tags 含该 slug
+  const rows = db
+    .prepare(`SELECT props FROM posts WHERE page_kind = 'article'`)
+    .all() as Array<{ props: string }>;
+  let n = 0;
+  for (const row of rows) {
+    let props: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(row.props || "{}") as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        props = parsed as Record<string, unknown>;
+      }
+    } catch {
+      /* ignore */
+    }
+    if (tagsFromProps(props).includes(slug)) {
+      n += 1;
+    }
+  }
+  return n;
 }
 
 export function createCategory(input: UpsertCategoryInput): Category {
-  if (input.kind === "photos" && listCategorySlugs("photos").length > 0) {
-    throw new Error("PHOTOS_EXISTS");
-  }
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
   const slug = uniqueCategorySlug(input.slug || input.name);
   const sort =
-    input.kind === "photos"
-      ? 1000
-      : typeof input.sort === "number"
-        ? input.sort
-        : ((db
-            .prepare("SELECT COALESCE(MAX(sort), -1) AS n FROM categories WHERE kind = 'article'")
-            .get() as { n: number }).n + 1);
+    typeof input.sort === "number"
+      ? input.sort
+      : ((db
+          .prepare("SELECT COALESCE(MAX(sort), -1) AS n FROM categories WHERE kind = 'article'")
+          .get() as { n: number }).n + 1);
 
   db.prepare(
     `INSERT INTO categories
@@ -164,21 +235,10 @@ export function updateCategory(id: string, input: UpsertCategoryInput): Category
   if (!existing) {
     return undefined;
   }
-  // 照片墙分类固定：不允许改成文章栏
-  const kind = existing.kind === "photos" ? "photos" : input.kind;
-  if (kind === "photos" && existing.kind !== "photos" && listCategorySlugs("photos").length > 0) {
-    throw new Error("PHOTOS_EXISTS");
-  }
 
   const slug = uniqueCategorySlug(input.slug || input.name, id);
   const now = new Date().toISOString();
-  // 照片墙 sort 固定靠后，不参与文章分类排序
-  const sort =
-    existing.kind === "photos"
-      ? 1000
-      : typeof input.sort === "number"
-        ? input.sort
-        : existing.sort;
+  const sort = typeof input.sort === "number" ? input.sort : existing.sort;
 
   db.prepare(
     `UPDATE categories SET
@@ -189,7 +249,7 @@ export function updateCategory(id: string, input: UpsertCategoryInput): Category
     input.name.trim(),
     input.hint?.trim() ?? "",
     input.color,
-    kind,
+    input.kind,
     input.nav === false ? 0 : 1,
     sort,
     now,
@@ -198,6 +258,26 @@ export function updateCategory(id: string, input: UpsertCategoryInput): Category
 
   if (slug !== existing.slug) {
     db.prepare("UPDATE posts SET type = ? WHERE type = ?").run(slug, existing.slug);
+    const rows = db.prepare("SELECT id, props FROM posts").all() as Array<{ id: string; props: string }>;
+    const updateProps = db.prepare("UPDATE posts SET props = ?, updated_at = ? WHERE id = ?");
+    const touchedAt = new Date().toISOString();
+    for (const row of rows) {
+      let props: Record<string, unknown> = {};
+      try {
+        const parsed = JSON.parse(row.props || "{}") as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          props = parsed as Record<string, unknown>;
+        }
+      } catch {
+        continue;
+      }
+      const tags = tagsFromProps(props);
+      if (!tags.includes(existing.slug)) {
+        continue;
+      }
+      const nextTags = tags.map((tag) => (tag === existing.slug ? slug : tag));
+      updateProps.run(JSON.stringify(propsWithTags(props, nextTags)), touchedAt, row.id);
+    }
   }
 
   return getCategoryById(id);
@@ -207,9 +287,6 @@ export function deleteCategory(id: string): boolean {
   const existing = getCategoryById(id);
   if (!existing) {
     return false;
-  }
-  if (existing.kind === "photos") {
-    throw new Error("PHOTOS_FIXED");
   }
   if (countPostsInCategory(existing.slug) > 0) {
     throw new Error("CATEGORY_IN_USE");
@@ -222,5 +299,4 @@ export function deleteCategory(id: string): boolean {
 }
 
 ensureDefaultCategories();
-// 既有库也把照片墙 sort 钉在文章分类之后
-db.prepare("UPDATE categories SET sort = 1000 WHERE kind = 'photos' AND sort != 1000").run();
+removePhotosFeature();

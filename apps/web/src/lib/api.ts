@@ -52,18 +52,30 @@ export const api = {
     request<{ ok: boolean }>(`/api/categories/${id}`, { method: "DELETE" }),
   listPosts: (query?: string | {
     type?: string;
-    kind?: "article" | "photos";
+    kind?: "article";
+    pageKind?: Post["pageKind"];
+    parentId?: string | null;
+    tree?: boolean;
     limit?: number;
     page?: number;
     pageSize?: number;
   }) => {
     const opts = typeof query === "string" ? { type: query } : (query ?? {});
     const params = new URLSearchParams();
+    if (opts.tree) {
+      params.set("tree", "1");
+    }
     if (opts.type) {
       params.set("type", opts.type);
     }
     if (opts.kind) {
       params.set("kind", opts.kind);
+    }
+    if (opts.pageKind) {
+      params.set("pageKind", opts.pageKind);
+    }
+    if (opts.parentId !== undefined) {
+      params.set("parentId", opts.parentId === null ? "null" : opts.parentId);
     }
     if (opts.limit) {
       params.set("limit", String(opts.limit));
@@ -75,10 +87,18 @@ export const api = {
       params.set("pageSize", String(opts.pageSize));
     }
     const qs = params.toString();
-    return request<{ posts: PostListItem[]; total: number; page: number; pageSize: number }>(
+    return request<{ posts: PostListItem[]; total: number; page?: number; pageSize?: number }>(
       qs ? `/api/posts?${qs}` : "/api/posts",
     );
   },
+  workspaceTree: () => api.listPosts({ tree: true }),
+  workspaceSpecials: () =>
+    request<{ about: Post | null }>("/api/posts/workspace/specials"),
+  reorderPages: (ids: string[]) =>
+    request<{ ok: boolean }>("/api/posts/reorder", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
   getBySlug: (slug: string) => request<{ post: Post }>(`/api/posts/${slug}`),
   getById: (id: string) => request<{ post: Post }>(`/api/posts/id/${id}`),
   createPost: (input: UpsertPostInput) =>
@@ -97,12 +117,18 @@ export const api = {
       title: patch.title ?? post.title,
       slug: patch.slug ?? post.slug,
       type: patch.type ?? post.type,
+      pageKind: patch.pageKind ?? post.pageKind,
+      parentId: patch.parentId !== undefined ? patch.parentId : post.parentId,
+      treeSort: patch.treeSort ?? post.treeSort,
       summary: patch.summary ?? post.summary,
       coverUrl: patch.coverUrl ?? post.coverUrl,
+      props: patch.props ?? post.props,
+      tags: patch.tags ?? post.tags,
       body: patch.body ?? post.body,
       draft: patch.draft ?? post.draft,
     });
   },
+  listTags: () => request<{ tags: string[] }>("/api/posts/tags"),
   deletePost: (id: string) =>
     request<{ ok: boolean }>(`/api/posts/${id}`, { method: "DELETE" }),
   getSite: () => request<{ about: SiteAbout }>("/api/site"),

@@ -10,11 +10,14 @@ export type EditorJsDocument = {
   blocks: EditorJsBlock[];
 };
 
-export const CATEGORY_KINDS = ["article", "photos"] as const;
+export const CATEGORY_KINDS = ["article"] as const;
 
 export type CategoryKind = (typeof CATEGORY_KINDS)[number];
 
-export const RESERVED_PATHS = ["admin", "login", "post", "api", "uploads"] as const;
+export const PAGE_KINDS = ["article", "about"] as const;
+export type PageKind = (typeof PAGE_KINDS)[number];
+
+export const RESERVED_PATHS = ["admin", "login", "post", "api", "uploads", "notes"] as const;
 
 export const SITE_SKILL_COLORS = [
   "app-pink",
@@ -61,11 +64,18 @@ export type Post = {
   slug: string;
   title: string;
   type: string;
+  pageKind: PageKind;
+  parentId: string | null;
+  treeSort: number;
   categoryName: string;
   categoryColor: SiteSkillColor;
   categoryKind: CategoryKind;
   summary: string;
   coverUrl: string;
+  /** about 页：avatar / skills；文章：tags = 分类 slug 列表（可多选） */
+  props: Record<string, unknown>;
+  /** 文章所属分类（多选），存的是 category.slug */
+  tags: string[];
   body: EditorJsDocument;
   draft: boolean;
   publishedAt: string | null;
@@ -79,15 +89,21 @@ export type UpsertPostInput = {
   title: string;
   slug?: string;
   type: string;
+  pageKind?: PageKind;
+  parentId?: string | null;
+  treeSort?: number;
   summary?: string;
   coverUrl?: string;
+  props?: Record<string, unknown>;
+  /** 发布时可带分类 slug 列表；写入 props.tags，并可用作筛选 */
+  tags?: string[];
   body: EditorJsDocument;
   draft?: boolean;
 };
 
 export const SITE_NAME = "小岛日记";
 
-export const SITE_DESCRIPTION = "一座慢慢写的小岛。记录生活、编程、闲聊和照片。";
+export const SITE_DESCRIPTION = "一座慢慢写的小岛。记录生活、编程和闲聊。";
 
 export function siteTitle(pageTitle: string): string {
   return pageTitle === SITE_NAME ? SITE_NAME : `${pageTitle} · ${SITE_NAME}`;
@@ -154,11 +170,11 @@ export function normalizeEditorDocument(value: unknown): EditorJsDocument {
 }
 
 export const DEFAULT_ABOUT: SiteAbout = {
-  name: "小岛日记 · 生活 / 编程 / 闲聊 / 照片",
+  name: "小岛日记 · 生活 / 编程 / 闲聊",
   body: editorDocumentFromPlainText(
     "这是我的个人博客。白天写代码，其余时间看看路、拍拍照，偶尔把卡住的问题和想清楚的事情记下来。喜欢能摸到质感的软件，也喜欢把话写明白。",
   ),
-  avatar: "🦊",
+  avatar: "",
   skills: [
     { name: "React / TS", color: "app-blue" },
     { name: "Node.js", color: "app-green" },
@@ -175,15 +191,6 @@ export const DEFAULT_CATEGORIES: Array<
   { slug: "life", name: "生活", hint: "日常里留下的事", color: "app-blue", kind: "article", nav: true, sort: 0 },
   { slug: "coding", name: "编程", hint: "代码里踩过的坑", color: "app-green", kind: "article", nav: true, sort: 1 },
   { slug: "chat", name: "闲聊", hint: "想到就记一笔", color: "purple", kind: "article", nav: true, sort: 2 },
-  {
-    slug: "photos",
-    name: "照片",
-    hint: "路上拍下的画面",
-    color: "warm-peach-pink",
-    kind: "photos",
-    nav: true,
-    sort: 1000,
-  },
 ];
 
 export type AiAttachment =
@@ -244,10 +251,53 @@ export function isCategoryKind(value: string): value is CategoryKind {
   return (CATEGORY_KINDS as readonly string[]).includes(value);
 }
 
+export function isPageKind(value: string): value is PageKind {
+  return (PAGE_KINDS as readonly string[]).includes(value);
+}
+
 export function isReservedPath(slug: string): boolean {
   return (RESERVED_PATHS as readonly string[]).includes(slug);
 }
 
 export function isSiteSkillColor(value: string): value is SiteSkillColor {
   return (SITE_SKILL_COLORS as readonly string[]).includes(value);
+}
+
+/** 规范化文章标签：去空、去重（忽略大小写）、上限 */
+export function normalizeTags(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of value) {
+    const name = String(item ?? "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .slice(0, 32);
+    if (!name) {
+      continue;
+    }
+    const key = name.toLocaleLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    out.push(name);
+    if (out.length >= 20) {
+      break;
+    }
+  }
+  return out;
+}
+
+export function tagsFromProps(props: Record<string, unknown> | undefined): string[] {
+  return normalizeTags(props?.tags);
+}
+
+export function propsWithTags(
+  props: Record<string, unknown> | undefined,
+  tags: string[],
+): Record<string, unknown> {
+  return { ...(props ?? {}), tags: normalizeTags(tags) };
 }

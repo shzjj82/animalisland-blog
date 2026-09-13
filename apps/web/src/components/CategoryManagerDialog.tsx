@@ -51,7 +51,7 @@ type Props = {
   onOpenChange: (open: boolean) => void;
 };
 
-/** 文章分类管理（不含照片墙；照片墙固定由「照片」页使用） */
+/** 文章分类管理 */
 export function CategoryManagerDialog({ open, onOpenChange }: Props) {
   const { categories, reload } = useCategories();
   const [form, setForm] = useState(emptyForm);
@@ -199,7 +199,7 @@ export function CategoryManagerDialog({ open, onOpenChange }: Props) {
             <DialogTitle>文章分类</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            用来给文章归类，也会出现在前台导航。照片墙不在这里，位置固定在「照片」页。
+            用来给文章归类。当前前台导航以「笔记」统一入口，不必再拆栏目链接。
           </p>
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
           <ul className="max-h-[min(52vh,420px)] space-y-2 overflow-y-auto pr-1">

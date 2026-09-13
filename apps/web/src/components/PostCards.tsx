@@ -1,6 +1,9 @@
 import type { PostListItem } from "@myblog/shared";
+import { ArrowRight } from "@icon-park/react";
 import { Card } from "animal-island-ui";
 import { Link } from "react-router-dom";
+import { iconParkOutline } from "@/lib/iconPark";
+import { pageTitle } from "@/lib/pageTree";
 
 function prefetchPostPage() {
   void import("@/pages/Post/Post");
@@ -27,15 +30,17 @@ export function PostCards({ posts, empty }: { posts: PostListItem[]; empty: stri
           onMouseEnter={prefetchPostPage}
           onFocus={prefetchPostPage}
         >
-          <Card color={post.categoryColor} hoverable className="blog-post-card">
-            <div className="blog-post-tag">#{post.categoryName}</div>
-            <h3 className="blog-post-title">{post.title}</h3>
+          <Card color="app-blue" hoverable className="blog-post-card">
+            <h3 className="blog-post-title">{pageTitle(post)}</h3>
             <p className="blog-post-excerpt">{post.summary || "点进去看全文。"}</p>
             <div className="blog-post-meta">
               <time dateTime={(post.publishedAt ?? post.updatedAt).slice(0, 10)}>
                 {(post.publishedAt ?? post.updatedAt).slice(0, 10)}
               </time>
-              <span className="blog-post-more">阅读 →</span>
+              <span className="blog-post-more blog-inline-icon">
+                阅读
+                <ArrowRight {...iconParkOutline} size={14} aria-hidden />
+              </span>
             </div>
           </Card>
         </Link>

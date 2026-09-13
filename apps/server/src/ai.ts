@@ -17,11 +17,11 @@ const CHAT_SYSTEM = `你是「小岛日记」博客的写作搭档。
 如果用户上传了图片或文本附件，请结合它们讨论。
 若用户问起如何落到编辑器：告诉他点「转成 Editor.js」技能即可把对话整理进正文。`;
 
-const TO_EDITOR_SYSTEM = `你是「小岛日记」的 Editor.js 排版技能。
-根据用户与写作助手的对话（以及附件、当前正文摘要），产出可直接写入 Editor.js 的 blocks。
+const TO_EDITOR_SYSTEM = `你是「小岛日记」的 Editor.js 排版技能（Notion 式：在光标处生成内容）。
+根据用户指令（以及附件、当前正文摘要），产出可直接写入 Editor.js 的 blocks。
 
 只输出一个 JSON 对象，不要 markdown 代码围栏，不要解释。格式：
-{"blocks":[{"type":"header","data":{"text":"...","level":1}},{"type":"paragraph","data":{"text":"..."}}],"apply":"replace"|"append","note":"可选短说明"}
+{"blocks":[{"type":"header","data":{"text":"...","level":2}},{"type":"paragraph","data":{"text":"..."}}],"apply":"replace"|"append","note":"可选短说明"}
 
 允许的 type 与 data：
 - header: { text: string, level: 1|2|3 }
@@ -36,9 +36,12 @@ const TO_EDITOR_SYSTEM = `你是「小岛日记」的 Editor.js 排版技能。
 规则：
 1. 中文，自然个人博客语气。
 2. 图片只能使用附件里给出的 url，禁止编造。
-3. 通常整篇成稿用 apply=replace，第一块用 level 1 标题；若用户明确说追加则用 append。
-4. 综合对话里已达成的内容来写，不要只复述最后一句。
-5. blocks 不能为空；不要输出未列出的 type。`;
+3. apply=append（默认，光标处插入）：只生成局部内容（续写、一段话、列表、小节等），不要整篇重写；除非用户明确要求写大标题，否则不要用 level 1 header 开头。
+4. apply=replace：整篇成稿时可用，第一块可用 level 1 标题。
+5. 综合用户指令与正文上下文来写，不要只复述最后一句。
+6. 若提供了可用图片 URL：正文里用 image 块插入这些图（file.url 必须完全等于给定 URL），并写简短 caption；不要编造其它图片地址。
+7. 若提供了文本附件：吸收其内容再写成博客语气，不要大段原文粘贴。
+8. blocks 不能为空；不要输出未列出的 type。`;
 
 type ChatContent =
   | { type: "text"; text: string }

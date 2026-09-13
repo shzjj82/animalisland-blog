@@ -7,7 +7,10 @@ import express from "express";
 import { ensureDataDirs, env, repoRoot } from "./env.js";
 import "./db.js";
 import "./categories.js";
+import { ensureWorkspacePages } from "./posts.js";
 import { authRouter } from "./routes/auth.js";
+
+ensureWorkspacePages();
 import { aiRouter } from "./routes/ai.js";
 import { categoriesRouter } from "./routes/categories.js";
 import { postsRouter } from "./routes/posts.js";

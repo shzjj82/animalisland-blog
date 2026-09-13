@@ -6,21 +6,26 @@ import { CategoriesProvider } from "@/lib/categories";
 import { ThemeProvider } from "@/lib/theme";
 import Home from "@/pages/Home/Home";
 import { CategoryPage } from "@/pages/Category";
+import { NotesPage } from "@/pages/Notes";
 import { NotFoundPage } from "@/pages/NotFound";
 
 const Post = lazy(() => import("@/pages/Post/Post"));
 const LoginPage = lazy(() => import("@/pages/Login").then((mod) => ({ default: mod.LoginPage })));
-const AdminLayout = lazy(() =>
-  import("@/components/AdminLayout").then((mod) => ({ default: mod.AdminLayout })),
+const WorkspaceLayout = lazy(() =>
+  import("@/workspace/WorkspaceLayout").then((mod) => ({ default: mod.WorkspaceLayout })),
 );
-const AdminPage = lazy(() => import("@/pages/Admin").then((mod) => ({ default: mod.AdminPage })));
-const AdminPhotosPage = lazy(() =>
-  import("@/pages/AdminPhotos").then((mod) => ({ default: mod.AdminPhotosPage })),
+const WorkspaceIndex = lazy(() =>
+  import("@/workspace/WorkspaceLayout").then((mod) => ({ default: mod.WorkspaceIndex })),
 );
-const AdminAboutPage = lazy(() =>
-  import("@/pages/AdminAbout").then((mod) => ({ default: mod.AdminAboutPage })),
+const WorkspacePage = lazy(() =>
+  import("@/workspace/WorkspacePage").then((mod) => ({ default: mod.WorkspacePage })),
 );
-const WritePage = lazy(() => import("@/pages/Write").then((mod) => ({ default: mod.WritePage })));
+const RedirectToSpecial = lazy(() =>
+  import("@/workspace/WorkspaceLayout").then((mod) => ({ default: mod.RedirectToSpecial })),
+);
+const RedirectWrite = lazy(() =>
+  import("@/workspace/WorkspaceLayout").then((mod) => ({ default: mod.RedirectWrite })),
+);
 
 function App() {
   return (
@@ -32,15 +37,17 @@ function App() {
               <Suspense fallback={<div className="route-fallback" />}>
                 <Routes>
                   <Route path="/" element={<Home />} />
+                  <Route path="/notes" element={<NotesPage />} />
                   <Route path="/post/:slug" element={<Post />} />
                   <Route path="/login" element={<LoginPage />} />
-                  <Route element={<AdminLayout />}>
-                    <Route path="/admin" element={<AdminPage />} />
-                    <Route path="/admin/photos" element={<AdminPhotosPage />} />
+                  <Route element={<WorkspaceLayout />}>
+                    <Route path="/admin" element={<WorkspaceIndex />} />
+                    <Route path="/admin/p/:id" element={<WorkspacePage />} />
+                    <Route path="/admin/about" element={<RedirectToSpecial kind="about" />} />
+                    <Route path="/admin/photos" element={<Navigate to="/admin" replace />} />
                     <Route path="/admin/categories" element={<Navigate to="/admin" replace />} />
-                    <Route path="/admin/about" element={<AdminAboutPage />} />
-                    <Route path="/admin/write" element={<WritePage />} />
-                    <Route path="/admin/write/:id" element={<WritePage />} />
+                    <Route path="/admin/write" element={<RedirectWrite />} />
+                    <Route path="/admin/write/:id" element={<RedirectWrite />} />
                   </Route>
                   <Route path="/:slug" element={<CategoryPage />} />
                   <Route path="*" element={<NotFoundPage />} />

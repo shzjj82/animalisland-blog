@@ -60,7 +60,7 @@ export class CodeTool {
 
   render() {
     this.wrap = document.createElement("div");
-    this.wrap.className = "code-tool";
+    this.wrap.className = "code-tool cdx-block";
 
     this.select = document.createElement("select");
     this.select.className = "code-tool-lang";

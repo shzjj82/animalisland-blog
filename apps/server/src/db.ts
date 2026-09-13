@@ -51,4 +51,27 @@ db.exec(`
     ON categories (sort, created_at);
 `);
 
-db.prepare("UPDATE posts SET type = 'photos' WHERE type = 'photo'").run();
+db.prepare("UPDATE posts SET type = 'life' WHERE type = 'photo' OR type = 'photos'").run();
+
+function hasColumn(table: string, column: string): boolean {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return rows.some((row) => row.name === column);
+}
+
+if (!hasColumn("posts", "page_kind")) {
+  db.exec(`ALTER TABLE posts ADD COLUMN page_kind TEXT NOT NULL DEFAULT 'article'`);
+}
+if (!hasColumn("posts", "parent_id")) {
+  db.exec(`ALTER TABLE posts ADD COLUMN parent_id TEXT`);
+}
+if (!hasColumn("posts", "tree_sort")) {
+  db.exec(`ALTER TABLE posts ADD COLUMN tree_sort INTEGER NOT NULL DEFAULT 0`);
+}
+if (!hasColumn("posts", "props")) {
+  db.exec(`ALTER TABLE posts ADD COLUMN props TEXT NOT NULL DEFAULT '{}'`);
+}
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_posts_page_kind ON posts (page_kind, tree_sort);
+  CREATE INDEX IF NOT EXISTS idx_posts_parent ON posts (parent_id, tree_sort);
+`);
