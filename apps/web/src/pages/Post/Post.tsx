@@ -9,7 +9,7 @@ import { Seo } from "@/components/Seo";
 import { api } from "@/lib/api";
 import { useCategories } from "@/lib/categories";
 import { iconParkOutline, PageLinkIcon } from "@/lib/iconPark";
-import { ancestorsOf, pageTitle } from "@/lib/pageTree";
+import { pageTitle } from "@/lib/pageTree";
 import "./Post.less";
 
 function Post() {
@@ -17,7 +17,7 @@ function Post() {
   const navigate = useNavigate();
   const { categories } = useCategories();
   const [post, setPost] = useState<BlogPost | null>(null);
-  const [allPages, setAllPages] = useState<PostListItem[]>([]);
+  const [crumbs, setCrumbs] = useState<PostListItem[]>([]);
   const [siblings, setSiblings] = useState<PostListItem[]>([]);
   const [children, setChildren] = useState<PostListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,7 +29,7 @@ function Post() {
     setMissing(false);
     setSiblings([]);
     setChildren([]);
-    setAllPages([]);
+    setCrumbs([]);
     let cancelled = false;
     void api
       .getBySlug(slug)
@@ -44,21 +44,10 @@ function Post() {
           return;
         }
         setPost(detail.post);
+        setCrumbs(detail.ancestors ?? []);
+        setSiblings(detail.siblings ?? []);
+        setChildren((detail.children ?? []).filter((item) => !item.draft));
         setLoading(false);
-        return Promise.all([
-          api.listPosts({ pageKind: "article" }),
-          api.listPosts({
-            pageKind: "article",
-            parentId: detail.post.parentId ?? null,
-          }),
-          api.listPosts({ pageKind: "article", parentId: detail.post.id }),
-        ]).then(([all, list, childList]) => {
-          if (!cancelled) {
-            setAllPages(all.posts);
-            setSiblings(list.posts);
-            setChildren(childList.posts.filter((item) => !item.draft));
-          }
-        });
       })
       .catch(() => {
         if (cancelled) {
@@ -77,7 +66,6 @@ function Post() {
   const prev = currentIndex > 0 ? siblings[currentIndex - 1] : null;
   const next = currentIndex >= 0 && currentIndex < siblings.length - 1 ? siblings[currentIndex + 1] : null;
   const published = post ? (post.publishedAt ?? post.updatedAt).slice(0, 10) : "";
-  const crumbs = post ? ancestorsOf(post.id, allPages) : [];
   const linkedChildIds = new Set(
     (post?.body.blocks ?? [])
       .filter((block) => block.type === "pageLink")

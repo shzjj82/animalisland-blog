@@ -1,6 +1,7 @@
 import {
   SITE_SKILL_COLORS,
   normalizeTags,
+  validateTagName,
   type Category,
   type SiteSkillColor,
 } from "@myblog/shared";
@@ -18,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { useCategories } from "@/lib/categories";
 import { iconParkOutline } from "@/lib/iconPark";
+import { skillColorHex } from "@/lib/skillColors";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -94,23 +96,28 @@ export function PublishDialog({
   };
 
   const addDraft = async () => {
-    const name = draft.trim();
-    if (!name) {
+    const nameCheck = validateTagName(draft);
+    if (!nameCheck.ok) {
+      setError(nameCheck.error);
       return;
     }
     const existing = categories.find(
-      (item) => item.name === name || item.slug === name.toLocaleLowerCase(),
+      (item) =>
+        item.name === nameCheck.value ||
+        item.slug === nameCheck.value.toLocaleLowerCase() ||
+        item.name.toLocaleLowerCase() === nameCheck.value.toLocaleLowerCase(),
     );
     if (existing) {
       setSelected((prev) => normalizeTags([...prev, existing.slug]));
       setDraft("");
+      setError("");
       return;
     }
     setCreating(true);
     setError("");
     try {
       const { category } = await api.createCategory({
-        name,
+        name: nameCheck.value,
         hint: "",
         color: pickColor(categories.length),
         kind: "article",
@@ -121,13 +128,18 @@ export function PublishDialog({
       setSelected((prev) => normalizeTags([...prev, category.slug]));
       setDraft("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "创建标签失败");
+      const message = err instanceof Error ? err.message : "";
+      if (message.startsWith("TAG_NAME_INVALID:")) {
+        setError(message.slice("TAG_NAME_INVALID:".length));
+      } else if (message === "TAG_NAME_EXISTS") {
+        setError("已有同名标签。");
+      } else {
+        setError("创建标签失败");
+      }
     } finally {
       setCreating(false);
     }
   };
-
-  const labelOf = (slug: string) => bySlug.get(slug)?.name ?? slug;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -138,22 +150,26 @@ export function PublishDialog({
 
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            选择标签（可多选）。输入新名字后回车或点添加，会创建标签并出现在导航。
+            选择标签（可多选）。输入新名字后回车或点添加；名称需 2–16 字且含文字，会进导航。
           </p>
 
           {selected.length ? (
             <div className="flex flex-wrap gap-1.5">
-              {selected.map((slug) => (
-                <button
-                  key={slug}
-                  type="button"
-                  className="inline-flex items-center gap-1 rounded-full border border-foreground/15 bg-foreground px-2.5 py-1 text-xs text-background"
-                  onClick={() => toggle(slug)}
-                >
-                  {labelOf(slug)}
-                  <Close {...iconParkOutline} size={12} aria-hidden />
-                </button>
-              ))}
+              {selected.map((slug) => {
+                const cat = bySlug.get(slug);
+                return (
+                  <button
+                    key={slug}
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-full border border-black/10 px-2.5 py-1 text-xs font-medium text-foreground/90"
+                    style={{ background: skillColorHex(cat?.color) }}
+                    onClick={() => toggle(slug)}
+                  >
+                    {cat?.name ?? slug}
+                    <Close {...iconParkOutline} size={12} aria-hidden />
+                  </button>
+                );
+              })}
             </div>
           ) : (
             <p className="text-xs text-muted-foreground">还没选标签，也可以直接发布。</p>
@@ -199,15 +215,18 @@ export function PublishDialog({
                     key={item.id}
                     type="button"
                     className={cn(
-                      "flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm transition-colors",
-                      active
-                        ? "bg-foreground text-background"
-                        : "text-foreground hover:bg-muted",
+                      "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors",
+                      active ? "bg-muted font-medium" : "text-foreground hover:bg-muted/70",
                     )}
                     onClick={() => toggle(item.slug)}
                   >
-                    <span>{item.name}</span>
-                    <span className="text-[11px] opacity-70">{active ? "已选" : "选择"}</span>
+                    <span
+                      className="size-2.5 shrink-0 rounded-full border border-black/10"
+                      style={{ background: skillColorHex(item.color) }}
+                      aria-hidden
+                    />
+                    <span className="min-w-0 flex-1 truncate">{item.name}</span>
+                    <span className="text-[11px] text-muted-foreground">{active ? "已选" : "选择"}</span>
                   </button>
                 );
               })

@@ -1,11 +1,10 @@
 import type EditorJS from "@editorjs/editorjs";
-import type { OutputData } from "@editorjs/editorjs";
 import type { EditorJsBlock, EditorJsDocument } from "@myblog/shared";
 
 /** 从 Notion 编辑器取出块文档（存 posts.body） */
 export async function saveEditor(editor: EditorJS | null): Promise<EditorJsDocument> {
   if (!editor) {
-    return { time: Date.now(), blocks: [] };
+    throw new Error("编辑器尚未就绪");
   }
   const data = await editor.save();
   return {
@@ -17,37 +16,6 @@ export async function saveEditor(editor: EditorJS | null): Promise<EditorJsDocum
       data: item.data as Record<string, unknown>,
     })),
   };
-}
-
-export async function applyEditorBlocks(
-  editor: EditorJS | null,
-  blocks: EditorJsDocument["blocks"],
-  apply: "append" | "replace",
-): Promise<void> {
-  if (!editor || blocks.length === 0) {
-    return;
-  }
-  const current = await editor.save();
-  const nextBlocks =
-    apply === "replace"
-      ? blocks
-      : [
-          ...current.blocks.filter((block) => {
-            if (block.type !== "paragraph") {
-              return true;
-            }
-            const text = String((block.data as { text?: string }).text ?? "")
-              .replace(/<[^>]+>/g, "")
-              .trim();
-            return text.length > 0;
-          }),
-          ...blocks,
-        ];
-  await editor.render({
-    time: Date.now(),
-    version: current.version,
-    blocks: nextBlocks as OutputData["blocks"],
-  });
 }
 
 /** 在指定下标插入块（Notion 式光标处生成） */

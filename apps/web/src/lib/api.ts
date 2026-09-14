@@ -3,6 +3,7 @@ import type {
   AiChatResult,
   AiToEditorInput,
   AiToEditorResult,
+  ApiResponse,
   Category,
   Post,
   PostListItem,
@@ -20,24 +21,26 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
       ...init?.headers,
     },
   });
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(data.error ?? `HTTP_${res.status}`);
+  const body = (await res.json().catch(() => null)) as ApiResponse<T> | null;
+  if (!body || typeof body !== "object" || !("success" in body)) {
+    throw new Error(`HTTP_${res.status}`);
   }
-  return res.json() as Promise<T>;
+  if (!res.ok || !body.success) {
+    throw new Error(body.code || body.message || `HTTP_${res.status}`);
+  }
+  return body.data;
 }
 
 export const api = {
   me: () => request<{ username: string }>("/api/auth/me"),
   login: (username: string, password: string) =>
-    request<{ ok: boolean }>("/api/auth/login", {
+    request<{ username: string }>("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
     }),
-  logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+  logout: () => request<null>("/api/auth/logout", { method: "POST" }),
   listCategories: () =>
     request<{ categories: Category[] }>("/api/categories", { cache: "no-store" }),
-  getCategory: (slug: string) => request<{ category: Category }>(`/api/categories/${slug}`),
   createCategory: (input: UpsertCategoryInput) =>
     request<{ category: Category }>("/api/categories", {
       method: "POST",
@@ -48,8 +51,7 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(input),
     }),
-  deleteCategory: (id: string) =>
-    request<{ ok: boolean }>(`/api/categories/${id}`, { method: "DELETE" }),
+  deleteCategory: (id: string) => request<null>(`/api/categories/${id}`, { method: "DELETE" }),
   listPosts: (query?: string | {
     type?: string;
     kind?: "article";
@@ -94,49 +96,31 @@ export const api = {
   workspaceTree: () => api.listPosts({ tree: true }),
   workspaceSpecials: () =>
     request<{ about: Post | null }>("/api/posts/workspace/specials"),
-  reorderPages: (ids: string[]) =>
-    request<{ ok: boolean }>("/api/posts/reorder", {
-      method: "POST",
-      body: JSON.stringify({ ids }),
-    }),
-  getBySlug: (slug: string) => request<{ post: Post }>(`/api/posts/${slug}`),
+  getBySlug: (slug: string) =>
+    request<{
+      post: Post;
+      ancestors: PostListItem[];
+      siblings: PostListItem[];
+      children: PostListItem[];
+    }>(`/api/posts/${slug}`),
   getById: (id: string) => request<{ post: Post }>(`/api/posts/id/${id}`),
   createPost: (input: UpsertPostInput) =>
     request<{ post: Post }>("/api/posts", {
       method: "POST",
       body: JSON.stringify(input),
     }),
+  /** 侧栏建子页：服务端事务创建 + 挂 pageLink */
+  createChildPage: (parentId: string) =>
+    request<{ post: Post; parent: Post }>(`/api/posts/id/${parentId}/children`, {
+      method: "POST",
+    }),
   updatePost: (id: string, input: UpsertPostInput) =>
     request<{ post: Post }>(`/api/posts/${id}`, {
       method: "PUT",
       body: JSON.stringify(input),
     }),
-  patchPost: async (id: string, patch: Partial<UpsertPostInput>) => {
-    const { post } = await api.getById(id);
-    return api.updatePost(id, {
-      title: patch.title ?? post.title,
-      slug: patch.slug ?? post.slug,
-      type: patch.type ?? post.type,
-      pageKind: patch.pageKind ?? post.pageKind,
-      parentId: patch.parentId !== undefined ? patch.parentId : post.parentId,
-      treeSort: patch.treeSort ?? post.treeSort,
-      summary: patch.summary ?? post.summary,
-      coverUrl: patch.coverUrl ?? post.coverUrl,
-      props: patch.props ?? post.props,
-      tags: patch.tags ?? post.tags,
-      body: patch.body ?? post.body,
-      draft: patch.draft ?? post.draft,
-    });
-  },
-  listTags: () => request<{ tags: string[] }>("/api/posts/tags"),
-  deletePost: (id: string) =>
-    request<{ ok: boolean }>(`/api/posts/${id}`, { method: "DELETE" }),
+  deletePost: (id: string) => request<null>(`/api/posts/${id}`, { method: "DELETE" }),
   getSite: () => request<{ about: SiteAbout }>("/api/site"),
-  saveSite: (about: SiteAbout) =>
-    request<{ about: SiteAbout }>("/api/site", {
-      method: "PUT",
-      body: JSON.stringify(about),
-    }),
   upload: async (file: File) => {
     const body = new FormData();
     body.append("file", file);

@@ -9,14 +9,51 @@ function prefetchPostPage() {
   void import("@/pages/Post/Post");
 }
 
+/** 空列表插图：摊开的空白笔记本 */
+function EmptyNotesArt() {
+  return (
+    <svg
+      className="blog-empty-art"
+      viewBox="0 0 160 120"
+      width="160"
+      height="120"
+      aria-hidden
+    >
+      <ellipse cx="80" cy="102" rx="54" ry="8" fill="currentColor" opacity="0.08" />
+      <path
+        d="M42 28c0-4 3-7 7-7h62c4 0 7 3 7 7v62c0 4-3 7-7 7H49c-4 0-7-3-7-7V28z"
+        fill="#fffdf5"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinejoin="round"
+        opacity="0.92"
+      />
+      <path d="M56 21v76" stroke="currentColor" strokeWidth="2" opacity="0.2" />
+      <path d="M68 44h40M68 56h34M68 68h28" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" opacity="0.18" />
+      <circle cx="118" cy="34" r="14" fill="#ffd089" opacity="0.55" />
+      <path
+        d="M112 34h12M118 28v12"
+        stroke="#d98c3b"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        opacity="0.85"
+      />
+    </svg>
+  );
+}
+
 export function PostCards({ posts, empty }: { posts: PostListItem[]; empty: string }) {
   if (posts.length === 0) {
     return (
-      <Card color="app-yellow">
-        <p className="blog-section-sub" style={{ marginBottom: 0 }}>
-          {empty}
-        </p>
-      </Card>
+      <div className="blog-empty" role="status">
+        <Card color="app-yellow" className="blog-empty-card">
+          <div className="blog-empty-inner">
+            <EmptyNotesArt />
+            <p className="blog-empty-title">暂时还是空的</p>
+            <p className="blog-empty-desc">{empty}</p>
+          </div>
+        </Card>
+      </div>
     );
   }
 

@@ -7,15 +7,8 @@ export const iconParkOutline = {
   strokeWidth: 3,
 };
 
-export function iconParkSize(size: number) {
-  return { ...iconParkOutline, size };
-}
-
 /** IconPark Notes：文章 / 子页面（Editor.js / 纯 DOM） */
 export const NOTES_ICON_SVG = `<svg width="1em" height="1em" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M8 6C8 4.89543 8.89543 4 10 4H30L40 14V42C40 43.1046 39.1046 44 38 44H10C8.89543 44 8 43.1046 8 42V6Z" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><path d="M16 20H32" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 28H32" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-
-/** @deprecated 兼容旧名，同 NOTES_ICON_SVG */
-export const PAGE_LINK_ICON_SVG = NOTES_ICON_SVG;
 
 export const PAGE_LINK_TOOLBOX_SVG = NOTES_ICON_SVG.replace('width="1em"', 'width="18"').replace(
   'height="1em"',

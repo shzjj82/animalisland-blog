@@ -16,6 +16,7 @@ import { categoriesRouter } from "./routes/categories.js";
 import { postsRouter } from "./routes/posts.js";
 import { siteRouter } from "./routes/site.js";
 import { uploadRouter } from "./routes/upload.js";
+import { fail, ok } from "./http.js";
 import { applyHtmlMeta, metaForRequest, publicOrigin, robotsTxt, sitemapXml } from "./seo.js";
 
 ensureDataDirs();
@@ -43,7 +44,7 @@ app.use(
 );
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true });
+  ok(res, { status: "up" });
 });
 
 app.use("/api/auth", authRouter);
@@ -88,11 +89,11 @@ if (env.isProd && fs.existsSync(indexPath)) {
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   const message = err instanceof Error ? err.message : "SERVER_ERROR";
   if (message === "UNSUPPORTED_TYPE" || message === "INVALID_CATEGORY") {
-    res.status(400).json({ error: message });
+    fail(res, message);
     return;
   }
   if (message === "OSS_NOT_CONFIGURED") {
-    res.status(500).json({ error: message });
+    fail(res, message, 500);
     return;
   }
   if (
@@ -105,11 +106,11 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
     message.startsWith("AI_UPSTREAM_")
   ) {
     const status = message === "AI_NOT_CONFIGURED" ? 503 : message === "AI_TIMEOUT" ? 504 : 502;
-    res.status(status).json({ error: message });
+    fail(res, message, status);
     return;
   }
   console.error(err);
-  res.status(500).json({ error: "SERVER_ERROR" });
+  fail(res, "SERVER_ERROR", 500);
 });
 
 app.listen(env.port, env.host, () => {

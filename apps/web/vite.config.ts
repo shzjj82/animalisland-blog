@@ -30,6 +30,12 @@ export default defineConfig({
           if (id.includes("node_modules/animal-island-ui")) {
             return "island";
           }
+          if (id.includes("node_modules/highlight.js") || id.includes("/lib/highlight")) {
+            return "highlight";
+          }
+          if (id.includes("node_modules/dompurify")) {
+            return "sanitize";
+          }
         },
       },
     },

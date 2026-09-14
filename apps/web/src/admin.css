@@ -1773,11 +1773,13 @@
 }
 
 .file-pick--compact .file-pick-btn {
-  min-height: 36px;
+  min-height: 32px;
+  height: 32px;
   width: auto;
   padding: 0 14px;
   border-radius: 999px;
   border-style: solid;
+  gap: 0;
 }
 
 .file-pick--compact .file-pick-copy em {

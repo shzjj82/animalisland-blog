@@ -58,19 +58,3 @@ export function syncPageLinkTitle(
   });
   return changed ? { ...body, blocks } : null;
 }
-
-/** 侧栏删除子页后，从父文去掉对应 pageLink 块 */
-export function removePageLink(body: EditorJsDocument, pageId: string): EditorJsDocument | null {
-  const blocks = body.blocks ?? [];
-  const next = blocks.filter(
-    (block) =>
-      !(
-        block.type === "pageLink" &&
-        String((block.data as { pageId?: string }).pageId ?? "") === pageId
-      ),
-  );
-  if (next.length === blocks.length) {
-    return null;
-  }
-  return { ...body, time: Date.now(), blocks: next };
-}

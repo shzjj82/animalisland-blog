@@ -1,5 +1,6 @@
 import {
   DEFAULT_ABOUT,
+  emptyEditorDocument,
   isSiteSkillColor,
   normalizeEditorDocument,
   type SiteAbout,
@@ -164,8 +165,16 @@ export function syncSiteFromAboutPage(page: {
       ? page.props.avatar
       : DEFAULT_ABOUT.avatar;
   const skills = parseSkills(page.props.skills ?? DEFAULT_ABOUT.skills);
+  const nextBody = normalizeEditorDocument(page.body);
+  const existing = db.prepare("SELECT about_body FROM site WHERE id = 1").get() as
+    | { about_body: string }
+    | undefined;
+  const prevBody = existing ? normalizeEditorDocument(existing.about_body) : emptyEditorDocument();
+  // 避免「空编辑器自动保存」把仍有内容的 site.about_body 冲掉
+  const bodyToStore =
+    nextBody.blocks.length > 0 || prevBody.blocks.length === 0 ? nextBody : prevBody;
   db.prepare(
     `UPDATE site SET about_name = ?, about_body = ?, about_avatar = ?, skills = ?
      WHERE id = 1`,
-  ).run(page.title, JSON.stringify(page.body), avatar, JSON.stringify(skills));
+  ).run(page.title, JSON.stringify(bodyToStore), avatar, JSON.stringify(skills));
 }

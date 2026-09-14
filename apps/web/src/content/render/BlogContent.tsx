@@ -6,10 +6,9 @@ import type { EditorJsBlock, EditorJsDocument } from "@myblog/shared";
 import { Card, Divider, Image } from "animal-island-ui";
 import DOMPurify from "dompurify";
 import { Link } from "react-router-dom";
-import { codeLanguageLabel } from "@/components/editor/CodeTool";
 import { PageLinkIcon } from "@/lib/iconPark";
-import { highlightCode } from "@/lib/highlight";
 import { pageTitle } from "@/lib/pageTree";
+import { LazyCodeBlock } from "@/content/render/LazyCodeBlock";
 
 function html(text: unknown): string {
   return DOMPurify.sanitize(typeof text === "string" ? text : "");
@@ -71,14 +70,7 @@ function BlockView({ block }: { block: EditorJsBlock }) {
   if (type === "code") {
     const language = typeof data.language === "string" ? data.language : "plaintext";
     const code = String(data.code ?? "");
-    return (
-      <div className="block-code">
-        <span className="block-code-lang">{codeLanguageLabel(language)}</span>
-        <pre className="block-code-pre">
-          <code className="hljs" dangerouslySetInnerHTML={{ __html: highlightCode(code, language) }} />
-        </pre>
-      </div>
-    );
+    return <LazyCodeBlock code={code} language={language} />;
   }
 
   if (type === "delimiter") {

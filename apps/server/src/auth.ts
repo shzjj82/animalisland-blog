@@ -1,6 +1,7 @@
 import type { RequestHandler } from "express";
 import { jwtVerify, SignJWT } from "jose";
 import { env } from "./env.js";
+import { fail } from "./http.js";
 
 const secret = new TextEncoder().encode(env.jwtSecret);
 
@@ -24,7 +25,7 @@ export async function verifyToken(token: string): Promise<boolean> {
 export const requireAuth: RequestHandler = async (req, res, next) => {
   const token = req.cookies?.token as string | undefined;
   if (!token || !(await verifyToken(token))) {
-    res.status(401).json({ error: "UNAUTHORIZED" });
+    fail(res, "UNAUTHORIZED", 401);
     return;
   }
   next();

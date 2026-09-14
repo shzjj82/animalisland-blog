@@ -1,19 +1,19 @@
 import {
   DEFAULT_ABOUT,
-  SITE_SKILL_COLORS,
   emptyEditorDocument,
   isSiteSkillColor,
+  type EditorJsDocument,
   type Post,
   type PostListItem,
   type SiteSkill,
-  type SiteSkillColor,
   type UpsertPostInput,
 } from "@myblog/shared";
-import { Close, Notes } from "@icon-park/react";
+import { Notes } from "@icon-park/react";
 import EditorJS from "@editorjs/editorjs";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useOutletContext, useParams } from "react-router-dom";
-import { AboutAvatar } from "@/components/AboutAvatar";
+import { AboutAvatar, isAvatarUrl } from "@/components/AboutAvatar";
+import { AboutSkillsDialog } from "@/components/AboutSkillsDialog";
 import { SoftScrollbar } from "@/components/SoftScrollbar";
 import { FilePick } from "@/components/FilePick";
 import type { PageLinkData } from "@/components/editor/PageLinkTool";
@@ -26,7 +26,9 @@ import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { ensureTitleHeader, metaFromEditorDocument } from "@/lib/editorMeta";
 import { appendPageLink, syncPageLinkTitle } from "@/lib/pageLinks";
+import { registerWorkspaceSaveGate } from "@/workspace/saveGate";
 import { iconParkOutline, PageLinkIcon } from "@/lib/iconPark";
+import { skillColorHex } from "@/lib/skillColors";
 import { ancestorsOf, pageTitle } from "@/lib/pageTree";
 
 type WorkspaceOutlet = {
@@ -52,6 +54,7 @@ export function PageEditor({ onSaved }: Props) {
   onSavedRef.current = onSaved;
   const autosaveTimerRef = useRef(0);
   const saveSeqRef = useRef(0);
+  const persistChainRef = useRef(Promise.resolve());
 
   const [editorReady, setEditorReady] = useState(false);
   const [inlineAi, setInlineAi] = useState<{ insertIndex: number } | null>(null);
@@ -64,8 +67,7 @@ export function PageEditor({ onSaved }: Props) {
   const [publishMode, setPublishMode] = useState<"publish" | "edit">("publish");
   const [avatar, setAvatar] = useState(DEFAULT_ABOUT.avatar);
   const [skills, setSkills] = useState<SiteSkill[]>(DEFAULT_ABOUT.skills);
-  const [skillName, setSkillName] = useState("");
-  const [skillColor, setSkillColor] = useState<SiteSkillColor>("app-yellow");
+  const [skillsOpen, setSkillsOpen] = useState(false);
   const [initial, setInitial] = useState(emptyEditorDocument());
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -86,113 +88,158 @@ export function PageEditor({ onSaved }: Props) {
     skills: DEFAULT_ABOUT.skills as SiteSkill[],
   });
   liveRef.current = { post, title, slug, draft, tags, avatar, skills };
+  const editorReadyRef = useRef(false);
+  /** onChange 已 save 过的正文，autosave 复用，避免再调一次 editor.save() */
+  const draftBodyRef = useRef<EditorJsDocument | null>(null);
 
   const persist = useCallback(async (opts?: { draft?: boolean; tags?: string[] }) => {
-    const snap = liveRef.current;
-    const current = snap.post;
-    if (!current) {
-      return;
-    }
-    const kind = current.pageKind;
-    const showEditor = kind === "article" || kind === "about";
-    const asDraft = opts?.draft ?? snap.draft;
-    const nextTags = opts?.tags ?? snap.tags;
-    const seq = ++saveSeqRef.current;
-
-    setSaving(true);
-    setSaveHint("saving");
-    setError("");
-    try {
-      let body = current.body;
-      if (showEditor) {
-        body = await saveEditor(editorRef.current);
-      }
-
-      let payload: UpsertPostInput;
-      if (kind === "about") {
-        payload = {
-          title: snap.title.trim() || "关于",
-          slug: snap.slug.trim() || undefined,
-          type: current.type,
-          pageKind: "about",
-          summary: "",
-          coverUrl: "",
-          props: { avatar: snap.avatar.trim() || DEFAULT_ABOUT.avatar, skills: snap.skills },
-          body: body.blocks.length ? body : emptyEditorDocument(),
-          draft: false,
-        };
-      } else {
-        const meta = metaFromEditorDocument(body, {
-          title:
-            current.title !== "无标题" && current.title !== "未命名" ? current.title : undefined,
-          summary: current.summary,
-          coverUrl: current.coverUrl,
-        });
-        payload = {
-          title: meta.title,
-          slug: snap.slug.trim() || undefined,
-          type: current.type,
-          pageKind: "article",
-          parentId: current.parentId,
-          summary: meta.summary,
-          coverUrl: meta.coverUrl,
-          props: current.props,
-          tags: current.parentId ? [] : nextTags,
-          body,
-          // 子页永远不是草稿；顶层仅手动发布才改 draft
-          draft: current.parentId ? false : asDraft,
-        };
-      }
-
-      const { post: saved } = await api.updatePost(current.id, payload);
-      if (seq !== saveSeqRef.current) {
+    const run = async () => {
+      const snap = liveRef.current;
+      const current = snap.post;
+      if (!current) {
         return;
       }
+      const kind = current.pageKind;
+      const showEditor = kind === "article" || kind === "about";
+      const asDraft = opts?.draft ?? snap.draft;
+      const nextTags = opts?.tags ?? snap.tags;
+      const seq = ++saveSeqRef.current;
 
-      if (kind === "article" && saved.parentId && saved.title !== current.title) {
-        try {
-          const { post: parentPost } = await api.getById(saved.parentId);
-          const nextBody = syncPageLinkTitle(parentPost.body, saved.id, saved.title, saved.slug);
-          if (nextBody) {
-            await api.updatePost(parentPost.id, {
-              title: parentPost.title,
-              slug: parentPost.slug,
-              type: parentPost.type,
-              pageKind: "article",
-              parentId: parentPost.parentId,
-              summary: parentPost.summary,
-              coverUrl: parentPost.coverUrl,
-              props: parentPost.props,
-              body: nextBody,
-              draft: parentPost.draft,
-            });
+      setSaving(true);
+      setSaveHint("saving");
+      setError("");
+      try {
+        let body = current.body;
+        // 优先用 onChange 缓存；否则再 save。未就绪时绝不能用空文档覆盖
+        if (showEditor && editorReadyRef.current) {
+          if (draftBodyRef.current) {
+            body = draftBodyRef.current;
+          } else if (editorRef.current) {
+            try {
+              body = await saveEditor(editorRef.current);
+              draftBodyRef.current = body;
+            } catch {
+              body = current.body;
+            }
           }
-        } catch {
-          /* ignore */
+        }
+
+        if (seq !== saveSeqRef.current) {
+          return;
+        }
+
+        let payload: UpsertPostInput;
+        if (kind === "about") {
+          payload = {
+            title: snap.title.trim() || "关于",
+            slug: snap.slug.trim() || undefined,
+            type: current.type,
+            pageKind: "about",
+            summary: "",
+            coverUrl: "",
+            props: { avatar: snap.avatar.trim() || DEFAULT_ABOUT.avatar, skills: snap.skills },
+            body: body.blocks.length ? body : emptyEditorDocument(),
+            draft: false,
+          };
+        } else {
+          const meta = metaFromEditorDocument(body, {
+            title:
+              current.title !== "无标题" && current.title !== "未命名" ? current.title : undefined,
+            summary: current.summary,
+            coverUrl: current.coverUrl,
+          });
+          payload = {
+            title: meta.title,
+            slug: snap.slug.trim() || undefined,
+            type: current.type,
+            pageKind: "article",
+            parentId: current.parentId,
+            summary: meta.summary,
+            coverUrl: meta.coverUrl,
+            props: current.props,
+            tags: current.parentId ? [] : nextTags,
+            body,
+            // 子页永远不是草稿；顶层仅手动发布才改 draft
+            draft: current.parentId ? false : asDraft,
+          };
+        }
+
+        if (seq !== saveSeqRef.current) {
+          return;
+        }
+
+        const { post: saved } = await api.updatePost(current.id, payload);
+        if (seq !== saveSeqRef.current) {
+          return;
+        }
+
+        if (kind === "article" && saved.parentId && saved.title !== current.title) {
+          try {
+            const { post: parentPost } = await api.getById(saved.parentId);
+            const nextBody = syncPageLinkTitle(parentPost.body, saved.id, saved.title, saved.slug);
+            if (nextBody) {
+              await api.updatePost(parentPost.id, {
+                title: parentPost.title,
+                slug: parentPost.slug,
+                type: parentPost.type,
+                pageKind: "article",
+                parentId: parentPost.parentId,
+                summary: parentPost.summary,
+                coverUrl: parentPost.coverUrl,
+                props: parentPost.props,
+                body: nextBody,
+                draft: parentPost.draft,
+              });
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+
+        if (seq !== saveSeqRef.current) {
+          return;
+        }
+
+        setPost(saved);
+        setDraft(saved.draft);
+        setTags(saved.tags ?? []);
+        setSlug(saved.slug);
+        setTitle(saved.title);
+        previewTreeTitleRef.current(saved.id, saved.title);
+        setPendingLinkIds([]);
+        setSaveHint("saved");
+        onSavedRef.current?.(saved);
+      } catch (err) {
+        if (seq !== saveSeqRef.current) {
+          return;
+        }
+        setError(err instanceof Error ? err.message : "保存失败");
+        setSaveHint("error");
+      } finally {
+        if (seq === saveSeqRef.current) {
+          setSaving(false);
         }
       }
+    };
 
-      setPost(saved);
-      setDraft(saved.draft);
-      setTags(saved.tags ?? []);
-      setSlug(saved.slug);
-      setTitle(saved.title);
-      previewTreeTitleRef.current(saved.id, saved.title);
-      setPendingLinkIds([]);
-      setSaveHint("saved");
-      onSavedRef.current?.(saved);
-    } catch (err) {
-      if (seq !== saveSeqRef.current) {
-        return;
-      }
-      setError(err instanceof Error ? err.message : "保存失败");
-      setSaveHint("error");
-    } finally {
-      if (seq === saveSeqRef.current) {
-        setSaving(false);
-      }
-    }
+    const next = persistChainRef.current.then(run, run);
+    persistChainRef.current = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
   }, []);
+
+  const suspendAutosave = useCallback(async () => {
+    window.clearTimeout(autosaveTimerRef.current);
+    saveSeqRef.current += 1;
+    await persistChainRef.current;
+  }, []);
+
+  useEffect(() => {
+    registerWorkspaceSaveGate({ suspend: suspendAutosave });
+    return () => registerWorkspaceSaveGate(null);
+  }, [suspendAutosave]);
 
   const scheduleAutosave = useCallback(() => {
     window.clearTimeout(autosaveTimerRef.current);
@@ -214,6 +261,8 @@ export function PageEditor({ onSaved }: Props) {
     setSaveHint("idle");
     setPendingLinkIds([]);
     setEditorEpoch(0);
+    editorReadyRef.current = false;
+    draftBodyRef.current = null;
     void api
       .getById(id)
       .then((data) => {
@@ -228,7 +277,8 @@ export function PageEditor({ onSaved }: Props) {
         setTags(p.tags ?? []);
         previewTreeTitleRef.current(p.id, p.title);
         if (p.pageKind === "about") {
-          setAvatar(typeof p.props.avatar === "string" ? p.props.avatar : DEFAULT_ABOUT.avatar);
+          const rawAvatar = typeof p.props.avatar === "string" ? p.props.avatar : DEFAULT_ABOUT.avatar;
+          setAvatar(isAvatarUrl(rawAvatar) ? rawAvatar.trim() : "");
           const rawSkills = p.props.skills;
           if (Array.isArray(rawSkills)) {
             setSkills(
@@ -267,6 +317,7 @@ export function PageEditor({ onSaved }: Props) {
       });
     return () => {
       alive = false;
+      editorReadyRef.current = false;
       window.clearTimeout(autosaveTimerRef.current);
     };
   }, [id]);
@@ -288,9 +339,8 @@ export function PageEditor({ onSaved }: Props) {
 
   const kind = post.pageKind;
   const showEditor = kind === "article" || kind === "about";
-  const showAi = kind === "article" || kind === "about";
   const needsNameField = kind === "about";
-  const titlePlaceholder = "关于标题";
+  const titlePlaceholder = "首页署名";
   const crumbs = kind === "article" ? ancestorsOf(post.id, pages) : [];
   const childPages = pages.filter((p) => p.pageKind === "article" && p.parentId === post.id);
   const linkedChildIds = new Set([
@@ -317,31 +367,12 @@ export function PageEditor({ onSaved }: Props) {
     }
   };
 
-  const addSkill = () => {
-    const name = skillName.trim();
-    if (!name) {
-      return;
-    }
-    const next = [...skills, { name, color: skillColor }].slice(0, 12);
-    setSkills(next);
-    liveRef.current.skills = next;
-    setSkillName("");
-    scheduleAutosave();
-  };
-
-  const removeSkill = (index: number) => {
-    const next = skills.filter((_, i) => i !== index);
-    setSkills(next);
-    liveRef.current.skills = next;
-    scheduleAutosave();
-  };
-
   /** / 插入「子页面」块：建子页，块本身就是入口 */
   const createChildForLinkBlock = async (): Promise<PageLinkData> => {
     if (!post || post.pageKind !== "article") {
       throw new Error("只有文章可以建子页面");
     }
-    window.clearTimeout(autosaveTimerRef.current);
+    await suspendAutosave();
     await persist();
     const { post: child } = await api.createPost({
       title: "无标题",
@@ -367,13 +398,14 @@ export function PageEditor({ onSaved }: Props) {
     if (!post || post.pageKind !== "article") {
       return;
     }
-    window.clearTimeout(autosaveTimerRef.current);
+    await suspendAutosave();
     setSaving(true);
     setError("");
     try {
-      let body = post.body;
+      let body = draftBodyRef.current ?? post.body;
       try {
         body = await saveEditor(editorRef.current);
+        draftBodyRef.current = body;
       } catch {
         /* 用已有 body */
       }
@@ -406,6 +438,7 @@ export function PageEditor({ onSaved }: Props) {
       });
       setPost(saved);
       setTitle(saved.title);
+      draftBodyRef.current = saved.body;
       onSaved?.(saved);
       navigate(`/admin/p/${child.id}`);
     } catch (err) {
@@ -416,13 +449,7 @@ export function PageEditor({ onSaved }: Props) {
   };
 
   const statusLabel =
-    saveHint === "saving" || saving
-      ? "保存中…"
-      : saveHint === "saved"
-        ? "已保存"
-        : saveHint === "error"
-          ? null
-          : null;
+    saveHint === "saving" || saving ? "保存中…" : saveHint === "saved" ? "已保存" : null;
 
   return (
     <div className="workspace-editor flex h-full min-h-0 flex-col overflow-hidden bg-background">
@@ -465,7 +492,6 @@ export function PageEditor({ onSaved }: Props) {
                   const next = e.currentTarget.value;
                   setTitle(next);
                   liveRef.current.title = next;
-                  previewTreeTitle(post.id, next.trim() || "关于");
                   scheduleAutosave();
                 }}
                 className="h-9"
@@ -541,14 +567,14 @@ export function PageEditor({ onSaved }: Props) {
 
       {kind === "about" ? (
         <div className="shrink-0 space-y-4 border-b border-border/60 px-5 py-4">
-          <div className="flex flex-wrap items-start gap-4">
+          <div className="flex flex-wrap items-center gap-3">
             <div
               className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-full border border-border bg-muted"
               aria-hidden
             >
-              <AboutAvatar value={avatar} iconSize={28} className="size-full object-cover" />
+              <AboutAvatar value={avatar} iconSize={28} />
             </div>
-            <div className="min-w-0 flex-1 space-y-2">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
               <FilePick
                 compact
                 label={uploading ? "上传中…" : "上传头像"}
@@ -556,54 +582,44 @@ export function PageEditor({ onSaved }: Props) {
                 accept="image/*"
                 onFile={(file) => void onPickAvatar(file)}
               />
-              <Input
-                value={avatar}
-                onChange={(e) => {
-                  const next = e.currentTarget.value;
-                  setAvatar(next);
-                  liveRef.current.avatar = next;
-                  scheduleAutosave();
-                }}
-                placeholder="或填写图片地址"
-              />
+              {avatar ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 text-muted-foreground"
+                  onClick={() => {
+                    setAvatar("");
+                    liveRef.current.avatar = "";
+                    scheduleAutosave();
+                  }}
+                >
+                  清除
+                </Button>
+              ) : null}
             </div>
           </div>
           <div>
-            <p className="mb-2 text-xs font-medium text-muted-foreground">标签</p>
-            <div className="mb-2 flex flex-wrap gap-1.5">
-              {skills.map((skill, index) => (
-                <button
-                  key={`${skill.name}-${index}`}
-                  type="button"
-                  className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/50 px-2.5 py-1 text-xs"
-                  onClick={() => removeSkill(index)}
-                >
-                  {skill.name}
-                  <Close {...iconParkOutline} size={12} aria-hidden />
-                </button>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Input
-                value={skillName}
-                onChange={(e) => setSkillName(e.currentTarget.value)}
-                placeholder="新标签"
-                className="h-8 max-w-[160px]"
-              />
-              <select
-                className="h-8 rounded-md border border-border bg-background px-2 text-sm"
-                value={skillColor}
-                onChange={(e) => setSkillColor(e.currentTarget.value as SiteSkillColor)}
-              >
-                {SITE_SKILL_COLORS.map((color) => (
-                  <option key={color} value={color}>
-                    {color}
-                  </option>
-                ))}
-              </select>
-              <Button type="button" size="sm" variant="outline" onClick={addSkill}>
-                加上
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-xs font-medium text-muted-foreground">首页标签</p>
+              <Button type="button" size="sm" variant="outline" className="h-7" onClick={() => setSkillsOpen(true)}>
+                管理标签
               </Button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {skills.length ? (
+                skills.map((skill, index) => (
+                  <span
+                    key={`${skill.name}-${index}`}
+                    className="inline-flex items-center rounded-full border border-black/10 px-2.5 py-1 text-xs font-medium text-foreground/90"
+                    style={{ background: skillColorHex(skill.color) }}
+                  >
+                    {skill.name}
+                  </span>
+                ))
+              ) : (
+                <p className="text-xs text-muted-foreground">还没有标签，点「管理标签」添加。</p>
+              )}
             </div>
           </div>
         </div>
@@ -627,7 +643,7 @@ export function PageEditor({ onSaved }: Props) {
                   : undefined
               }
               aiAssist={
-                showAi
+                showEditor
                   ? {
                       onInvoke: ({ blockIndex }) => {
                         setInlineAi({ insertIndex: blockIndex });
@@ -636,6 +652,7 @@ export function PageEditor({ onSaved }: Props) {
                   : undefined
               }
               onChange={(document) => {
+                draftBodyRef.current = document;
                 if (kind === "article") {
                   const meta = metaFromEditorDocument(document, {
                     title: post.title !== "无标题" && post.title !== "未命名" ? post.title : undefined,
@@ -648,6 +665,7 @@ export function PageEditor({ onSaved }: Props) {
               }}
               onReady={(instance) => {
                 editorRef.current = instance;
+                editorReadyRef.current = true;
                 setEditorReady(true);
               }}
             />
@@ -674,13 +692,14 @@ export function PageEditor({ onSaved }: Props) {
             ) : null}
           </SoftScrollbar>
         ) : null}
-        {showAi && inlineAi && editorReady ? (
+        {showEditor && inlineAi && editorReady ? (
           <InlineAiAssist
             editor={editorRef.current}
             insertIndex={inlineAi.insertIndex}
             onClose={() => setInlineAi(null)}
             onAccepted={() => {
               setInlineAi(null);
+              draftBodyRef.current = null;
               scheduleAutosave();
             }}
           />
@@ -701,6 +720,19 @@ export function PageEditor({ onSaved }: Props) {
             setDraft(false);
             window.clearTimeout(autosaveTimerRef.current);
             await persist({ draft: false, tags: nextTags });
+          }}
+        />
+      ) : null}
+
+      {kind === "about" ? (
+        <AboutSkillsDialog
+          open={skillsOpen}
+          onOpenChange={setSkillsOpen}
+          skills={skills}
+          onSave={(next) => {
+            setSkills(next);
+            liveRef.current.skills = next;
+            scheduleAutosave();
           }}
         />
       ) : null}

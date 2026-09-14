@@ -44,6 +44,9 @@ function buildArticleForest(articles: PostListItem[]): TreeNode[] {
 }
 
 function pageLabel(page: PostListItem) {
+  if (page.pageKind === "about") {
+    return "关于";
+  }
   if (page.title && page.title !== "无标题" && page.title !== "未命名") {
     return page.title;
   }
@@ -105,7 +108,7 @@ export function PageTree({
         )}
         <NavLink
           to={`/admin/p/${page.id}`}
-          title={pageLabel(page)}
+          title={page.pageKind === "about" ? page.title || "关于" : pageLabel(page)}
           onClick={onCloseMobile}
           className={({ isActive }) =>
             cn(
@@ -167,27 +170,6 @@ export function PageTree({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      {!collapsed ? (
-        <div className="px-0.5">
-          <Button type="button" size="sm" className="h-8 w-full" onClick={() => onCreateArticle(null)}>
-            <Plus {...iconParkOutline} size={14} className="mr-1" />
-            页面
-          </Button>
-        </div>
-      ) : (
-        <div className="flex flex-col items-center gap-1">
-          <Button
-            type="button"
-            size="icon"
-            className="size-9"
-            title="新页面"
-            onClick={() => onCreateArticle(null)}
-          >
-            <Plus {...iconParkOutline} size={16} />
-          </Button>
-        </div>
-      )}
-
       <SoftScrollbar className="min-h-0 flex-1" contentClassName="space-y-4 pb-4">
         <nav className="space-y-4" aria-label="页面树">
           <div className="space-y-0.5">
@@ -206,13 +188,34 @@ export function PageTree({
               </p>
             ) : null}
             {articleForest.length === 0 && !collapsed ? (
-              <p className="px-2.5 text-xs text-muted-foreground">还没有页面，点上方新建</p>
+              <p className="px-2.5 text-xs text-muted-foreground">还没有页面，点下方新建</p>
             ) : (
               articleForest.map((node) => renderArticleNode(node, 0))
             )}
           </div>
         </nav>
       </SoftScrollbar>
+
+      {!collapsed ? (
+        <div className="mt-auto shrink-0 border-t border-sidebar-border pt-3">
+          <Button type="button" size="sm" className="h-8 w-full" onClick={() => onCreateArticle(null)}>
+            <Plus {...iconParkOutline} size={14} className="mr-1" />
+            页面
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-auto flex shrink-0 flex-col items-center border-t border-sidebar-border pt-3">
+          <Button
+            type="button"
+            size="icon"
+            className="size-9"
+            title="新页面"
+            onClick={() => onCreateArticle(null)}
+          >
+            <Plus {...iconParkOutline} size={16} />
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

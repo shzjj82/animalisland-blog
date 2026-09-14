@@ -1,7 +1,8 @@
 import { SITE_DESCRIPTION, SITE_NAME, emptyEditorDocument, type PostListItem } from "@myblog/shared";
-import { ExpandLeft, Home, Logout, MenuFold, MenuUnfold } from "@icon-park/react";
+import { ExpandLeft, Home, Logout, MenuFold, MenuUnfold, TagOne } from "@icon-park/react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
+import { CategoryManagerDialog } from "@/components/CategoryManagerDialog";
 import { Seo } from "@/components/Seo";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -9,10 +10,10 @@ import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { iconParkOutline } from "@/lib/iconPark";
-import { appendPageLink } from "@/lib/pageLinks";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { PageTree } from "@/workspace/PageTree";
+import { suspendWorkspaceAutosave } from "@/workspace/saveGate";
 import "@/admin.css";
 
 const SIDE_KEY = "myblog.workspace.sideCollapsed";
@@ -29,6 +30,7 @@ export function WorkspaceLayout() {
   const [mobileTreeOpen, setMobileTreeOpen] = useState(false);
   /** 侧栏删了当前打开页的子页时，强制重载编辑器以同步正文里的 pageLink */
   const [editorNonce, setEditorNonce] = useState(0);
+  const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem(SIDE_KEY) === "1";
@@ -89,37 +91,27 @@ export function WorkspaceLayout() {
   };
 
   const createArticle = async (parentId?: string | null) => {
-    const parent = parentId ? pages.find((p) => p.id === parentId) : undefined;
+    if (parentId) {
+      await suspendWorkspaceAutosave();
+      const { post } = await api.createChildPage(parentId);
+      await reloadTree();
+      if (routePageId === parentId) {
+        setEditorNonce((n) => n + 1);
+      }
+      navigate(`/admin/p/${post.id}`);
+      setMobileTreeOpen(false);
+      return;
+    }
     const { post } = await api.createPost({
       title: "无标题",
-      type: parent?.type || "life",
+      type: "life",
       pageKind: "article",
-      parentId: parentId ?? null,
+      parentId: null,
       summary: "",
       coverUrl: "",
       body: emptyEditorDocument(),
-      // 子页无独立草稿；顶层文章默认草稿
-      draft: parentId ? false : true,
+      draft: true,
     });
-    if (parentId) {
-      try {
-        const { post: parentPost } = await api.getById(parentId);
-        await api.updatePost(parentId, {
-          title: parentPost.title,
-          slug: parentPost.slug,
-          type: parentPost.type,
-          pageKind: "article",
-          parentId: parentPost.parentId,
-          summary: parentPost.summary,
-          coverUrl: parentPost.coverUrl,
-          props: parentPost.props,
-          body: appendPageLink(parentPost.body, post),
-          draft: parentPost.draft,
-        });
-      } catch {
-        /* 子页已建好，父文链接写入失败时可从侧栏进入 */
-      }
-    }
     await reloadTree();
     navigate(`/admin/p/${post.id}`);
     setMobileTreeOpen(false);
@@ -256,6 +248,16 @@ export function WorkspaceLayout() {
               <span className="text-xs font-medium text-muted-foreground">{dark ? "夜" : "日"}</span>
               <Switch checked={dark} onCheckedChange={setDark} aria-label="夜间模式" />
             </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setTagManagerOpen(true)}
+              title="标签管理"
+            >
+              <TagOne {...iconParkOutline} size={16} />
+              标签
+            </Button>
             <Button variant="ghost" size="sm" asChild>
               <Link to="/" title="回前台">
                 <Home {...iconParkOutline} size={16} />
@@ -273,6 +275,8 @@ export function WorkspaceLayout() {
           <Outlet context={{ reloadTree, pages, previewTreeTitle, editorNonce }} />
         </main>
       </div>
+
+      <CategoryManagerDialog open={tagManagerOpen} onOpenChange={setTagManagerOpen} />
     </div>
   );
 }

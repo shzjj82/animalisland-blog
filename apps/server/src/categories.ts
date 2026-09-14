@@ -8,6 +8,8 @@ import {
   normalizeTags,
   tagsFromProps,
   propsWithTags,
+  validateTagName,
+  validateTagSlug,
   type Category,
   type CategoryKind,
   type SiteSkillColor,
@@ -159,8 +161,25 @@ export function ensureCategoriesFromLabels(labels: string[]): string[] {
       out.push(existing.slug);
       continue;
     }
+    const nameCheck = validateTagName(label);
+    if (!nameCheck.ok) {
+      // 旧数据里不合法的标签名：尽量保留可读名，放宽到截断创建
+      const fallbackName = label.slice(0, 16).trim() || "标签";
+      const safeName = validateTagName(fallbackName).ok
+        ? fallbackName
+        : `标签${listCategories().length + 1}`;
+      const created = createCategory({
+        name: safeName,
+        hint: "",
+        color: SITE_SKILL_COLORS[listCategories().length % SITE_SKILL_COLORS.length] ?? "app-yellow",
+        kind: "article",
+        nav: true,
+      });
+      out.push(created.slug);
+      continue;
+    }
     const created = createCategory({
-      name: label,
+      name: nameCheck.value,
       hint: "",
       color: SITE_SKILL_COLORS[listCategories().length % SITE_SKILL_COLORS.length] ?? "app-yellow",
       kind: "article",
@@ -171,38 +190,22 @@ export function ensureCategoriesFromLabels(labels: string[]): string[] {
   return normalizeTags(out);
 }
 
-export function countPostsInCategory(slug: string): number {
-  const byType = (db.prepare("SELECT COUNT(*) AS n FROM posts WHERE type = ?").get(slug) as { n: number })
-    .n;
-  if (byType > 0) {
-    return byType;
-  }
-  // 多标签文章：props.tags 含该 slug
-  const rows = db
-    .prepare(`SELECT props FROM posts WHERE page_kind = 'article'`)
-    .all() as Array<{ props: string }>;
-  let n = 0;
-  for (const row of rows) {
-    let props: Record<string, unknown> = {};
-    try {
-      const parsed = JSON.parse(row.props || "{}") as unknown;
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        props = parsed as Record<string, unknown>;
-      }
-    } catch {
-      /* ignore */
-    }
-    if (tagsFromProps(props).includes(slug)) {
-      n += 1;
-    }
-  }
-  return n;
-}
-
 export function createCategory(input: UpsertCategoryInput): Category {
+  const nameCheck = validateTagName(input.name);
+  if (!nameCheck.ok) {
+    throw new Error(`TAG_NAME_INVALID:${nameCheck.error}`);
+  }
+  const slugCheck = validateTagSlug(input.slug ?? "", { allowEmpty: true });
+  if (!slugCheck.ok) {
+    throw new Error(`TAG_SLUG_INVALID:${slugCheck.error}`);
+  }
+  if (getCategoryByName(nameCheck.value)) {
+    throw new Error("TAG_NAME_EXISTS");
+  }
+
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
-  const slug = uniqueCategorySlug(input.slug || input.name);
+  const slug = uniqueCategorySlug(slugCheck.value || nameCheck.value);
   const sort =
     typeof input.sort === "number"
       ? input.sort
@@ -217,7 +220,7 @@ export function createCategory(input: UpsertCategoryInput): Category {
   ).run(
     id,
     slug,
-    input.name.trim(),
+    nameCheck.value,
     input.hint?.trim() ?? "",
     input.color,
     input.kind,
@@ -236,7 +239,20 @@ export function updateCategory(id: string, input: UpsertCategoryInput): Category
     return undefined;
   }
 
-  const slug = uniqueCategorySlug(input.slug || input.name, id);
+  const nameCheck = validateTagName(input.name);
+  if (!nameCheck.ok) {
+    throw new Error(`TAG_NAME_INVALID:${nameCheck.error}`);
+  }
+  const slugCheck = validateTagSlug(input.slug ?? "", { allowEmpty: true });
+  if (!slugCheck.ok) {
+    throw new Error(`TAG_SLUG_INVALID:${slugCheck.error}`);
+  }
+  const dup = getCategoryByName(nameCheck.value);
+  if (dup && dup.id !== id) {
+    throw new Error("TAG_NAME_EXISTS");
+  }
+
+  const slug = uniqueCategorySlug(slugCheck.value || nameCheck.value, id);
   const now = new Date().toISOString();
   const sort = typeof input.sort === "number" ? input.sort : existing.sort;
 
@@ -246,7 +262,7 @@ export function updateCategory(id: string, input: UpsertCategoryInput): Category
      WHERE id = ?`,
   ).run(
     slug,
-    input.name.trim(),
+    nameCheck.value,
     input.hint?.trim() ?? "",
     input.color,
     input.kind,
@@ -283,19 +299,60 @@ export function updateCategory(id: string, input: UpsertCategoryInput): Category
   return getCategoryById(id);
 }
 
+/** 从所有文章上卸掉该标签；若 type 指向它则改到剩余标签或兜底 */
+function detachCategoryFromPosts(slug: string): void {
+  const fallback =
+    listCategories().find((item) => item.slug !== slug && item.kind === "article")?.slug ?? "life";
+  const rows = db
+    .prepare(`SELECT id, type, props FROM posts WHERE page_kind = 'article'`)
+    .all() as Array<{ id: string; type: string; props: string }>;
+  const update = db.prepare(`UPDATE posts SET type = ?, props = ?, updated_at = ? WHERE id = ?`);
+  const now = new Date().toISOString();
+  for (const row of rows) {
+    let props: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(row.props || "{}") as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        props = parsed as Record<string, unknown>;
+      }
+    } catch {
+      props = {};
+    }
+    const tags = tagsFromProps(props);
+    const had = tags.includes(slug) || row.type === slug;
+    if (!had) {
+      continue;
+    }
+    const nextTags = tags.filter((tag) => tag !== slug);
+    const nextType =
+      row.type === slug ? nextTags[0] ?? fallback : getCategoryBySlug(row.type) ? row.type : nextTags[0] ?? fallback;
+    update.run(nextType, JSON.stringify(propsWithTags(props, nextTags)), now, row.id);
+  }
+}
+
 export function deleteCategory(id: string): boolean {
   const existing = getCategoryById(id);
   if (!existing) {
     return false;
   }
-  if (countPostsInCategory(existing.slug) > 0) {
-    throw new Error("CATEGORY_IN_USE");
-  }
-  if (existing.kind === "article" && listCategorySlugs("article").length <= 1) {
-    throw new Error("LAST_ARTICLE_CATEGORY");
-  }
+  // 允许删除：先从文章上卸掉该标签，再删分类
+  detachCategoryFromPosts(existing.slug);
   const result = db.prepare("DELETE FROM categories WHERE id = ?").run(id);
-  return result.changes > 0;
+  if (result.changes <= 0) {
+    return false;
+  }
+  // 一个都不剩时补一个兜底，避免发文/导航空转
+  if (listCategorySlugs("article").length === 0) {
+    createCategory({
+      name: "未分类",
+      slug: "uncategorized",
+      hint: "还没归类的笔记",
+      color: "app-yellow",
+      kind: "article",
+      nav: false,
+    });
+  }
+  return true;
 }
 
 ensureDefaultCategories();

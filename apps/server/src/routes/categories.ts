@@ -8,6 +8,7 @@ import {
   listCategories,
   updateCategory,
 } from "../categories.js";
+import { fail, ok } from "../http.js";
 
 export const categoriesRouter = Router();
 
@@ -47,55 +48,77 @@ function parseUpsert(raw: unknown): UpsertCategoryInput | null {
 categoriesRouter.get("/", (_req, res) => {
   // 管理端会改排序/显隐，不能公共缓存，否则上移下移后仍读到旧列表
   res.set("Cache-Control", "private, no-store");
-  res.json({ categories: listCategories() });
+  ok(res, { categories: listCategories() });
 });
 
 categoriesRouter.get("/:slug", (req, res) => {
   const category = getCategoryBySlug(req.params.slug);
   if (!category) {
-    res.status(404).json({ error: "NOT_FOUND" });
+    fail(res, "NOT_FOUND", 404);
     return;
   }
   res.set("Cache-Control", "private, no-store");
-  res.json({ category });
+  ok(res, { category });
 });
 
 categoriesRouter.post("/", requireAuth, (req, res) => {
   const parsed = parseUpsert(req.body);
   if (!parsed) {
-    res.status(400).json({ error: "INVALID_INPUT" });
+    fail(res, "INVALID_INPUT");
     return;
   }
-  res.status(201).json({ category: createCategory(parsed) });
+  try {
+    ok(res, { category: createCategory(parsed) }, 201);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "SERVER_ERROR";
+    if (
+      message.startsWith("TAG_NAME_INVALID:") ||
+      message.startsWith("TAG_SLUG_INVALID:") ||
+      message === "TAG_NAME_EXISTS"
+    ) {
+      fail(res, message);
+      return;
+    }
+    throw err;
+  }
 });
 
 categoriesRouter.put("/:id", requireAuth, (req, res) => {
   const parsed = parseUpsert(req.body);
   if (!parsed) {
-    res.status(400).json({ error: "INVALID_INPUT" });
+    fail(res, "INVALID_INPUT");
     return;
   }
-  const category = updateCategory(req.params.id, parsed);
-  if (!category) {
-    res.status(404).json({ error: "NOT_FOUND" });
-    return;
+  try {
+    const category = updateCategory(req.params.id, parsed);
+    if (!category) {
+      fail(res, "NOT_FOUND", 404);
+      return;
+    }
+    ok(res, { category });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "SERVER_ERROR";
+    if (
+      message.startsWith("TAG_NAME_INVALID:") ||
+      message.startsWith("TAG_SLUG_INVALID:") ||
+      message === "TAG_NAME_EXISTS"
+    ) {
+      fail(res, message);
+      return;
+    }
+    throw err;
   }
-  res.json({ category });
 });
 
 categoriesRouter.delete("/:id", requireAuth, (req, res) => {
   try {
     if (!deleteCategory(req.params.id)) {
-      res.status(404).json({ error: "NOT_FOUND" });
+      fail(res, "NOT_FOUND", 404);
       return;
     }
-    res.json({ ok: true });
+    ok(res, null);
   } catch (err) {
     const message = err instanceof Error ? err.message : "SERVER_ERROR";
-    if (message === "CATEGORY_IN_USE" || message === "LAST_ARTICLE_CATEGORY") {
-      res.status(400).json({ error: message });
-      return;
-    }
-    throw err;
+    fail(res, message);
   }
 });

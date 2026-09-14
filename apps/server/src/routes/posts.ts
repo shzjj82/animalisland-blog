@@ -3,13 +3,16 @@ import type { EditorJsDocument, PageKind } from "@myblog/shared";
 import { isPageKind, normalizeTags } from "@myblog/shared";
 import { optionalAuth, requireAuth } from "../auth.js";
 import { listCategories } from "../categories.js";
+import { fail, ok } from "../http.js";
 import {
+  createLinkedChild,
   createPost,
   deletePost,
   getPageByKind,
   getPostById,
   getPostBySlug,
   listAllTags,
+  listAncestors,
   listPosts,
   listWorkspaceTree,
   reorderPages,
@@ -116,11 +119,11 @@ function parseUpsert(raw: unknown): ParsedUpsert {
 postsRouter.get("/", optionalAuth, (req, res) => {
   if (req.query.tree === "1" || req.query.tree === "true") {
     if (!req.authed) {
-      res.status(401).json({ error: "UNAUTHORIZED" });
+      fail(res, "UNAUTHORIZED", 401);
       return;
     }
     const posts = listWorkspaceTree(true);
-    res.json({ posts, total: posts.length });
+    ok(res, { posts, total: posts.length });
     return;
   }
 
@@ -156,55 +159,74 @@ postsRouter.get("/", optionalAuth, (req, res) => {
   if (!req.authed) {
     res.set("Cache-Control", "public, max-age=30");
   }
-  res.json({ posts, total, page: page ?? 1, pageSize: pageSize ?? posts.length });
+  ok(res, { posts, total, page: page ?? 1, pageSize: pageSize ?? posts.length });
 });
 
 postsRouter.get("/workspace/specials", requireAuth, (_req, res) => {
-  res.json({
+  ok(res, {
     about: getPageByKind("about") ?? null,
   });
 });
 
 postsRouter.get("/tags", optionalAuth, (_req, res) => {
-  res.json({ tags: listAllTags() });
+  ok(res, { tags: listAllTags() });
 });
 
 postsRouter.post("/reorder", requireAuth, (req, res) => {
   const ids = (req.body as { ids?: unknown })?.ids;
   if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) {
-    res.status(400).json({ error: "INVALID_INPUT" });
+    fail(res, "INVALID_INPUT");
     return;
   }
   reorderPages(ids);
-  res.json({ ok: true });
+  ok(res, null);
 });
 
 postsRouter.get("/id/:id", requireAuth, (req, res) => {
   const post = getPostById(req.params.id);
   if (!post) {
-    res.status(404).json({ error: "NOT_FOUND" });
+    fail(res, "NOT_FOUND", 404);
     return;
   }
-  res.json({ post });
+  ok(res, { post });
 });
 
 postsRouter.get("/:slug", optionalAuth, (req, res) => {
-  const post = getPostBySlug(req.params.slug, Boolean(req.authed));
+  const includeDrafts = Boolean(req.authed);
+  const post = getPostBySlug(req.params.slug, includeDrafts);
   // 前台 /post/:slug 只服务普通文章；about 走工作区
   if (!post || post.pageKind !== "article") {
-    res.status(404).json({ error: "NOT_FOUND" });
+    fail(res, "NOT_FOUND", 404);
     return;
   }
   if (!req.authed) {
     res.set("Cache-Control", "public, max-age=60");
   }
-  res.json({ post });
+  const ancestors = listAncestors(post.id, includeDrafts);
+  const { posts: siblings } = listPosts({
+    pageKind: "article",
+    parentId: post.parentId ?? null,
+    includeDrafts,
+    treeOrder: true,
+  });
+  const { posts: children } = listPosts({
+    pageKind: "article",
+    parentId: post.id,
+    includeDrafts,
+    treeOrder: true,
+  });
+  ok(res, {
+    post,
+    ancestors,
+    siblings,
+    children: includeDrafts ? children : children.filter((item) => !item.draft),
+  });
 });
 
 postsRouter.post("/", requireAuth, (req, res) => {
   const parsed = parseUpsert(req.body);
   if (!parsed.ok) {
-    res.status(400).json({ error: parsed.error });
+    fail(res, parsed.error);
     return;
   }
   try {
@@ -212,7 +234,7 @@ postsRouter.post("/", requireAuth, (req, res) => {
     if (post.pageKind === "about") {
       syncSiteFromAboutPage(post);
     }
-    res.status(201).json({ post });
+    ok(res, { post }, 201);
   } catch (err) {
     const message = err instanceof Error ? err.message : "SERVER_ERROR";
     if (
@@ -221,7 +243,22 @@ postsRouter.post("/", requireAuth, (req, res) => {
       message === "INVALID_CATEGORY" ||
       message === "PAGE_KIND_FIXED"
     ) {
-      res.status(400).json({ error: message });
+      fail(res, message);
+      return;
+    }
+    throw err;
+  }
+});
+
+/** 侧栏建子页：创建子页 + 父文 pageLink，避免与打开中的编辑器竞态冲掉链接 */
+postsRouter.post("/id/:id/children", requireAuth, (req, res) => {
+  try {
+    const { child, parent } = createLinkedChild(req.params.id);
+    ok(res, { post: child, parent }, 201);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "SERVER_ERROR";
+    if (message === "INVALID_PARENT" || message === "INVALID_CATEGORY" || message === "PAGE_EXISTS") {
+      fail(res, message);
       return;
     }
     throw err;
@@ -231,23 +268,23 @@ postsRouter.post("/", requireAuth, (req, res) => {
 postsRouter.put("/:id", requireAuth, (req, res) => {
   const parsed = parseUpsert(req.body);
   if (!parsed.ok) {
-    res.status(400).json({ error: parsed.error });
+    fail(res, parsed.error);
     return;
   }
   try {
     const post = updatePost(req.params.id, parsed.value);
     if (!post) {
-      res.status(404).json({ error: "NOT_FOUND" });
+      fail(res, "NOT_FOUND", 404);
       return;
     }
     if (post.pageKind === "about") {
       syncSiteFromAboutPage(post);
     }
-    res.json({ post });
+    ok(res, { post });
   } catch (err) {
     const message = err instanceof Error ? err.message : "SERVER_ERROR";
-    if (message === "INVALID_CATEGORY" || message === "PAGE_KIND_FIXED") {
-      res.status(400).json({ error: message });
+    if (message === "INVALID_CATEGORY" || message === "PAGE_KIND_FIXED" || message === "EMPTY_BODY") {
+      fail(res, message);
       return;
     }
     throw err;
@@ -257,14 +294,14 @@ postsRouter.put("/:id", requireAuth, (req, res) => {
 postsRouter.delete("/:id", requireAuth, (req, res) => {
   try {
     if (!deletePost(req.params.id)) {
-      res.status(404).json({ error: "NOT_FOUND" });
+      fail(res, "NOT_FOUND", 404);
       return;
     }
-    res.json({ ok: true });
+    ok(res, null);
   } catch (err) {
     const message = err instanceof Error ? err.message : "SERVER_ERROR";
     if (message === "PAGE_FIXED") {
-      res.status(400).json({ error: message });
+      fail(res, message);
       return;
     }
     throw err;

@@ -92,7 +92,7 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
                 onChangeRef.current?.(data as EditorJsDocument);
               })
               .catch(() => undefined);
-          }, 180);
+          }, 320);
         },
         tools: {
           header: {
@@ -125,9 +125,6 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
               uploader: {
                 async uploadByFile(file: File) {
                   const { url } = await api.upload(file);
-                  return { success: 1, file: { url } };
-                },
-                async uploadByUrl(url: string) {
                   return { success: 1, file: { url } };
                 },
               },

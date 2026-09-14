@@ -1,0 +1,30 @@
+# 依赖与构建产物
+node_modules
+**/node_modules
+**/dist
+.pnpm-store
+*.tsbuildinfo
+
+# 运行时数据与密钥
+data
+uploads
+logs
+.env
+.env.*
+!.env.example
+
+# Git / IDE / 本地工具
+.git
+.gitignore
+.cursor
+.idea
+.vscode
+.pm2
+*.log
+.DS_Store
+
+# 文档与无关文件（构建不需要）
+**/*.md
+!README.md
+ecosystem.config.cjs
+agent-transcripts

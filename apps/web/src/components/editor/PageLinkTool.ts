@@ -1,5 +1,5 @@
 import type { BlockTool, BlockToolConstructorOptions } from "@editorjs/editorjs";
-import { PAGE_LINK_ICON_SVG, PAGE_LINK_TOOLBOX_SVG } from "@/lib/iconPark";
+import { NOTES_ICON_SVG, PAGE_LINK_TOOLBOX_SVG } from "@/lib/iconPark";
 
 export type PageLinkData = {
   pageId: string;
@@ -61,7 +61,7 @@ export class PageLinkTool implements BlockTool {
     const icon = document.createElement("span");
     icon.className = "cdx-page-link__icon";
     icon.setAttribute("aria-hidden", "true");
-    icon.innerHTML = PAGE_LINK_ICON_SVG;
+    icon.innerHTML = NOTES_ICON_SVG;
 
     const title = document.createElement("span");
     title.className = "cdx-page-link__title";

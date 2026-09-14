@@ -192,13 +192,15 @@ export function robotsTxt(origin: string): string {
 
 export function sitemapXml(origin: string): string {
   const { posts } = listPosts({ includeDrafts: false, pageKind: "article" });
+  // 只收录顶层文章；子页由正文 pageLink 发现，避免空「无标题」子页进地图
+  const topLevel = posts.filter((post) => !post.parentId);
   const staticPages = [
     { loc: "/", lastmod: undefined as string | undefined, changefreq: "daily", priority: "1.0" },
     { loc: "/notes", lastmod: undefined as string | undefined, changefreq: "daily", priority: "0.9" },
   ];
   const urls = [
     ...staticPages.map((page) => urlEntry(`${origin}${page.loc}`, page.lastmod, page.changefreq, page.priority)),
-    ...posts.map((post) =>
+    ...topLevel.map((post) =>
       urlEntry(`${origin}/post/${encodeURIComponent(post.slug)}`, post.updatedAt, "monthly", "0.6"),
     ),
   ];

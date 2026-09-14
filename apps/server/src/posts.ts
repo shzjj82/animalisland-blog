@@ -41,6 +41,10 @@ function parseBody(raw: string): EditorJsDocument {
   }
 }
 
+function bodyHasBlocks(body: EditorJsDocument): boolean {
+  return (body.blocks?.length ?? 0) > 0;
+}
+
 function parseProps(raw: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -98,6 +102,81 @@ function toListItem(row: Omit<PostRow, "body">): PostListItem {
   const { body: _body, ...post } = toPost({ ...row, body: "{}" });
   return post;
 }
+
+type AncestorRow = {
+  id: string;
+  parent_id: string | null;
+  draft: number;
+};
+
+/** 轻量祖先索引：避免 hasDraftAncestor 每次 getPostById 解析整篇 body */
+function loadAncestorIndex(): Map<string, AncestorRow> {
+  const rows = db
+    .prepare("SELECT id, parent_id, draft FROM posts")
+    .all() as AncestorRow[];
+  return new Map(rows.map((row) => [row.id, row]));
+}
+
+/** 子页没有独立草稿：若任一祖先是草稿，前台当作不可见 */
+function hasDraftAncestor(postId: string, index?: Map<string, AncestorRow>): boolean {
+  const map = index ?? loadAncestorIndex();
+  let current: string | null = map.get(postId)?.parent_id ?? null;
+  const seen = new Set<string>();
+  while (current) {
+    if (seen.has(current)) {
+      break;
+    }
+    seen.add(current);
+    const parent = map.get(current);
+    if (!parent) {
+      break;
+    }
+    if (parent.draft) {
+      return true;
+    }
+    current = parent.parent_id;
+  }
+  return false;
+}
+
+/** 祖先链（根 → 父），不含自身；供前台面包屑，避免拉全站列表 */
+export function listAncestors(postId: string, includeDrafts: boolean): PostListItem[] {
+  const index = loadAncestorIndex();
+  const chainIds: string[] = [];
+  let current: string | null = index.get(postId)?.parent_id ?? null;
+  const seen = new Set<string>();
+  while (current) {
+    if (seen.has(current)) {
+      break;
+    }
+    seen.add(current);
+    const parent = index.get(current);
+    if (!parent) {
+      break;
+    }
+    if (!includeDrafts && parent.draft) {
+      break;
+    }
+    chainIds.unshift(current);
+    current = parent.parent_id;
+  }
+  if (chainIds.length === 0) {
+    return [];
+  }
+  const placeholders = chainIds.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT id, slug, title, type, page_kind, parent_id, tree_sort, summary, cover_url, props, draft, published_at, created_at, updated_at
+       FROM posts WHERE id IN (${placeholders})`,
+    )
+    .all(...chainIds) as Omit<PostRow, "body">[];
+  const byId = new Map(rows.map((row) => [row.id, toListItem(row)]));
+  return chainIds.flatMap((id) => {
+    const item = byId.get(id);
+    return item ? [item] : [];
+  });
+}
+
 
 export function slugify(input: string): string {
   const base = input
@@ -230,7 +309,8 @@ export function listPosts(opts: {
     posts = posts.filter((p) => p.type === typeSlug || p.tags.includes(typeSlug));
   }
   if (!opts.includeDrafts) {
-    posts = posts.filter((p) => !hasDraftAncestor(p.id));
+    const ancestorIndex = loadAncestorIndex();
+    posts = posts.filter((p) => !hasDraftAncestor(p.id, ancestorIndex));
   }
 
   return { posts, total: posts.length };
@@ -243,27 +323,6 @@ export function listWorkspaceTree(includeDrafts: boolean): PostListItem[] {
     treeOrder: true,
   });
   return posts.filter((p) => p.pageKind === "about" || p.pageKind === "article");
-}
-
-/** 子页没有独立草稿：若任一祖先是草稿，前台当作不可见 */
-function hasDraftAncestor(postId: string): boolean {
-  let current: string | null = getPostById(postId)?.parentId ?? null;
-  const seen = new Set<string>();
-  while (current) {
-    if (seen.has(current)) {
-      break;
-    }
-    seen.add(current);
-    const parent = getPostById(current);
-    if (!parent) {
-      break;
-    }
-    if (parent.draft) {
-      return true;
-    }
-    current = parent.parentId;
-  }
-  return false;
 }
 
 export function getPostBySlug(slug: string, includeDrafts: boolean): Post | undefined {
@@ -473,6 +532,11 @@ export function updatePost(id: string, input: PostWriteInput): Post | undefined 
               "life")))
       : input.type;
 
+  // 防止空 autosave / 竞态把已有正文冲成空文档
+  if (!bodyHasBlocks(input.body) && bodyHasBlocks(existing.body)) {
+    throw new Error("EMPTY_BODY");
+  }
+
   db.prepare(
     `UPDATE posts SET
       slug = ?, title = ?, type = ?, page_kind = ?, parent_id = ?, tree_sort = ?,
@@ -521,6 +585,71 @@ function stripPageLinkFromParent(parentId: string, childId: string): void {
     now,
     parentId,
   );
+}
+
+/** 在父文正文末尾挂上子页入口（幂等）；用于侧栏建子页，避免 get→改→put 竞态 */
+export function appendPageLinkToParent(
+  parentId: string,
+  child: Pick<Post, "id" | "slug" | "title">,
+): Post | undefined {
+  const parent = getPostById(parentId);
+  if (!parent || parent.pageKind !== "article") {
+    return undefined;
+  }
+  const blocks = [...(parent.body.blocks ?? [])];
+  const exists = blocks.some(
+    (block) =>
+      block.type === "pageLink" &&
+      String((block.data as { pageId?: string }).pageId ?? "") === child.id,
+  );
+  if (exists) {
+    return parent;
+  }
+  const title = child.title?.trim() && child.title !== "无标题" ? child.title : "无标题";
+  const nextBody: EditorJsDocument = {
+    ...parent.body,
+    time: Date.now(),
+    blocks: [
+      ...blocks,
+      {
+        type: "pageLink",
+        data: { pageId: child.id, slug: child.slug, title },
+      },
+    ],
+  };
+  const now = new Date().toISOString();
+  db.prepare("UPDATE posts SET body = ?, updated_at = ? WHERE id = ?").run(
+    JSON.stringify(nextBody),
+    now,
+    parentId,
+  );
+  return getPostById(parentId);
+}
+
+/** 建子页并在同一事务里写入父文 pageLink */
+export function createLinkedChild(parentId: string): { child: Post; parent: Post } {
+  const run = db.transaction(() => {
+    const parent = getPostById(parentId);
+    if (!parent || parent.pageKind !== "article") {
+      throw new Error("INVALID_PARENT");
+    }
+    const child = createPost({
+      title: "无标题",
+      type: parent.type,
+      pageKind: "article",
+      parentId,
+      summary: "",
+      coverUrl: "",
+      body: emptyEditorDocument(),
+      draft: false,
+    });
+    const nextParent = appendPageLinkToParent(parentId, child);
+    if (!nextParent) {
+      throw new Error("INVALID_PARENT");
+    }
+    return { child, parent: nextParent };
+  });
+  return run();
 }
 
 export function deletePost(id: string): boolean {

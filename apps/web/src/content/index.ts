@@ -9,7 +9,6 @@
 export { NotionEditor, type NotionEditorProps } from "@/content/editor/NotionEditor";
 export {
   saveEditor,
-  applyEditorBlocks,
   insertEditorBlocksAt,
   removeEditorBlocksRange,
   markEditorPreviewBlocks,

@@ -8,11 +8,12 @@ import {
 import { runAiChat, runAiToEditor } from "../ai.js";
 import { requireAuth } from "../auth.js";
 import { aiConfigured, env } from "../env.js";
+import { fail, ok } from "../http.js";
 
 export const aiRouter = Router();
 
 aiRouter.get("/status", requireAuth, (_req, res) => {
-  res.json({
+  ok(res, {
     enabled: aiConfigured(),
     model: aiConfigured() ? env.aiModel : null,
     base: aiConfigured() ? env.aiApiBase : null,
@@ -32,7 +33,7 @@ function parseAttachments(value: unknown): AiAttachment[] {
     const name = String(raw.name ?? "附件").slice(0, 120);
     if (raw.kind === "image") {
       const url = String(raw.url ?? "").trim();
-      if (url.startsWith("http://") || url.startsWith("https://")) {
+      if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("/")) {
         out.push({ kind: "image", name, url });
       }
       continue;
@@ -77,12 +78,12 @@ function parseDocument(value: unknown): EditorJsDocument | undefined {
 aiRouter.post("/chat", requireAuth, (req, res, next) => {
   void (async () => {
     if (!aiConfigured()) {
-      res.status(503).json({ error: "AI_NOT_CONFIGURED" });
+      fail(res, "AI_NOT_CONFIGURED", 503);
       return;
     }
     const messages = parseMessages(req.body?.messages);
     if (messages.length === 0) {
-      res.status(400).json({ error: "AI_EMPTY_PROMPT" });
+      fail(res, "AI_EMPTY_PROMPT");
       return;
     }
     const result = await runAiChat({
@@ -90,19 +91,19 @@ aiRouter.post("/chat", requireAuth, (req, res, next) => {
       attachments: parseAttachments(req.body?.attachments),
       document: parseDocument(req.body?.document),
     });
-    res.json(result);
+    ok(res, result);
   })().catch(next);
 });
 
 aiRouter.post("/to-editor", requireAuth, (req, res, next) => {
   void (async () => {
     if (!aiConfigured()) {
-      res.status(503).json({ error: "AI_NOT_CONFIGURED" });
+      fail(res, "AI_NOT_CONFIGURED", 503);
       return;
     }
     const messages = parseMessages(req.body?.messages);
     if (messages.length === 0) {
-      res.status(400).json({ error: "AI_EMPTY_PROMPT" });
+      fail(res, "AI_EMPTY_PROMPT");
       return;
     }
     const apply = req.body?.apply === "append" || req.body?.apply === "replace" ? req.body.apply : undefined;
@@ -112,6 +113,6 @@ aiRouter.post("/to-editor", requireAuth, (req, res, next) => {
       document: parseDocument(req.body?.document),
       apply,
     });
-    res.json(result);
+    ok(res, result);
   })().catch(next);
 });

@@ -1,9 +1,11 @@
 import {
   SITE_SKILL_COLORS,
+  validateTagName,
+  validateTagSlug,
   type Category,
   type SiteSkillColor,
 } from "@myblog/shared";
-import { ArrowDownWideNarrow, ArrowUpWideNarrow, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Close, Plus, Edit } from "@icon-park/react";
 import { FormEvent, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,22 +21,9 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { useCategories } from "@/lib/categories";
+import { iconParkOutline } from "@/lib/iconPark";
+import { SKILL_COLOR_HEX } from "@/lib/skillColors";
 import { cn } from "@/lib/utils";
-
-const COLOR_HEX: Record<SiteSkillColor, string> = {
-  "app-pink": "#f8a6b2",
-  purple: "#b77dee",
-  "app-blue": "#889df0",
-  "app-yellow": "#f7cd67",
-  "app-orange": "#e59266",
-  "app-teal": "#82d5bb",
-  "app-green": "#8ac68a",
-  "app-red": "#fc736d",
-  "lime-green": "#d1da49",
-  "yellow-green": "#ecdf52",
-  brown: "#9a835a",
-  "warm-peach-pink": "#e18c6f",
-};
 
 function emptyForm() {
   return {
@@ -46,17 +35,31 @@ function emptyForm() {
   };
 }
 
+function mapApiError(message: string): string {
+  if (message.startsWith("TAG_NAME_INVALID:")) {
+    return message.slice("TAG_NAME_INVALID:".length);
+  }
+  if (message.startsWith("TAG_SLUG_INVALID:")) {
+    return message.slice("TAG_SLUG_INVALID:".length);
+  }
+  if (message === "TAG_NAME_EXISTS") {
+    return "已有同名标签。";
+  }
+  return "没存上，再试一次。";
+}
+
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 };
 
-/** 文章分类管理 */
+/** 标签（=分类）管理：改名、改路径、是否进导航、删除 */
 export function CategoryManagerDialog({ open, onOpenChange }: Props) {
   const { categories, reload } = useCategories();
   const [form, setForm] = useState(emptyForm);
   const [editing, setEditing] = useState<Category | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Category | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -77,6 +80,7 @@ export function CategoryManagerDialog({ open, onOpenChange }: Props) {
 
   const closeAll = () => {
     resetForm();
+    setDeleteTarget(null);
     onOpenChange(false);
   };
 
@@ -102,51 +106,58 @@ export function CategoryManagerDialog({ open, onOpenChange }: Props) {
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!form.name.trim()) {
-      setError("先写分类名。");
+    const nameCheck = validateTagName(form.name);
+    if (!nameCheck.ok) {
+      setError(nameCheck.error);
+      return;
+    }
+    const slugCheck = validateTagSlug(form.slug, { allowEmpty: true });
+    if (!slugCheck.ok) {
+      setError(slugCheck.error);
       return;
     }
     setSaving(true);
     setError("");
     try {
+      const payload = {
+        name: nameCheck.value,
+        slug: slugCheck.value || undefined,
+        hint: form.hint,
+        color: form.color,
+        nav: form.nav,
+        kind: "article" as const,
+      };
       if (editing) {
-        await api.updateCategory(editing.id, {
-          ...form,
-          kind: "article",
-          sort: editing.sort,
-        });
+        await api.updateCategory(editing.id, { ...payload, sort: editing.sort });
       } else {
-        await api.createCategory({ ...form, kind: "article" });
+        await api.createCategory(payload);
       }
       await reload();
       resetForm();
-    } catch {
-      setError("没存上，再试一次。");
+    } catch (err) {
+      setError(mapApiError(err instanceof Error ? err.message : ""));
     } finally {
       setSaving(false);
     }
   };
 
-  const remove = async (category: Category) => {
-    if (!confirm(`删掉分类「${category.name}」？里面还有文章的话删不掉。`)) {
+  const confirmDelete = async () => {
+    if (!deleteTarget) {
       return;
     }
+    setSaving(true);
+    setError("");
     try {
-      await api.deleteCategory(category.id);
+      await api.deleteCategory(deleteTarget.id);
       await reload();
-      if (editing?.id === category.id) {
+      if (editing?.id === deleteTarget.id) {
         resetForm();
       }
-      setError("");
-    } catch (err) {
-      const code = err instanceof Error ? err.message : "";
-      if (code === "CATEGORY_IN_USE") {
-        setError("这个分类里还有文章，先挪走再删。");
-      } else if (code === "LAST_ARTICLE_CATEGORY") {
-        setError("至少留一个文章分类。");
-      } else {
-        setError("没删掉。");
-      }
+      setDeleteTarget(null);
+    } catch {
+      setError("没删掉，再试一次。");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -158,14 +169,14 @@ export function CategoryManagerDialog({ open, onOpenChange }: Props) {
     }
 
     const next = [...ordered];
-    const current = next[index];
-    const swap = next[swapIndex];
+    const current = next[index]!;
+    const swap = next[swapIndex]!;
     next[index] = swap;
     next[swapIndex] = current;
 
     try {
       for (let i = 0; i < next.length; i += 1) {
-        const item = next[i];
+        const item = next[i]!;
         if (item.sort === i) {
           continue;
         }
@@ -189,17 +200,17 @@ export function CategoryManagerDialog({ open, onOpenChange }: Props) {
   return (
     <>
       <Dialog
-        open={open && !formOpen}
+        open={open && !formOpen && !deleteTarget}
         onOpenChange={(next) => {
           if (!next) closeAll();
         }}
       >
         <DialogContent className="max-w-lg sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>文章分类</DialogTitle>
+            <DialogTitle>标签管理</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            用来给文章归类。当前前台导航以「笔记」统一入口，不必再拆栏目链接。
+            标签就是分类：可改名称与路径（如 /travel），决定是否出现在导航，也可删除。
           </p>
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
           <ul className="max-h-[min(52vh,420px)] space-y-2 overflow-y-auto pr-1">
@@ -210,7 +221,7 @@ export function CategoryManagerDialog({ open, onOpenChange }: Props) {
               >
                 <span
                   className="size-2.5 shrink-0 rounded-full"
-                  style={{ background: COLOR_HEX[category.color] }}
+                  style={{ background: SKILL_COLOR_HEX[category.color] }}
                   aria-hidden
                 />
                 <div className="min-w-0 flex-1">
@@ -234,7 +245,7 @@ export function CategoryManagerDialog({ open, onOpenChange }: Props) {
                     disabled={index === 0}
                     onClick={() => void move(category, -1)}
                   >
-                    <ArrowUpWideNarrow className="size-3.5" />
+                    <ArrowUp {...iconParkOutline} size={14} />
                   </Button>
                   <Button
                     type="button"
@@ -244,7 +255,7 @@ export function CategoryManagerDialog({ open, onOpenChange }: Props) {
                     disabled={index === ordered.length - 1}
                     onClick={() => void move(category, 1)}
                   >
-                    <ArrowDownWideNarrow className="size-3.5" />
+                    <ArrowDown {...iconParkOutline} size={14} />
                   </Button>
                   <Button
                     type="button"
@@ -253,7 +264,7 @@ export function CategoryManagerDialog({ open, onOpenChange }: Props) {
                     title="编辑"
                     onClick={() => startEdit(category)}
                   >
-                    <Pencil className="size-3.5" />
+                    <Edit {...iconParkOutline} size={14} />
                   </Button>
                   <Button
                     type="button"
@@ -261,9 +272,12 @@ export function CategoryManagerDialog({ open, onOpenChange }: Props) {
                     variant="ghost"
                     className="text-destructive hover:text-destructive"
                     title="删除"
-                    onClick={() => void remove(category)}
+                    onClick={() => {
+                      setError("");
+                      setDeleteTarget(category);
+                    }}
                   >
-                    <Trash2 className="size-3.5" />
+                    <Close {...iconParkOutline} size={14} />
                   </Button>
                 </div>
               </li>
@@ -274,8 +288,8 @@ export function CategoryManagerDialog({ open, onOpenChange }: Props) {
               完成
             </Button>
             <Button type="button" onClick={openCreate}>
-              <Plus className="size-4" />
-              新建分类
+              <Plus {...iconParkOutline} size={14} className="mr-1" />
+              新建标签
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -289,31 +303,35 @@ export function CategoryManagerDialog({ open, onOpenChange }: Props) {
       >
         <DialogContent className="max-w-lg sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{editing ? "编辑分类" : "新建分类"}</DialogTitle>
+            <DialogTitle>{editing ? "编辑标签" : "新建标签"}</DialogTitle>
           </DialogHeader>
           <form className="flex flex-col gap-3.5" onSubmit={(event) => void onSubmit(event)}>
             <div className="space-y-2">
-              <Label htmlFor="cat-name">名称</Label>
+              <Label htmlFor="tag-name">名称</Label>
               <Input
-                id="cat-name"
+                id="tag-name"
                 value={form.name}
                 onChange={(e) => setForm((prev) => ({ ...prev, name: e.currentTarget.value }))}
-                placeholder="比如旅行"
+                placeholder="比如旅行、读书（2–16 字）"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="cat-slug">链接别名</Label>
-              <Input
-                id="cat-slug"
-                value={form.slug}
-                onChange={(e) => setForm((prev) => ({ ...prev, slug: e.currentTarget.value }))}
-                placeholder="可空，默认跟名称走"
-              />
+              <Label htmlFor="tag-slug">路径</Label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">/</span>
+                <Input
+                  id="tag-slug"
+                  value={form.slug}
+                  onChange={(e) => setForm((prev) => ({ ...prev, slug: e.currentTarget.value }))}
+                  placeholder="可空，默认跟名称走"
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground">前台地址形如 /travel，不能用保留路径或纯数字。</p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="cat-hint">导航短句</Label>
+              <Label htmlFor="tag-hint">导航短句</Label>
               <Input
-                id="cat-hint"
+                id="tag-hint"
                 value={form.hint}
                 onChange={(e) => setForm((prev) => ({ ...prev, hint: e.currentTarget.value }))}
                 placeholder="顶栏下一行的小字"
@@ -321,7 +339,7 @@ export function CategoryManagerDialog({ open, onOpenChange }: Props) {
             </div>
             <div className="space-y-2">
               <Label>颜色</Label>
-              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="分类颜色">
+              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="标签颜色">
                 {SITE_SKILL_COLORS.map((color) => (
                   <button
                     key={color}
@@ -330,7 +348,7 @@ export function CategoryManagerDialog({ open, onOpenChange }: Props) {
                       "size-7 rounded-full border-2 border-transparent shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)] transition-transform hover:scale-105",
                       form.color === color && "ring-2 ring-ring ring-offset-2 ring-offset-background",
                     )}
-                    style={{ background: COLOR_HEX[color] }}
+                    style={{ background: SKILL_COLOR_HEX[color] }}
                     title={color}
                     aria-label={color}
                     aria-checked={form.color === color}
@@ -341,9 +359,9 @@ export function CategoryManagerDialog({ open, onOpenChange }: Props) {
               </div>
             </div>
             <div className="flex items-center justify-between gap-3">
-              <Label htmlFor="cat-nav">出现在导航</Label>
+              <Label htmlFor="tag-nav">出现在导航</Label>
               <Switch
-                id="cat-nav"
+                id="tag-nav"
                 checked={form.nav}
                 onCheckedChange={(nav) => setForm((prev) => ({ ...prev, nav }))}
               />
@@ -360,6 +378,33 @@ export function CategoryManagerDialog({ open, onOpenChange }: Props) {
           </form>
         </DialogContent>
       </Dialog>
+
+      <Dialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(next) => {
+          if (!next) setDeleteTarget(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>删除标签「{deleteTarget?.name}」？</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            删除后：导航与筛选里不再出现；已挂这个标签的文章会自动去掉它。路径 /{deleteTarget?.slug}{" "}
+            也会失效。
+          </p>
+          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          <DialogFooter className="mx-0 mb-0 border-0 bg-transparent p-0">
+            <Button type="button" variant="outline" disabled={saving} onClick={() => setDeleteTarget(null)}>
+              取消
+            </Button>
+            <Button type="button" variant="destructive" disabled={saving} onClick={() => void confirmDelete()}>
+              {saving ? "删除中…" : "确认删除"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
+

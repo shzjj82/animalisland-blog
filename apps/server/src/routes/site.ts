@@ -6,6 +6,7 @@ import {
   type SiteSkill,
 } from "@myblog/shared";
 import { requireAuth } from "../auth.js";
+import { fail, ok } from "../http.js";
 import { getAbout, saveAbout } from "../site.js";
 
 export const siteRouter = Router();
@@ -55,14 +56,14 @@ function readAbout(input: unknown): SiteAbout | null {
 
 siteRouter.get("/", (_req, res) => {
   res.set("Cache-Control", "public, max-age=60");
-  res.json({ about: getAbout() });
+  ok(res, { about: getAbout() });
 });
 
 siteRouter.put("/", requireAuth, (req, res) => {
   const about = readAbout(req.body);
   if (!about || !about.name) {
-    res.status(400).json({ error: "INVALID_INPUT" });
+    fail(res, "INVALID_INPUT");
     return;
   }
-  res.json({ about: saveAbout(about) });
+  ok(res, { about: saveAbout(about) });
 });

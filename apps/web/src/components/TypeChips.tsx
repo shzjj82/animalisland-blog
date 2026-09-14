@@ -25,7 +25,10 @@ export function TypeChips(props: TypeChipsProps) {
 
   return (
     <div
-      className={cn("flex flex-wrap items-center gap-2", className)}
+      className={cn(
+        "inline-grid max-w-full grid-flow-col items-stretch gap-2 [grid-auto-columns:minmax(0,1fr)]",
+        className,
+      )}
       role="radiogroup"
       aria-label="文章分类"
     >
@@ -34,9 +37,10 @@ export function TypeChips(props: TypeChipsProps) {
           type="button"
           size="sm"
           variant={value === "all" ? "default" : "outline"}
+          className="min-w-0 justify-center px-3"
           onClick={() => select("all")}
         >
-          全部
+          <span className="truncate">全部</span>
         </Button>
       ) : null}
       {categories.map((item) => (
@@ -45,9 +49,10 @@ export function TypeChips(props: TypeChipsProps) {
           type="button"
           size="sm"
           variant={value === item.slug ? "default" : "outline"}
+          className="min-w-0 justify-center px-3"
           onClick={() => select(item.slug)}
         >
-          {item.name}
+          <span className="truncate">{item.name}</span>
         </Button>
       ))}
     </div>
