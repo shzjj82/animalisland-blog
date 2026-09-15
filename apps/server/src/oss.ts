@@ -1,33 +1,26 @@
 import crypto from "node:crypto";
+import { createRequire } from "node:module";
 import type OSS from "ali-oss";
 import { env, ossConfigured } from "./env.js";
 
+const require = createRequire(import.meta.url);
+
 let client: OSS | null = null;
-let OSSCtor: (typeof import("ali-oss"))["default"] | null = null;
 
-async function loadOssCtor(): Promise<(typeof import("ali-oss"))["default"]> {
-  if (!OSSCtor) {
-    const mod = await import("ali-oss");
-    OSSCtor = mod.default;
-  }
-  return OSSCtor;
-}
-
-async function getClient(): Promise<OSS> {
+function getClient(): OSS {
   if (!ossConfigured()) {
     throw new Error("OSS_NOT_CONFIGURED");
   }
-  if (!client) {
-    const OSS = await loadOssCtor();
-    client = new OSS({
-      region: env.ossRegion,
-      accessKeyId: env.ossAccessKeyId,
-      accessKeySecret: env.ossAccessKeySecret,
-      bucket: env.ossBucket,
-      secure: true,
-      authorizationV4: true,
-    });
-  }
+  if (client) return client;
+  const OSSCtor = require("ali-oss") as typeof import("ali-oss");
+  client = new OSSCtor({
+    region: env.ossRegion,
+    accessKeyId: env.ossAccessKeyId,
+    accessKeySecret: env.ossAccessKeySecret,
+    bucket: env.ossBucket,
+    secure: true,
+    authorizationV4: true,
+  });
   return client;
 }
 
@@ -49,7 +42,7 @@ export async function uploadImageToOss(file: {
   const prefix = env.ossPrefix || "blog";
   const key = `${prefix}/${year}/${month}/${crypto.randomUUID()}${file.ext}`;
 
-  const oss = await getClient();
+  const oss = getClient();
   await oss.put(key, file.buffer, {
     mime: file.mimetype,
     headers: {
