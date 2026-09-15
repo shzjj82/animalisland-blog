@@ -698,10 +698,22 @@
   gap: 8px;
 }
 
+.ai-inline-preview-copy {
+  min-width: 0;
+  flex: 1 1 160px;
+}
+
 .ai-inline-preview-label {
   margin: 0;
   font-size: 12px;
   color: var(--muted-foreground, #78716c);
+}
+
+.ai-inline-preview-note {
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: color-mix(in oklab, var(--muted-foreground, #78716c) 85%, transparent);
 }
 
 .ai-inline-preview-actions {
@@ -712,13 +724,108 @@
 }
 
 .notion-editor .ce-block.ai-preview-block {
-  border-radius: 10px;
-  background: color-mix(in oklab, var(--foreground, #1c1917) 4%, transparent);
-  box-shadow: inset 3px 0 0 0 color-mix(in oklab, var(--foreground, #1c1917) 28%, transparent);
+  /* 整段预览轻轻铺一层底，不做每行左边线，避免「一条条切块」 */
+  background: color-mix(in oklab, #d98c3b 5.5%, transparent);
+  border-radius: 0;
+  box-shadow: none;
 }
 
-.notion-editor .ce-block.ai-preview-block + .ce-block.ai-preview-block {
-  margin-top: 2px;
+/* 预览确认前先藏掉块左侧 + / 拖拽柄，减少干扰 */
+.notion-editor .ce-block.ai-preview-block .ce-toolbar,
+.notion-editor.codex-editor--narrow .ce-block.ai-preview-block .ce-toolbar {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* AI 预览/生成内容禁止出现表单输入控件 */
+.notion-editor .ce-block.ai-preview-block input,
+.notion-editor .ce-block.ai-preview-block textarea,
+.notion-editor .ce-block.ai-preview-block select,
+.notion-editor .ce-block.ai-preview-block button {
+  display: none !important;
+}
+
+.notion-editor .ce-block.ai-preview-block [contenteditable="false"] {
+  caret-color: transparent;
+  outline: none;
+  cursor: default;
+}
+
+.notion-editor .ce-block.ai-preview-block [contenteditable="false"][data-placeholder]:empty::before,
+.notion-editor .ce-block.ai-preview-block [data-placeholder]:empty::before {
+  content: none !important;
+}
+
+.notion-editor .ce-block:not(.ai-preview-block) + .ce-block.ai-preview-block {
+  border-radius: 10px 10px 0 0;
+}
+
+.notion-editor .ce-block.ai-preview-block:has(+ .ce-block:not(.ai-preview-block)),
+.notion-editor .ce-block.ai-preview-block:last-child {
+  border-radius: 0 0 10px 10px;
+}
+
+.notion-editor .ce-block:not(.ai-preview-block) + .ce-block.ai-preview-block:has(+ .ce-block:not(.ai-preview-block)),
+.notion-editor .ce-block:not(.ai-preview-block) + .ce-block.ai-preview-block:last-child {
+  border-radius: 10px;
+}
+
+/* AI / 手工块：引用不要长得像大输入框（库默认 min-height:158px） */
+.editor-holder .cdx-quote {
+  margin: 10px 0;
+  padding: 2px 0 2px 14px;
+  border: 0;
+  border-radius: 0;
+  border-left: 3px solid color-mix(in oklab, #d98c3b 70%, transparent);
+  background: transparent;
+}
+
+.editor-holder .cdx-quote .cdx-input,
+.editor-holder .cdx-quote__text,
+.editor-holder .cdx-quote__caption {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.editor-holder .cdx-quote__text {
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  font-size: 16px;
+  line-height: 1.7;
+  font-weight: 600;
+  color: color-mix(in oklab, var(--foreground, #1c1917) 78%, transparent);
+}
+
+.editor-holder .cdx-quote__caption {
+  margin-top: 6px;
+  padding: 0 !important;
+  font-size: 13px;
+  opacity: 0.72;
+}
+
+.editor-holder .cdx-quote__caption:empty {
+  display: none !important;
+}
+
+.editor-holder .cdx-list {
+  margin: 4px 0 8px;
+  padding-left: 1.35em;
+}
+
+.editor-holder .cdx-list__item {
+  padding: 2px 0;
+  line-height: 1.75;
+}
+
+.editor-holder .ce-delimiter {
+  margin: 18px 0;
+  line-height: 1;
+  text-align: center;
+  letter-spacing: 0.35em;
+  opacity: 0.45;
 }
 
 .ai-float > * {

@@ -105,9 +105,12 @@ export function InlineAiAssist({ editor, insertIndex, onClose, onAccepted }: Pro
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [anchor, setAnchor] = useState(() => measureAnchor(insertIndex));
-  const [preview, setPreview] = useState<{ startIndex: number; count: number; blockIds: string[] } | null>(
-    null,
-  );
+  const [preview, setPreview] = useState<{
+    startIndex: number;
+    count: number;
+    blockIds: string[];
+    note?: string;
+  } | null>(null);
   const lastPromptRef = useRef("");
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
@@ -258,9 +261,17 @@ export function InlineAiAssist({ editor, insertIndex, onClose, onAccepted }: Pro
       }
       const inserted = await insertEditorBlocksAt(editor, blocks, insertIndex);
       markEditorPreviewBlocks(inserted.blockIds, true);
-      setPreview(inserted);
+      setPreview({ ...inserted, note: result.note });
       setPhase("preview");
       setAnchor(measureAnchor(insertIndex));
+      const firstId = inserted.blockIds[0];
+      if (firstId) {
+        requestAnimationFrame(() => {
+          document
+            .querySelector(`.ce-block[data-id="${firstId}"]`)
+            ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        });
+      }
     } catch (err) {
       setError(aiErrorMessage(err instanceof Error ? err.message : "生成失败"));
       setPhase("error");
@@ -435,7 +446,10 @@ export function InlineAiAssist({ editor, insertIndex, onClose, onAccepted }: Pro
 
         {phase === "preview" ? (
           <div className="ai-inline-preview-bar">
-            <p className="ai-inline-preview-label">预览已插入正文 · 尚未确认</p>
+            <div className="ai-inline-preview-copy">
+              <p className="ai-inline-preview-label">预览已插入正文 · 尚未确认</p>
+              {preview?.note ? <p className="ai-inline-preview-note">{preview.note}</p> : null}
+            </div>
             <div className="ai-inline-preview-actions">
               <Button type="button" variant="ghost" size="sm" onClick={() => void discardAndClose()}>
                 丢弃

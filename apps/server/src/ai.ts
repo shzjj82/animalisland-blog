@@ -25,23 +25,33 @@ const TO_EDITOR_SYSTEM = `你是「小岛日记」的 Editor.js 排版技能（N
 
 允许的 type 与 data：
 - header: { text: string, level: 1|2|3 }
-- paragraph: { text: string }  （可含简单 HTML：b/i/a/code）
+- paragraph: { text: string }  （可含简单 HTML：b/i/a/code；关键词用 <b>，术语可用 <code>；短代码片段写在 <code> 里）
 - list: { style: "ordered"|"unordered", items: string[] }
-- quote: { text: string, caption?: string }
-- code: { code: string, language?: string }
-- delimiter: {}
 - image: { file: { url: string }, caption?: string, withBorder?: false, stretched?: false, withBackground?: false }
 - embed: { service: string, source: string, embed: string, width?: number, height?: number, caption?: string }
+
+不要输出 type=code（会挂 textarea）。
+不要输出 type=quote（编辑器引用块是双输入框）；金句请写成 paragraph，例如用 <b>…</b> 强调。
+不要输出 type=delimiter（分隔线块）；小节之间直接用 header / 空一行语义的短 paragraph 衔接即可。
+不要输出空 paragraph / 空 header，不要输出任何 input/textarea/select/button/form。
+
+排版（重要，直接影响可读性）：
+- 超过约 120 字时，优先拆成「小标题 + 短段落 + 列表」，避免连续 3 个以上纯 paragraph。
+- 讲解概念、步骤、要点时用 list；有先后用 ordered，并列用 unordered。
+- 适合强调的一句原则/提醒写成 paragraph，并用 <b>…</b>，不要用 quote/code/delimiter 块。
+- 段落宜短：单段通常不超过 3 句；需要强调时在 paragraph 内用 <b>…</b>。
+- 不要用 markdown（#、-、1.、**）；结构一律用上述 block type。
+- 严禁输出任何表单控件：禁止 <input>、<textarea>、<select>、<button>、<form>，也不要模拟输入框样式的占位块；空段落不要输出。
 
 规则：
 1. 中文，自然个人博客语气。
 2. 图片只能使用附件里给出的 url，禁止编造。
-3. apply=append（默认，光标处插入）：只生成局部内容（续写、一段话、列表、小节等），不要整篇重写；除非用户明确要求写大标题，否则不要用 level 1 header 开头。
-4. apply=replace：整篇成稿时可用，第一块可用 level 1 标题。
+3. apply=append（默认，光标处插入）：只生成局部内容（续写、一段话、列表、小节等），不要整篇重写；除非用户明确要求写大标题，否则不要用 level 1 header 开头；可用 level 2/3。
+4. apply=replace：整篇成稿时可用，第一块可用 level 1 标题，并合理使用 header/list。
 5. 综合用户指令与正文上下文来写，不要只复述最后一句。
 6. 若提供了可用图片 URL：正文里用 image 块插入这些图（file.url 必须完全等于给定 URL），并写简短 caption；不要编造其它图片地址。
 7. 若提供了文本附件：吸收其内容再写成博客语气，不要大段原文粘贴。
-8. blocks 不能为空；不要输出未列出的 type。`;
+8. blocks 不能为空；不要输出未列出的 type；不要输出空 paragraph / 空 header。`;
 
 type ChatContent =
   | { type: "text"; text: string }
@@ -66,7 +76,19 @@ function summarizeDocument(document?: EditorJsDocument): string {
       return `${index + 1}. [paragraph] ${String(data.text ?? "").slice(0, 240)}`;
     }
     if (block.type === "list") {
-      const items = Array.isArray(data.items) ? data.items.join(" / ") : "";
+      const rawItems = Array.isArray(data.items) ? data.items : [];
+      const items = rawItems
+        .map((item) => {
+          if (typeof item === "string") {
+            return item;
+          }
+          if (item && typeof item === "object" && "content" in item) {
+            return String((item as { content: unknown }).content ?? "");
+          }
+          return "";
+        })
+        .filter(Boolean)
+        .join(" / ");
       return `${index + 1}. [list ${data.style ?? "unordered"}] ${items.slice(0, 240)}`;
     }
     if (block.type === "quote") {
@@ -129,12 +151,60 @@ const ALLOWED_TYPES = new Set([
   "header",
   "paragraph",
   "list",
-  "quote",
-  "code",
-  "delimiter",
   "image",
   "embed",
 ]);
+
+/** 去掉 AI 可能塞进正文的表单控件标签 */
+function scrubFormControls(html: string): string {
+  return html
+    .replace(/<\s*(input|textarea|select|option|button|form|label)(\s[^>]*)?>/gi, "")
+    .replace(/<\s*\/\s*(input|textarea|select|option|button|form|label)\s*>/gi, "")
+    .replace(/\b(contenteditable|data-placeholder)\s*=\s*(['"]).*?\2/gi, "")
+    .trim();
+}
+
+function scrubRichText(value: unknown): string {
+  return scrubFormControls(String(value ?? ""));
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** 代码块会挂载 textarea，AI 产物一律改成段落里的 <code> */
+function codeToParagraph(code: string): EditorJsBlock | null {
+  const raw = code.replace(/\r\n/g, "\n").trim();
+  if (!raw) {
+    return null;
+  }
+  const html = `<code>${escapeHtml(raw).replace(/\n/g, "<br>")}</code>`;
+  return { type: "paragraph", data: { text: html } };
+}
+
+/** 转成 @editorjs/list v2 节点，避免 string[] 在编辑器里显示异常 */
+function normalizeListItems(items: unknown): Array<{ content: string; meta: Record<string, unknown>; items: [] }> {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+  return items
+    .map((item) => {
+      if (typeof item === "string") {
+        const content = scrubRichText(item);
+        return content ? { content, meta: {}, items: [] as [] } : null;
+      }
+      if (item && typeof item === "object" && "content" in item) {
+        const content = scrubRichText((item as { content: unknown }).content);
+        return content ? { content, meta: {}, items: [] as [] } : null;
+      }
+      return null;
+    })
+    .filter((item): item is { content: string; meta: Record<string, unknown>; items: [] } => Boolean(item));
+}
 
 function sanitizeBlocks(value: unknown, allowedImageUrls: Set<string>): EditorJsBlock[] {
   if (!Array.isArray(value)) {
@@ -146,12 +216,64 @@ function sanitizeBlocks(value: unknown, allowedImageUrls: Set<string>): EditorJs
       continue;
     }
     const raw = item as { type?: unknown; data?: unknown };
-    const type = String(raw.type ?? "");
-    if (!ALLOWED_TYPES.has(type)) {
+    let type = String(raw.type ?? "");
+    if (!ALLOWED_TYPES.has(type) && type !== "code" && type !== "quote") {
       continue;
     }
     const data =
       raw.data && typeof raw.data === "object" ? { ...(raw.data as Record<string, unknown>) } : {};
+
+    // 禁止 AI 挂载带 textarea 的 code 工具
+    if (type === "code") {
+      const converted = codeToParagraph(String(data.code ?? ""));
+      if (converted) {
+        blocks.push(converted);
+      }
+      continue;
+    }
+
+    // 禁止 AI 挂载 Quote（双 cdx-input），改成强调段落
+    if (type === "quote") {
+      const text = scrubRichText(data.text);
+      const caption = scrubRichText(data.caption);
+      if (!text) {
+        continue;
+      }
+      const body = caption
+        ? `<b>${text}</b><br><i>${caption}</i>`
+        : `<b>${text}</b>`;
+      blocks.push({ type: "paragraph", data: { text: body } });
+      continue;
+    }
+
+    // delimiter 直接丢弃（不插入 ce-delimiter）
+    if (type === "delimiter") {
+      continue;
+    }
+
+    if (type === "header") {
+      const level = Number(data.level);
+      data.level = level === 1 || level === 2 || level === 3 ? level : 2;
+      data.text = scrubRichText(data.text);
+      if (!data.text) {
+        continue;
+      }
+    }
+    if (type === "paragraph") {
+      data.text = scrubRichText(data.text);
+      if (!data.text) {
+        continue;
+      }
+    }
+    if (type === "list") {
+      const style = data.style === "ordered" ? "ordered" : "unordered";
+      const items = normalizeListItems(data.items);
+      if (items.length === 0) {
+        continue;
+      }
+      data.style = style;
+      data.items = items;
+    }
     if (type === "image") {
       const file = data.file as { url?: string } | undefined;
       const url = file?.url?.trim() ?? "";
@@ -159,6 +281,12 @@ function sanitizeBlocks(value: unknown, allowedImageUrls: Set<string>): EditorJs
         continue;
       }
       data.file = { url };
+      if (typeof data.caption === "string") {
+        data.caption = scrubRichText(data.caption);
+      }
+    }
+    if (type === "embed" && typeof data.caption === "string") {
+      data.caption = scrubRichText(data.caption);
     }
     blocks.push({ type, data });
   }
@@ -282,12 +410,13 @@ export async function runAiToEditor(input: AiToEditorInput): Promise<AiToEditorR
   const appendix = [
     contextAppendix(input.document, attachments),
     `期望应用方式：${input.apply === "append" ? "append" : "replace"}`,
-    "请根据以上对话整理成完整 Editor.js 文章 blocks。",
+    "请根据以上对话整理成完整 Editor.js 文章 blocks；多用 header / list 做出层次，少用连续纯 paragraph；不要用 quote/code/delimiter。",
   ].join("\n\n");
 
   const skillUser: AiChatMessage = {
     role: "user",
-    content: "请执行技能：把我们的对话整理成 Editor.js blocks，并填写到编辑器。",
+    content:
+      "请执行技能：把我们的对话整理成 Editor.js blocks 并填写到编辑器。注意用小标题、列表和短引用提升可读性，不要整篇都是段落。",
   };
   const packed = [...messages, skillUser];
 
