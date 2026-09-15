@@ -248,11 +248,11 @@ export function InlineAiAssist({ editor, insertIndex, onClose, onAccepted }: Pro
     setPhase("loading");
     setError("");
     try {
-      const document = await saveEditor(editor);
+      const editorDocument = await saveEditor(editor);
       const result = await api.aiToEditor({
         messages: [{ role: "user", content: promptText }],
         attachments: payloadAttachments(attach),
-        document,
+        document: editorDocument,
         apply: "append",
       });
       const blocks = result.blocks as EditorJsBlock[];
@@ -267,7 +267,7 @@ export function InlineAiAssist({ editor, insertIndex, onClose, onAccepted }: Pro
       const firstId = inserted.blockIds[0];
       if (firstId) {
         requestAnimationFrame(() => {
-          document
+          window.document
             .querySelector(`.ce-block[data-id="${firstId}"]`)
             ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
         });
