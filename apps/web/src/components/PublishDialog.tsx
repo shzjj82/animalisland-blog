@@ -132,9 +132,9 @@ export function PublishDialog({
       if (message.startsWith("TAG_NAME_INVALID:")) {
         setError(message.slice("TAG_NAME_INVALID:".length));
       } else if (message === "TAG_NAME_EXISTS") {
-        setError("已有同名标签。");
+        setError("已有同名分类。");
       } else {
-        setError("创建标签失败");
+        setError("创建分类失败");
       }
     } finally {
       setCreating(false);
@@ -145,12 +145,12 @@ export function PublishDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md gap-4">
         <DialogHeader>
-          <DialogTitle>{mode === "publish" ? "发布文章" : "编辑标签"}</DialogTitle>
+          <DialogTitle>{mode === "publish" ? "发布文章" : "编辑分类"}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            选择标签（可多选）。输入新名字后回车或点添加；名称需 2–16 字且含文字，会进导航。
+            选择分类（可多选）。输入新名字后回车或点添加；名称需 2–16 字且含文字，会进导航。
           </p>
 
           {selected.length ? (
@@ -172,13 +172,13 @@ export function PublishDialog({
               })}
             </div>
           ) : (
-            <p className="text-xs text-muted-foreground">还没选标签，也可以直接发布。</p>
+            <p className="text-xs text-muted-foreground">还没选分类，也可以直接发布。</p>
           )}
 
           <div className="flex gap-2">
             <Input
               value={draft}
-              placeholder="新建标签…"
+              placeholder="新建分类…"
               className="h-9"
               disabled={creating}
               onChange={(e) => setDraft(e.currentTarget.value)}
@@ -204,9 +204,9 @@ export function PublishDialog({
 
           <div className="max-h-48 space-y-1 overflow-auto rounded-lg border border-border/70 p-2">
             {loading ? (
-              <p className="px-1 py-2 text-xs text-muted-foreground">加载标签…</p>
+              <p className="px-1 py-2 text-xs text-muted-foreground">加载分类…</p>
             ) : options.length === 0 ? (
-              <p className="px-1 py-2 text-xs text-muted-foreground">暂无标签，先在上面创建一个。</p>
+              <p className="px-1 py-2 text-xs text-muted-foreground">暂无分类，先在上面创建一个。</p>
             ) : (
               options.map((item) => {
                 const active = selected.includes(item.slug);
@@ -255,7 +255,7 @@ export function PublishDialog({
               })();
             }}
           >
-            {busy ? "处理中…" : mode === "publish" ? "确认发布" : "保存标签"}
+            {busy ? "处理中…" : mode === "publish" ? "确认发布" : "保存分类"}
           </Button>
         </DialogFooter>
       </DialogContent>

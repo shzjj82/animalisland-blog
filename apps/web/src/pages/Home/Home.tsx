@@ -1,4 +1,4 @@
-import { DEFAULT_ABOUT, SITE_DESCRIPTION, SITE_NAME, type PostListItem } from "@myblog/shared";
+import { DEFAULT_ABOUT, SITE_DESCRIPTION, SITE_NAME, type SiteSkillColor } from "@myblog/shared";
 import { ArrowRight } from "@icon-park/react";
 import { Button, Card, Divider, Modal, Typewriter } from "animal-island-ui";
 import { useEffect, useState } from "react";
@@ -10,13 +10,13 @@ import { PostCards } from "@/components/PostCards";
 import { Seo } from "@/components/Seo";
 import { api } from "@/lib/api";
 import { iconParkOutline } from "@/lib/iconPark";
-import type { BlogColor } from "./posts";
+import { usePublishedArticles } from "@/lib/usePublishedArticles";
 
 function Home() {
   const navigate = useNavigate();
   const location = useLocation();
   const [introOpen, setIntroOpen] = useState(false);
-  const [posts, setPosts] = useState<PostListItem[]>([]);
+  const { posts } = usePublishedArticles();
   const [about, setAbout] = useState(DEFAULT_ABOUT);
 
   useEffect(() => {
@@ -33,17 +33,11 @@ function Home() {
   };
 
   useEffect(() => {
-    // 前台只列顶层文章；子文从主文里的页面链接进入（Notion 同款）
-    void api
-      .listPosts({ pageKind: "article", parentId: null })
-      .then((data) => setPosts(data.posts.filter((item) => !item.draft)))
-      .catch(() => setPosts([]));
     void api
       .getSite()
       .then((data) => setAbout(data.about))
       .catch(() => setAbout(DEFAULT_ABOUT));
   }, []);
-
   useEffect(() => {
     const id = location.hash.replace("#", "");
     if (!id) {
@@ -55,7 +49,7 @@ function Home() {
     return () => window.clearTimeout(timer);
   }, [location.hash]);
 
-  const stats: { label: string; value: string; color: BlogColor }[] = [
+  const stats: { label: string; value: string; color: SiteSkillColor }[] = [
     { label: "文章", value: String(posts.length), color: "app-yellow" },
     { label: "岛民", value: "1", color: "app-teal" },
     { label: "更新节奏", value: "慢", color: "yellow-green" },

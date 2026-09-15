@@ -1,30 +1,16 @@
-import type { PostListItem } from "@myblog/shared";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { BlogShell } from "@/components/BlogShell";
 import { PostCards } from "@/components/PostCards";
 import { Seo } from "@/components/Seo";
 import { TypeChips } from "@/components/TypeChips";
-import { api } from "@/lib/api";
 import { useCategories } from "@/lib/categories";
+import { usePublishedArticles } from "@/lib/usePublishedArticles";
 
 /** 顶层文章列表；可用分类筛选；子文从主文链接进入 */
 export function NotesPage() {
   const { articleCategories } = useCategories();
-  const [posts, setPosts] = useState<PostListItem[]>([]);
+  const { posts, error } = usePublishedArticles();
   const [filter, setFilter] = useState<string | "all">("all");
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    window.scrollTo({ top: 0, behavior: "auto" });
-    setError("");
-    void api
-      .listPosts({ pageKind: "article", parentId: null })
-      .then((data) => setPosts(data.posts.filter((item) => !item.draft)))
-      .catch(() => {
-        setPosts([]);
-        setError("文章暂时读不出来。");
-      });
-  }, []);
 
   const visible = useMemo(() => {
     if (filter === "all") {

@@ -1,6 +1,7 @@
 import type { Request } from "express";
 import { SITE_DESCRIPTION, SITE_NAME, siteTitle } from "@myblog/shared";
 import { env } from "./env.js";
+import { getCategoryBySlug, listCategories } from "./categories.js";
 import { getPostBySlug, listPosts } from "./posts.js";
 import { getAbout } from "./site.js";
 
@@ -129,10 +130,25 @@ export function metaForRequest(req: Request): PageMeta {
     return {
       status: 200,
       title: "笔记",
-      description: "按层级整理的页面",
+      description: "小岛上写下的文章",
       path: "/notes",
       type: "website",
     };
+  }
+
+  // 分类页 /:slug（排除已处理路径）
+  if (path.length > 1 && !path.slice(1).includes("/")) {
+    const slug = decodeURIComponent(path.slice(1));
+    const category = getCategoryBySlug(slug);
+    if (category && category.kind === "article") {
+      return {
+        status: 200,
+        title: category.name,
+        description: category.hint?.trim() || `${category.name}相关笔记`,
+        path: `/${category.slug}`,
+        type: "website",
+      };
+    }
   }
 
   return {
@@ -194,9 +210,18 @@ export function sitemapXml(origin: string): string {
   const { posts } = listPosts({ includeDrafts: false, pageKind: "article" });
   // 只收录顶层文章；子页由正文 pageLink 发现，避免空「无标题」子页进地图
   const topLevel = posts.filter((post) => !post.parentId);
+  const categoryPages = listCategories()
+    .filter((item) => item.kind === "article" && item.nav)
+    .map((item) => ({
+      loc: `/${item.slug}`,
+      lastmod: undefined as string | undefined,
+      changefreq: "weekly",
+      priority: "0.7",
+    }));
   const staticPages = [
     { loc: "/", lastmod: undefined as string | undefined, changefreq: "daily", priority: "1.0" },
     { loc: "/notes", lastmod: undefined as string | undefined, changefreq: "daily", priority: "0.9" },
+    ...categoryPages,
   ];
   const urls = [
     ...staticPages.map((page) => urlEntry(`${origin}${page.loc}`, page.lastmod, page.changefreq, page.priority)),

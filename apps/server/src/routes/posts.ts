@@ -11,11 +11,9 @@ import {
   getPageByKind,
   getPostById,
   getPostBySlug,
-  listAllTags,
   listAncestors,
   listPosts,
   listWorkspaceTree,
-  reorderPages,
   updatePost,
 } from "../posts.js";
 import { syncSiteFromAboutPage } from "../site.js";
@@ -168,20 +166,6 @@ postsRouter.get("/workspace/specials", requireAuth, (_req, res) => {
   });
 });
 
-postsRouter.get("/tags", optionalAuth, (_req, res) => {
-  ok(res, { tags: listAllTags() });
-});
-
-postsRouter.post("/reorder", requireAuth, (req, res) => {
-  const ids = (req.body as { ids?: unknown })?.ids;
-  if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) {
-    fail(res, "INVALID_INPUT");
-    return;
-  }
-  reorderPages(ids);
-  ok(res, null);
-});
-
 postsRouter.get("/id/:id", requireAuth, (req, res) => {
   const post = getPostById(req.params.id);
   if (!post) {
@@ -283,7 +267,7 @@ postsRouter.put("/:id", requireAuth, (req, res) => {
     ok(res, { post });
   } catch (err) {
     const message = err instanceof Error ? err.message : "SERVER_ERROR";
-    if (message === "INVALID_CATEGORY" || message === "PAGE_KIND_FIXED" || message === "EMPTY_BODY") {
+    if (message === "INVALID_CATEGORY" || message === "PAGE_KIND_FIXED" || message === "EMPTY_BODY" || message === "INVALID_PARENT") {
       fail(res, message);
       return;
     }

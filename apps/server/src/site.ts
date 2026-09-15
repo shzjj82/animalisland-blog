@@ -1,8 +1,7 @@
 import {
   DEFAULT_ABOUT,
-  emptyEditorDocument,
-  isSiteSkillColor,
   normalizeEditorDocument,
+  isSiteSkillColor,
   type SiteAbout,
   type SiteSkill,
 } from "@myblog/shared";
@@ -17,6 +16,7 @@ type SiteRow = {
 };
 
 type AboutPageRow = {
+  id: string;
   title: string;
   body: string;
   props: string;
@@ -61,15 +61,6 @@ function parseProps(raw: string): Record<string, unknown> {
   return {};
 }
 
-function toAbout(row: SiteRow): SiteAbout {
-  return {
-    name: row.about_name,
-    body: normalizeEditorDocument(row.about_body),
-    avatar: row.about_avatar,
-    skills: parseSkills(row.skills),
-  };
-}
-
 function aboutFromPage(row: AboutPageRow): SiteAbout {
   const props = parseProps(row.props ?? "{}");
   return {
@@ -80,7 +71,16 @@ function aboutFromPage(row: AboutPageRow): SiteAbout {
   };
 }
 
-function seedIfEmpty() {
+function toAbout(row: SiteRow): SiteAbout {
+  return {
+    name: row.about_name,
+    body: normalizeEditorDocument(row.about_body),
+    avatar: row.about_avatar,
+    skills: parseSkills(row.skills),
+  };
+}
+
+function seedSiteIfEmpty() {
   const existing = db.prepare("SELECT id FROM site WHERE id = 1").get() as { id: number } | undefined;
   if (existing) {
     return;
@@ -96,85 +96,65 @@ function seedIfEmpty() {
   );
 }
 
-seedIfEmpty();
+seedSiteIfEmpty();
 
 function getAboutPageRow(): AboutPageRow | undefined {
-  return db.prepare("SELECT title, body, props FROM posts WHERE page_kind = 'about' LIMIT 1").get() as
-    | AboutPageRow
-    | undefined;
+  return db
+    .prepare("SELECT id, title, body, props FROM posts WHERE page_kind = 'about' LIMIT 1")
+    .get() as AboutPageRow | undefined;
 }
 
+/** 唯一读源：about 页；仅在页尚未创建时回落 site（启动迁移前） */
 export function getAbout(): SiteAbout {
   const page = getAboutPageRow();
   if (page) {
-    const fromPage = aboutFromPage(page);
-    if (fromPage.body.blocks.length > 0) {
-      return fromPage;
-    }
-    const row = db.prepare("SELECT * FROM site WHERE id = 1").get() as SiteRow | undefined;
-    if (row) {
-      const fromSite = toAbout(row);
-      return {
-        ...fromPage,
-        body: fromSite.body.blocks.length ? fromSite.body : fromPage.body,
-        avatar: fromPage.avatar || fromSite.avatar,
-        skills: fromPage.skills.length ? fromPage.skills : fromSite.skills,
-        name: fromPage.name || fromSite.name,
-      };
-    }
-    return fromPage;
+    return aboutFromPage(page);
   }
   const row = db.prepare("SELECT * FROM site WHERE id = 1").get() as SiteRow | undefined;
   return row ? toAbout(row) : DEFAULT_ABOUT;
 }
 
-export function saveAbout(input: SiteAbout): SiteAbout {
+function mirrorSite(about: SiteAbout): void {
   db.prepare(
     `UPDATE site SET about_name = ?, about_body = ?, about_avatar = ?, skills = ?
      WHERE id = 1`,
-  ).run(input.name, JSON.stringify(input.body), input.avatar, JSON.stringify(input.skills));
+  ).run(about.name, JSON.stringify(about.body), about.avatar, JSON.stringify(about.skills));
+}
 
-  const page = db.prepare("SELECT id, props FROM posts WHERE page_kind = 'about' LIMIT 1").get() as
-    | { id: string; props: string }
-    | undefined;
+/** 写入 about 页为权威源，并镜像到 site（兼容旧备份） */
+export function saveAbout(input: SiteAbout): SiteAbout {
+  const page = getAboutPageRow();
+  const now = new Date().toISOString();
   if (page) {
     const props = {
       ...parseProps(page.props),
       avatar: input.avatar,
       skills: input.skills,
     };
-    const now = new Date().toISOString();
     db.prepare(
       `UPDATE posts SET title = ?, body = ?, props = ?, draft = 0, updated_at = ?,
         published_at = COALESCE(published_at, ?)
        WHERE id = ?`,
     ).run(input.name, JSON.stringify(input.body), JSON.stringify(props), now, now, page.id);
   }
-
+  mirrorSite(input);
   return getAbout();
 }
 
-/** 从 about 页 props/body 同步回 site（工作区保存后调用） */
+/** 工作区保存 about 页后：镜像到 site，不再反向覆盖页正文 */
 export function syncSiteFromAboutPage(page: {
   title: string;
   body: unknown;
   props: Record<string, unknown>;
 }): void {
-  const avatar =
-    typeof page.props.avatar === "string" && page.props.avatar.trim()
-      ? page.props.avatar
-      : DEFAULT_ABOUT.avatar;
-  const skills = parseSkills(page.props.skills ?? DEFAULT_ABOUT.skills);
-  const nextBody = normalizeEditorDocument(page.body);
-  const existing = db.prepare("SELECT about_body FROM site WHERE id = 1").get() as
-    | { about_body: string }
-    | undefined;
-  const prevBody = existing ? normalizeEditorDocument(existing.about_body) : emptyEditorDocument();
-  // 避免「空编辑器自动保存」把仍有内容的 site.about_body 冲掉
-  const bodyToStore =
-    nextBody.blocks.length > 0 || prevBody.blocks.length === 0 ? nextBody : prevBody;
-  db.prepare(
-    `UPDATE site SET about_name = ?, about_body = ?, about_avatar = ?, skills = ?
-     WHERE id = 1`,
-  ).run(page.title, JSON.stringify(bodyToStore), avatar, JSON.stringify(skills));
+  const about: SiteAbout = {
+    name: page.title || DEFAULT_ABOUT.name,
+    body: normalizeEditorDocument(page.body),
+    avatar:
+      typeof page.props.avatar === "string" && page.props.avatar.trim()
+        ? page.props.avatar
+        : DEFAULT_ABOUT.avatar,
+    skills: parseSkills(page.props.skills ?? DEFAULT_ABOUT.skills),
+  };
+  mirrorSite(about);
 }

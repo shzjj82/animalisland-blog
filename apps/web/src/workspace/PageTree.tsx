@@ -5,6 +5,7 @@ import { NavLink } from "react-router-dom";
 import { SoftScrollbar } from "@/components/SoftScrollbar";
 import { Button } from "@/components/ui/button";
 import { iconParkOutline } from "@/lib/iconPark";
+import { pageTitle } from "@/lib/pageTree";
 import { cn } from "@/lib/utils";
 
 type TreeNode = PostListItem & { children: TreeNode[] };
@@ -41,16 +42,6 @@ function buildArticleForest(articles: PostListItem[]): TreeNode[] {
     }));
 
   return walk(null);
-}
-
-function pageLabel(page: PostListItem) {
-  if (page.pageKind === "about") {
-    return "关于";
-  }
-  if (page.title && page.title !== "无标题" && page.title !== "未命名") {
-    return page.title;
-  }
-  return "无标题";
 }
 
 export function PageTree({
@@ -108,7 +99,7 @@ export function PageTree({
         )}
         <NavLink
           to={`/admin/p/${page.id}`}
-          title={page.pageKind === "about" ? page.title || "关于" : pageLabel(page)}
+          title={pageTitle(page)}
           onClick={onCloseMobile}
           className={({ isActive }) =>
             cn(
@@ -123,7 +114,7 @@ export function PageTree({
           <Icon {...iconParkOutline} size={16} className="shrink-0 opacity-80" />
           {!collapsed ? (
             <span className="min-w-0 truncate">
-              {pageLabel(page)}
+              {pageTitle(page)}
               {!page.parentId && page.draft ? (
                 <span className="ml-1 text-[10px] font-normal text-muted-foreground">草稿</span>
               ) : null}
@@ -135,7 +126,7 @@ export function PageTree({
             type="button"
             className="inline-grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover:opacity-100"
             title="新建子页面"
-            aria-label={`在 ${pageLabel(page)} 下新建子页面`}
+            aria-label={`在 ${pageTitle(page)} 下新建子页面`}
             onClick={() => {
               setExpanded((prev) => ({ ...prev, [page.id]: true }));
               onCreateArticle(page.id);
@@ -149,7 +140,7 @@ export function PageTree({
             type="button"
             className="inline-grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
             title="删除"
-            aria-label={`删除 ${pageLabel(page)}`}
+            aria-label={`删除 ${pageTitle(page)}`}
             onClick={() => onDelete(page)}
           >
             <Delete {...iconParkOutline} size={14} />

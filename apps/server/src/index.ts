@@ -4,8 +4,8 @@ import compression from "compression";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import express from "express";
+import { db } from "./db.js";
 import { ensureDataDirs, env, repoRoot } from "./env.js";
-import "./db.js";
 import "./categories.js";
 import { ensureWorkspacePages } from "./posts.js";
 import { authRouter } from "./routes/auth.js";
@@ -44,7 +44,12 @@ app.use(
 );
 
 app.get("/api/health", (_req, res) => {
-  ok(res, { status: "up" });
+  try {
+    db.prepare("SELECT 1 AS ok").get();
+    ok(res, { status: "up", db: "up" });
+  } catch {
+    fail(res, "DB_DOWN", 503, "数据库不可用");
+  }
 });
 
 app.use("/api/auth", authRouter);

@@ -6,16 +6,14 @@ import {
   type Post,
   type PostListItem,
   type SiteSkill,
-  type UpsertPostInput,
 } from "@myblog/shared";
 import { Notes } from "@icon-park/react";
 import EditorJS from "@editorjs/editorjs";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useOutletContext, useParams } from "react-router-dom";
-import { AboutAvatar, isAvatarUrl } from "@/components/AboutAvatar";
+import { isAvatarUrl } from "@/components/AboutAvatar";
 import { AboutSkillsDialog } from "@/components/AboutSkillsDialog";
 import { SoftScrollbar } from "@/components/SoftScrollbar";
-import { FilePick } from "@/components/FilePick";
 import type { PageLinkData } from "@/components/editor/PageLinkTool";
 import { InlineAiAssist } from "@/components/InlineAiAssist";
 import { PublishDialog } from "@/components/PublishDialog";
@@ -25,11 +23,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { ensureTitleHeader, metaFromEditorDocument } from "@/lib/editorMeta";
-import { appendPageLink, syncPageLinkTitle } from "@/lib/pageLinks";
-import { registerWorkspaceSaveGate } from "@/workspace/saveGate";
-import { iconParkOutline, PageLinkIcon } from "@/lib/iconPark";
-import { skillColorHex } from "@/lib/skillColors";
+import { appendPageLink } from "@/lib/pageLinks";
+import { iconParkOutline } from "@/lib/iconPark";
 import { ancestorsOf, pageTitle } from "@/lib/pageTree";
+import { AboutEditorPanel } from "@/workspace/AboutEditorPanel";
+import { LooseChildPages } from "@/workspace/LooseChildPages";
+import { usePagePersist, type PageLiveSnap } from "@/workspace/usePagePersist";
 
 type WorkspaceOutlet = {
   reloadTree: () => Promise<PostListItem[]>;
@@ -41,20 +40,13 @@ type Props = {
   onSaved?: (post: Post) => void;
 };
 
-const AUTOSAVE_MS = 900;
-
 export function PageEditor({ onSaved }: Props) {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const { pages, previewTreeTitle } = useOutletContext<WorkspaceOutlet>();
   const editorRef = useRef<EditorJS | null>(null);
-  const previewTreeTitleRef = useRef(previewTreeTitle);
-  previewTreeTitleRef.current = previewTreeTitle;
-  const onSavedRef = useRef(onSaved);
-  onSavedRef.current = onSaved;
-  const autosaveTimerRef = useRef(0);
-  const saveSeqRef = useRef(0);
-  const persistChainRef = useRef(Promise.resolve());
+  const editorReadyRef = useRef(false);
+  const draftBodyRef = useRef<EditorJsDocument | null>(null);
 
   const [editorReady, setEditorReady] = useState(false);
   const [inlineAi, setInlineAi] = useState<{ insertIndex: number } | null>(null);
@@ -74,179 +66,37 @@ export function PageEditor({ onSaved }: Props) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [saveHint, setSaveHint] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  /** 斜杠刚建、尚在编辑器未入库 body 的子页 id */
   const [pendingLinkIds, setPendingLinkIds] = useState<string[]>([]);
   const [editorEpoch, setEditorEpoch] = useState(0);
 
-  const liveRef = useRef({
-    post: null as Post | null,
+  const liveRef = useRef<PageLiveSnap>({
+    post: null,
     title: "",
     slug: "",
     draft: true,
-    tags: [] as string[],
+    tags: [],
     avatar: DEFAULT_ABOUT.avatar,
-    skills: DEFAULT_ABOUT.skills as SiteSkill[],
+    skills: DEFAULT_ABOUT.skills,
   });
   liveRef.current = { post, title, slug, draft, tags, avatar, skills };
-  const editorReadyRef = useRef(false);
-  /** onChange 已 save 过的正文，autosave 复用，避免再调一次 editor.save() */
-  const draftBodyRef = useRef<EditorJsDocument | null>(null);
 
-  const persist = useCallback(async (opts?: { draft?: boolean; tags?: string[] }) => {
-    const run = async () => {
-      const snap = liveRef.current;
-      const current = snap.post;
-      if (!current) {
-        return;
-      }
-      const kind = current.pageKind;
-      const showEditor = kind === "article" || kind === "about";
-      const asDraft = opts?.draft ?? snap.draft;
-      const nextTags = opts?.tags ?? snap.tags;
-      const seq = ++saveSeqRef.current;
-
-      setSaving(true);
-      setSaveHint("saving");
-      setError("");
-      try {
-        let body = current.body;
-        // 优先用 onChange 缓存；否则再 save。未就绪时绝不能用空文档覆盖
-        if (showEditor && editorReadyRef.current) {
-          if (draftBodyRef.current) {
-            body = draftBodyRef.current;
-          } else if (editorRef.current) {
-            try {
-              body = await saveEditor(editorRef.current);
-              draftBodyRef.current = body;
-            } catch {
-              body = current.body;
-            }
-          }
-        }
-
-        if (seq !== saveSeqRef.current) {
-          return;
-        }
-
-        let payload: UpsertPostInput;
-        if (kind === "about") {
-          payload = {
-            title: snap.title.trim() || "关于",
-            slug: snap.slug.trim() || undefined,
-            type: current.type,
-            pageKind: "about",
-            summary: "",
-            coverUrl: "",
-            props: { avatar: snap.avatar.trim() || DEFAULT_ABOUT.avatar, skills: snap.skills },
-            body: body.blocks.length ? body : emptyEditorDocument(),
-            draft: false,
-          };
-        } else {
-          const meta = metaFromEditorDocument(body, {
-            title:
-              current.title !== "无标题" && current.title !== "未命名" ? current.title : undefined,
-            summary: current.summary,
-            coverUrl: current.coverUrl,
-          });
-          payload = {
-            title: meta.title,
-            slug: snap.slug.trim() || undefined,
-            type: current.type,
-            pageKind: "article",
-            parentId: current.parentId,
-            summary: meta.summary,
-            coverUrl: meta.coverUrl,
-            props: current.props,
-            tags: current.parentId ? [] : nextTags,
-            body,
-            // 子页永远不是草稿；顶层仅手动发布才改 draft
-            draft: current.parentId ? false : asDraft,
-          };
-        }
-
-        if (seq !== saveSeqRef.current) {
-          return;
-        }
-
-        const { post: saved } = await api.updatePost(current.id, payload);
-        if (seq !== saveSeqRef.current) {
-          return;
-        }
-
-        if (kind === "article" && saved.parentId && saved.title !== current.title) {
-          try {
-            const { post: parentPost } = await api.getById(saved.parentId);
-            const nextBody = syncPageLinkTitle(parentPost.body, saved.id, saved.title, saved.slug);
-            if (nextBody) {
-              await api.updatePost(parentPost.id, {
-                title: parentPost.title,
-                slug: parentPost.slug,
-                type: parentPost.type,
-                pageKind: "article",
-                parentId: parentPost.parentId,
-                summary: parentPost.summary,
-                coverUrl: parentPost.coverUrl,
-                props: parentPost.props,
-                body: nextBody,
-                draft: parentPost.draft,
-              });
-            }
-          } catch {
-            /* ignore */
-          }
-        }
-
-        if (seq !== saveSeqRef.current) {
-          return;
-        }
-
-        setPost(saved);
-        setDraft(saved.draft);
-        setTags(saved.tags ?? []);
-        setSlug(saved.slug);
-        setTitle(saved.title);
-        previewTreeTitleRef.current(saved.id, saved.title);
-        setPendingLinkIds([]);
-        setSaveHint("saved");
-        onSavedRef.current?.(saved);
-      } catch (err) {
-        if (seq !== saveSeqRef.current) {
-          return;
-        }
-        setError(err instanceof Error ? err.message : "保存失败");
-        setSaveHint("error");
-      } finally {
-        if (seq === saveSeqRef.current) {
-          setSaving(false);
-        }
-      }
-    };
-
-    const next = persistChainRef.current.then(run, run);
-    persistChainRef.current = next.then(
-      () => undefined,
-      () => undefined,
-    );
-    return next;
-  }, []);
-
-  const suspendAutosave = useCallback(async () => {
-    window.clearTimeout(autosaveTimerRef.current);
-    saveSeqRef.current += 1;
-    await persistChainRef.current;
-  }, []);
-
-  useEffect(() => {
-    registerWorkspaceSaveGate({ suspend: suspendAutosave });
-    return () => registerWorkspaceSaveGate(null);
-  }, [suspendAutosave]);
-
-  const scheduleAutosave = useCallback(() => {
-    window.clearTimeout(autosaveTimerRef.current);
-    autosaveTimerRef.current = window.setTimeout(() => {
-      void persist();
-    }, AUTOSAVE_MS);
-  }, [persist]);
+  const { persist, scheduleAutosave, suspendAutosave, autosaveTimerRef, saveSeqRef } = usePagePersist({
+    liveRef,
+    editorRef,
+    editorReadyRef,
+    draftBodyRef,
+    previewTreeTitle,
+    onSaved,
+    setPost,
+    setDraft,
+    setTags,
+    setSlug,
+    setTitle,
+    setSaving,
+    setSaveHint,
+    setError,
+    setPendingLinkIds,
+  });
 
   useEffect(() => {
     if (!id) {
@@ -275,7 +125,7 @@ export function PageEditor({ onSaved }: Props) {
         setSlug(p.slug);
         setDraft(p.draft);
         setTags(p.tags ?? []);
-        previewTreeTitleRef.current(p.id, p.title);
+        previewTreeTitle(p.id, p.title);
         if (p.pageKind === "about") {
           const rawAvatar = typeof p.props.avatar === "string" ? p.props.avatar : DEFAULT_ABOUT.avatar;
           setAvatar(isAvatarUrl(rawAvatar) ? rawAvatar.trim() : "");
@@ -320,7 +170,7 @@ export function PageEditor({ onSaved }: Props) {
       editorReadyRef.current = false;
       window.clearTimeout(autosaveTimerRef.current);
     };
-  }, [id]);
+  }, [id, autosaveTimerRef, previewTreeTitle, saveSeqRef]);
 
   if (!loaded) {
     return <p className="px-6 py-10 text-sm text-muted-foreground">加载中…</p>;
@@ -339,8 +189,6 @@ export function PageEditor({ onSaved }: Props) {
 
   const kind = post.pageKind;
   const showEditor = kind === "article" || kind === "about";
-  const needsNameField = kind === "about";
-  const titlePlaceholder = "首页署名";
   const crumbs = kind === "article" ? ancestorsOf(post.id, pages) : [];
   const childPages = pages.filter((p) => p.pageKind === "article" && p.parentId === post.id);
   const linkedChildIds = new Set([
@@ -367,9 +215,8 @@ export function PageEditor({ onSaved }: Props) {
     }
   };
 
-  /** / 插入「子页面」块：建子页，块本身就是入口 */
   const createChildForLinkBlock = async (): Promise<PageLinkData> => {
-    if (!post || post.pageKind !== "article") {
+    if (post.pageKind !== "article") {
       throw new Error("只有文章可以建子页面");
     }
     await suspendAutosave();
@@ -393,9 +240,8 @@ export function PageEditor({ onSaved }: Props) {
     };
   };
 
-  /** 工具栏：写入子页入口块并打开子页 */
   const createChildAndOpen = async () => {
-    if (!post || post.pageKind !== "article") {
+    if (post.pageKind !== "article") {
       return;
     }
     await suspendAutosave();
@@ -480,10 +326,10 @@ export function PageEditor({ onSaved }: Props) {
                 </p>
               )}
             </div>
-          ) : needsNameField ? (
+          ) : kind === "about" ? (
             <div className="flex max-w-xl flex-col gap-1.5">
               <Label htmlFor="page-title" className="text-xs text-muted-foreground">
-                {titlePlaceholder}
+                首页署名
               </Label>
               <Input
                 id="page-title"
@@ -529,7 +375,7 @@ export function PageEditor({ onSaved }: Props) {
                     setPublishOpen(true);
                   }}
                 >
-                  标签{tags.length ? ` · ${tags.length}` : ""}
+                  分类{tags.length ? ` · ${tags.length}` : ""}
                 </Button>
                 <Button
                   type="button"
@@ -551,13 +397,7 @@ export function PageEditor({ onSaved }: Props) {
           {error ? <p className="text-sm font-medium text-destructive">{error}</p> : null}
           {statusLabel ? <p className="text-sm text-muted-foreground">{statusLabel}</p> : null}
           {kind === "article" ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={saving}
-              onClick={() => void createChildAndOpen()}
-            >
+            <Button type="button" variant="outline" size="sm" disabled={saving} onClick={() => void createChildAndOpen()}>
               <Notes {...iconParkOutline} size={14} className="mr-1" />
               子页面
             </Button>
@@ -566,63 +406,18 @@ export function PageEditor({ onSaved }: Props) {
       </div>
 
       {kind === "about" ? (
-        <div className="shrink-0 space-y-4 border-b border-border/60 px-5 py-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <div
-              className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-full border border-border bg-muted"
-              aria-hidden
-            >
-              <AboutAvatar value={avatar} iconSize={28} />
-            </div>
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-              <FilePick
-                compact
-                label={uploading ? "上传中…" : "上传头像"}
-                hint="jpg / png / webp"
-                accept="image/*"
-                onFile={(file) => void onPickAvatar(file)}
-              />
-              {avatar ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  className="h-8 text-muted-foreground"
-                  onClick={() => {
-                    setAvatar("");
-                    liveRef.current.avatar = "";
-                    scheduleAutosave();
-                  }}
-                >
-                  清除
-                </Button>
-              ) : null}
-            </div>
-          </div>
-          <div>
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-xs font-medium text-muted-foreground">首页标签</p>
-              <Button type="button" size="sm" variant="outline" className="h-7" onClick={() => setSkillsOpen(true)}>
-                管理标签
-              </Button>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {skills.length ? (
-                skills.map((skill, index) => (
-                  <span
-                    key={`${skill.name}-${index}`}
-                    className="inline-flex items-center rounded-full border border-black/10 px-2.5 py-1 text-xs font-medium text-foreground/90"
-                    style={{ background: skillColorHex(skill.color) }}
-                  >
-                    {skill.name}
-                  </span>
-                ))
-              ) : (
-                <p className="text-xs text-muted-foreground">还没有标签，点「管理标签」添加。</p>
-              )}
-            </div>
-          </div>
-        </div>
+        <AboutEditorPanel
+          avatar={avatar}
+          skills={skills}
+          uploading={uploading}
+          onPickAvatar={(file) => void onPickAvatar(file)}
+          onClearAvatar={() => {
+            setAvatar("");
+            liveRef.current.avatar = "";
+            scheduleAutosave();
+          }}
+          onManageSkills={() => setSkillsOpen(true)}
+        />
       ) : null}
 
       <div className="flex min-h-0 flex-1 overflow-hidden bg-background">
@@ -669,26 +464,8 @@ export function PageEditor({ onSaved }: Props) {
                 setEditorReady(true);
               }}
             />
-            {kind === "article" && looseChildren.length > 0 ? (
-              <section className="workspace-child-pages mt-8 border-t border-border/70 pt-5" aria-label="未出现在正文的子页面">
-                <p className="mb-3 text-xs text-muted-foreground">这些子页面还没在正文里（例如旧数据）</p>
-                <ul className="space-y-2">
-                  {looseChildren.map((child) => (
-                    <li key={child.id}>
-                      <button
-                        type="button"
-                        className="cdx-page-link is-clickable w-full text-left"
-                        onClick={() => navigate(`/admin/p/${child.id}`)}
-                      >
-                        <span className="cdx-page-link__icon" aria-hidden>
-                          <PageLinkIcon size={16} />
-                        </span>
-                        <span className="cdx-page-link__title">{pageTitle(child)}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </section>
+            {kind === "article" ? (
+              <LooseChildPages pages={looseChildren} onOpen={(pageId) => navigate(`/admin/p/${pageId}`)} />
             ) : null}
           </SoftScrollbar>
         ) : null}

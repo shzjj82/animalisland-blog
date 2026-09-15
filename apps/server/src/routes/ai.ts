@@ -20,6 +20,50 @@ aiRouter.get("/status", requireAuth, (_req, res) => {
   });
 });
 
+function isPrivateHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "0.0.0.0") {
+    return true;
+  }
+  if (host === "169.254.169.254" || host.endsWith(".local") || host.endsWith(".internal")) {
+    return true;
+  }
+  if (/^10\.\d+\.\d+\.\d+$/.test(host)) {
+    return true;
+  }
+  if (/^192\.168\.\d+\.\d+$/.test(host)) {
+    return true;
+  }
+  if (/^172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+$/.test(host)) {
+    return true;
+  }
+  return false;
+}
+
+/** 仅允许站内上传、配置过的公网图床；拒绝内网/元数据地址，降低 SSRF 风险 */
+function isAllowedAttachmentUrl(raw: string): boolean {
+  const url = raw.trim();
+  if (!url) {
+    return false;
+  }
+  if (url.startsWith("/uploads/")) {
+    return true;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return false;
+  }
+  if (isPrivateHost(parsed.hostname)) {
+    return false;
+  }
+  return true;
+}
+
 function parseAttachments(value: unknown): AiAttachment[] {
   if (!Array.isArray(value)) {
     return [];
@@ -33,7 +77,7 @@ function parseAttachments(value: unknown): AiAttachment[] {
     const name = String(raw.name ?? "附件").slice(0, 120);
     if (raw.kind === "image") {
       const url = String(raw.url ?? "").trim();
-      if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("/")) {
+      if (isAllowedAttachmentUrl(url)) {
         out.push({ kind: "image", name, url });
       }
       continue;

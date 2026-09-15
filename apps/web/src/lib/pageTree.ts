@@ -1,6 +1,9 @@
 import type { PostListItem } from "@myblog/shared";
 
-export function pageTitle(page: Pick<PostListItem, "title">) {
+export function pageTitle(page: Pick<PostListItem, "title"> & { pageKind?: PostListItem["pageKind"] }) {
+  if (page.pageKind === "about") {
+    return "关于";
+  }
   if (page.title && page.title !== "无标题" && page.title !== "未命名") {
     return page.title;
   }

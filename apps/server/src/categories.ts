@@ -150,8 +150,22 @@ export function getCategoryByName(name: string): Category | undefined {
 }
 
 /**
- * 自定义标签即分类：按名字/slug 解析，没有就创建（默认进导航）。
- * 返回规范化后的 category.slug 列表。
+ * 只解析已存在的分类（slug 或名称），未知标签丢弃，不再隐式建类。
+ * 新建分类请走 CategoryManager / PublishDialog 的 createCategory。
+ */
+export function resolveExistingCategorySlugs(labels: string[]): string[] {
+  const out: string[] = [];
+  for (const label of normalizeTags(labels)) {
+    const existing = getCategoryBySlug(label) ?? getCategoryByName(label);
+    if (existing) {
+      out.push(existing.slug);
+    }
+  }
+  return normalizeTags(out);
+}
+
+/**
+ * @deprecated 仅用于一次性数据迁移；业务写入请用 resolveExistingCategorySlugs
  */
 export function ensureCategoriesFromLabels(labels: string[]): string[] {
   const out: string[] = [];
@@ -163,11 +177,10 @@ export function ensureCategoriesFromLabels(labels: string[]): string[] {
     }
     const nameCheck = validateTagName(label);
     if (!nameCheck.ok) {
-      // 旧数据里不合法的标签名：尽量保留可读名，放宽到截断创建
-      const fallbackName = label.slice(0, 16).trim() || "标签";
+      const fallbackName = label.slice(0, 16).trim() || "分类";
       const safeName = validateTagName(fallbackName).ok
         ? fallbackName
-        : `标签${listCategories().length + 1}`;
+        : `分类${listCategories().length + 1}`;
       const created = createCategory({
         name: safeName,
         hint: "",

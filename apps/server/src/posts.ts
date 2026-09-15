@@ -8,8 +8,8 @@ import type {
   SiteSkillColor,
 } from "@myblog/shared";
 import { emptyEditorDocument, isPageKind, tagsFromProps, propsWithTags } from "@myblog/shared";
-import { ensureCategoriesFromLabels, getCategoryBySlug, listCategories, listCategorySlugs } from "./categories.js";
-import { db } from "./db.js";
+import { ensureCategoriesFromLabels, getCategoryBySlug, listCategories, listCategorySlugs, resolveExistingCategorySlugs } from "./categories.js";
+import { db, getSchemaMeta, setSchemaMeta } from "./db.js";
 
 type PostRow = {
   id: string;
@@ -256,10 +256,17 @@ export function listPosts(opts: {
       return { posts: [], total: 0 };
     }
     typeSlug = opts.type;
-    // 按分类筛：type 或 tags 命中即可，SQL 侧先收窄 page_kind
     if (!opts.pageKind) {
       clauses.push("page_kind = 'article'");
     }
+    // type 字段或 props.tags JSON 数组命中（在 SQL 侧过滤，保证分页/total 正确）
+    clauses.push(
+      `(type = ? OR EXISTS (
+        SELECT 1 FROM json_each(json_extract(COALESCE(props, '{}'), '$.tags')) AS tag
+        WHERE tag.value = ?
+      ))`,
+    );
+    params.push(typeSlug, typeSlug);
   } else if (opts.kind && !opts.pageKind) {
     const slugs = listCategorySlugs(opts.kind);
     if (slugs.length === 0) {
@@ -270,6 +277,18 @@ export function listPosts(opts: {
     if (opts.kind === "article") {
       clauses.push("page_kind = 'article'");
     }
+  }
+
+  // 公开列表：排除「祖先为草稿」的子树（含子页自身 draft=0 的情况）
+  if (!opts.includeDrafts) {
+    clauses.push(`id NOT IN (
+      WITH RECURSIVE under_draft AS (
+        SELECT id FROM posts WHERE draft = 1
+        UNION ALL
+        SELECT p.id FROM posts p INNER JOIN under_draft u ON p.parent_id = u.id
+      )
+      SELECT id FROM under_draft
+    )`);
   }
 
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
@@ -304,16 +323,7 @@ export function listPosts(opts: {
     bind.push(offset);
   }
   const rows = db.prepare(sql).all(...bind) as Omit<PostRow, "body">[];
-  let posts = rows.map(toListItem);
-  if (typeSlug) {
-    posts = posts.filter((p) => p.type === typeSlug || p.tags.includes(typeSlug));
-  }
-  if (!opts.includeDrafts) {
-    const ancestorIndex = loadAncestorIndex();
-    posts = posts.filter((p) => !hasDraftAncestor(p.id, ancestorIndex));
-  }
-
-  return { posts, total: posts.length };
+  return { posts: rows.map(toListItem), total };
 }
 
 /** 工作区树：about + articles（含子页面） */
@@ -418,9 +428,9 @@ export function createPost(input: PostWriteInput): Post {
     input.tags !== undefined
       ? tagsFromProps(propsWithTags({}, input.tags))
       : tagsFromProps(input.props);
-  // 自定义标签自动落成分类（进导航）
+  // 仅绑定已有分类；新建分类走分类管理 / 发布弹窗的显式创建
   const tagSlugs =
-    pageKind === "article" && !parentId ? ensureCategoriesFromLabels(rawTags) : rawTags;
+    pageKind === "article" && !parentId ? resolveExistingCategorySlugs(rawTags) : rawTags;
 
   const resolvedType =
     pageKind === "article"
@@ -514,7 +524,7 @@ export function updatePost(id: string, input: PostWriteInput): Post | undefined 
   const rawTags =
     input.tags !== undefined ? tagsFromProps(propsWithTags({}, input.tags)) : tagsFromProps(baseProps);
   const tagSlugs =
-    pageKind === "article" && !parentId ? ensureCategoriesFromLabels(rawTags) : rawTags;
+    pageKind === "article" && !parentId ? resolveExistingCategorySlugs(rawTags) : rawTags;
   const props =
     pageKind === "article" && !parentId
       ? propsWithTags(baseProps, tagSlugs)
@@ -653,117 +663,88 @@ export function createLinkedChild(parentId: string): { child: Post; parent: Post
 }
 
 export function deletePost(id: string): boolean {
-  const existing = getPostById(id);
-  if (!existing) {
-    return false;
-  }
-  if (existing.pageKind === "about") {
-    throw new Error("PAGE_FIXED");
-  }
-  // 先从父文去掉入口块，再递归删子页
-  if (existing.parentId) {
-    stripPageLinkFromParent(existing.parentId, id);
-  }
-  const children = db
-    .prepare("SELECT id FROM posts WHERE parent_id = ?")
-    .all(id) as Array<{ id: string }>;
-  for (const child of children) {
-    deletePost(child.id);
-  }
-  const result = db.prepare("DELETE FROM posts WHERE id = ?").run(id);
-  return result.changes > 0;
-}
-
-/** 全站已用过的文章标签（去重） */
-export function listAllTags(): string[] {
-  const rows = db
-    .prepare(`SELECT props FROM posts WHERE page_kind = 'article'`)
-    .all() as Array<{ props: string }>;
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const row of rows) {
-    let props: Record<string, unknown> = {};
-    try {
-      const parsed = JSON.parse(row.props || "{}") as unknown;
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        props = parsed as Record<string, unknown>;
-      }
-    } catch {
-      /* ignore */
+  const run = db.transaction((rootId: string) => {
+    const existing = getPostById(rootId);
+    if (!existing) {
+      return false;
     }
-    for (const tag of tagsFromProps(props)) {
-      const key = tag.toLocaleLowerCase();
-      if (seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
-      out.push(tag);
+    if (existing.pageKind === "about") {
+      throw new Error("PAGE_FIXED");
     }
-  }
-  return out.sort((a, b) => a.localeCompare(b, "zh-CN"));
-}
 
-export function reorderPages(orderedIds: string[]): void {
-  const now = new Date().toISOString();
-  const update = db.prepare("UPDATE posts SET tree_sort = ?, updated_at = ? WHERE id = ?");
-  const tx = db.transaction(() => {
-    orderedIds.forEach((id, index) => {
-      update.run(index, now, id);
-    });
+    const collect = (pageId: string): string[] => {
+      const kids = db.prepare("SELECT id FROM posts WHERE parent_id = ?").all(pageId) as Array<{ id: string }>;
+      return [pageId, ...kids.flatMap((kid) => collect(kid.id))];
+    };
+    const ids = collect(rootId);
+
+    if (existing.parentId) {
+      stripPageLinkFromParent(existing.parentId, rootId);
+    }
+
+    const del = db.prepare("DELETE FROM posts WHERE id = ?");
+    // 先删子孙再删根，避免中间态孤儿引用
+    for (let i = ids.length - 1; i >= 0; i -= 1) {
+      del.run(ids[i]);
+    }
+    return true;
   });
-  tx();
+  return run(id);
 }
 
-/** 将旧数据迁成工作区页面模型 */
+/** 将旧数据迁成工作区页面模型（重活只跑一次） */
 export function ensureWorkspacePages(): void {
   const articleCat = listCategories().find((c) => c.kind === "article");
   const defaultType = articleCat?.slug ?? "life";
+  const migrated = getSchemaMeta("workspace_migrated_v2") === "1";
 
-  // 旧文章默认 article；清掉已废弃的 photo/photos 页
-  db.prepare("DELETE FROM posts WHERE page_kind IN ('photos', 'photo')").run();
-  db.prepare(
-    `UPDATE posts SET page_kind = 'article'
-     WHERE page_kind IS NULL OR page_kind = '' OR page_kind NOT IN ('article', 'about')`,
-  ).run();
-  db.prepare(
-    `UPDATE posts SET type = ?
-     WHERE type NOT IN (SELECT slug FROM categories)`,
-  ).run(defaultType);
+  if (!migrated) {
+    // 旧文章默认 article；清掉已废弃的 photo/photos 页
+    db.prepare("DELETE FROM posts WHERE page_kind IN ('photos', 'photo')").run();
+    db.prepare(
+      `UPDATE posts SET page_kind = 'article'
+       WHERE page_kind IS NULL OR page_kind = '' OR page_kind NOT IN ('article', 'about')`,
+    ).run();
+    db.prepare(
+      `UPDATE posts SET type = ?
+       WHERE type NOT IN (SELECT slug FROM categories)`,
+    ).run(defaultType);
 
-  // 子页面不能是草稿：旧数据一并纠正
-  const now = new Date().toISOString();
-  db.prepare(
-    `UPDATE posts SET draft = 0, published_at = COALESCE(published_at, ?), updated_at = ?
-     WHERE parent_id IS NOT NULL AND draft = 1`,
-  ).run(now, now);
+    // 子页面不能是草稿：旧数据一并纠正
+    const now = new Date().toISOString();
+    db.prepare(
+      `UPDATE posts SET draft = 0, published_at = COALESCE(published_at, ?), updated_at = ?
+       WHERE parent_id IS NOT NULL AND draft = 1`,
+    ).run(now, now);
 
-  // 文章上的自定义标签 → 分类，并回写 slug
-  const articleRows = db
-    .prepare(
-      `SELECT id, type, props FROM posts WHERE page_kind = 'article' AND parent_id IS NULL`,
-    )
-    .all() as Array<{ id: string; type: string; props: string }>;
-  const updateArticle = db.prepare(
-    `UPDATE posts SET type = ?, props = ?, updated_at = ? WHERE id = ?`,
-  );
-  for (const row of articleRows) {
-    let props: Record<string, unknown> = {};
-    try {
-      const parsed = JSON.parse(row.props || "{}") as unknown;
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        props = parsed as Record<string, unknown>;
+    // 文章上的自定义标签 → 分类，并回写 slug（仅迁移期允许建类）
+    const articleRows = db
+      .prepare(
+        `SELECT id, type, props FROM posts WHERE page_kind = 'article' AND parent_id IS NULL`,
+      )
+      .all() as Array<{ id: string; type: string; props: string }>;
+    const updateArticle = db.prepare(
+      `UPDATE posts SET type = ?, props = ?, updated_at = ? WHERE id = ?`,
+    );
+    for (const row of articleRows) {
+      let props: Record<string, unknown> = {};
+      try {
+        const parsed = JSON.parse(row.props || "{}") as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          props = parsed as Record<string, unknown>;
+        }
+      } catch {
+        props = {};
       }
-    } catch {
-      props = {};
+      const raw = tagsFromProps(props);
+      const labels = raw.length > 0 ? raw : row.type ? [row.type] : [];
+      if (labels.length === 0) {
+        continue;
+      }
+      const slugs = ensureCategoriesFromLabels(labels);
+      const nextType = slugs[0] && getCategoryBySlug(slugs[0]) ? slugs[0] : row.type;
+      updateArticle.run(nextType, JSON.stringify(propsWithTags(props, slugs)), now, row.id);
     }
-    const raw = tagsFromProps(props);
-    const labels = raw.length > 0 ? raw : row.type ? [row.type] : [];
-    if (labels.length === 0) {
-      continue;
-    }
-    const slugs = ensureCategoriesFromLabels(labels);
-    const nextType = slugs[0] && getCategoryBySlug(slugs[0]) ? slugs[0] : row.type;
-    updateArticle.run(nextType, JSON.stringify(propsWithTags(props, slugs)), now, row.id);
   }
 
   if (!getPageByKind("about")) {
@@ -808,8 +789,7 @@ export function ensureWorkspacePages(): void {
       treeSort: -1,
       props: { avatar, skills },
     });
-  } else {
-    // 旧数据可能被 slugify 成 workspace-about，改成不可读的系统 slug
+  } else if (!migrated) {
     const about = getPageByKind("about");
     if (about && (about.slug === "workspace-about" || about.slug.startsWith("workspace-"))) {
       db.prepare("UPDATE posts SET slug = ? WHERE id = ?").run(
@@ -819,48 +799,51 @@ export function ensureWorkspacePages(): void {
     }
   }
 
-  // 文章 tree_sort 补齐
-  const articles = listPosts({
-    pageKind: "article",
-    includeDrafts: true,
-    treeOrder: true,
-  }).posts;
-  articles.forEach((item, index) => {
-    if (item.treeSort !== index) {
-      db.prepare("UPDATE posts SET tree_sort = ? WHERE id = ?").run(index, item.id);
-    }
-  });
+  if (!migrated) {
+    const articles = listPosts({
+      pageKind: "article",
+      includeDrafts: true,
+      treeOrder: true,
+    }).posts;
+    articles.forEach((item, index) => {
+      if (item.treeSort !== index) {
+        db.prepare("UPDATE posts SET tree_sort = ? WHERE id = ?").run(index, item.id);
+      }
+    });
 
-  // about 正文若仍为空，从 site 回填一次
-  const aboutPage = getPageByKind("about");
-  if (aboutPage && (!aboutPage.body.blocks || aboutPage.body.blocks.length === 0)) {
-    const siteRow = db.prepare("SELECT * FROM site WHERE id = 1").get() as
-      | {
-          about_name: string;
-          about_body: string;
-          about_avatar: string;
-          skills: string;
+    // about 正文若仍为空，从 site 回填一次
+    const aboutPage = getPageByKind("about");
+    if (aboutPage && (!aboutPage.body.blocks || aboutPage.body.blocks.length === 0)) {
+      const siteRow = db.prepare("SELECT * FROM site WHERE id = 1").get() as
+        | {
+            about_name: string;
+            about_body: string;
+            about_avatar: string;
+            skills: string;
+          }
+        | undefined;
+      if (siteRow) {
+        try {
+          const parsed = JSON.parse(siteRow.about_body) as EditorJsDocument;
+          if (parsed?.blocks?.length) {
+            const props = {
+              ...aboutPage.props,
+              avatar: siteRow.about_avatar || aboutPage.props.avatar,
+              skills: JSON.parse(siteRow.skills),
+            };
+            db.prepare("UPDATE posts SET title = ?, body = ?, props = ? WHERE id = ?").run(
+              siteRow.about_name || aboutPage.title,
+              JSON.stringify(parsed),
+              JSON.stringify(props),
+              aboutPage.id,
+            );
+          }
+        } catch {
+          /* ignore */
         }
-      | undefined;
-    if (siteRow) {
-      try {
-        const parsed = JSON.parse(siteRow.about_body) as EditorJsDocument;
-        if (parsed?.blocks?.length) {
-          const props = {
-            ...aboutPage.props,
-            avatar: siteRow.about_avatar || aboutPage.props.avatar,
-            skills: JSON.parse(siteRow.skills),
-          };
-          db.prepare("UPDATE posts SET title = ?, body = ?, props = ? WHERE id = ?").run(
-            siteRow.about_name || aboutPage.title,
-            JSON.stringify(parsed),
-            JSON.stringify(props),
-            aboutPage.id,
-          );
-        }
-      } catch {
-        /* ignore */
       }
     }
+
+    setSchemaMeta("workspace_migrated_v2", "1");
   }
 }

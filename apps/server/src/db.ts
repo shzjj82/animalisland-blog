@@ -74,4 +74,23 @@ if (!hasColumn("posts", "props")) {
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_posts_page_kind ON posts (page_kind, tree_sort);
   CREATE INDEX IF NOT EXISTS idx_posts_parent ON posts (parent_id, tree_sort);
+
+  CREATE TABLE IF NOT EXISTS schema_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
 `);
+
+export function getSchemaMeta(key: string): string | undefined {
+  const row = db.prepare("SELECT value FROM schema_meta WHERE key = ?").get(key) as
+    | { value: string }
+    | undefined;
+  return row?.value;
+}
+
+export function setSchemaMeta(key: string, value: string): void {
+  db.prepare(
+    `INSERT INTO schema_meta (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+  ).run(key, value);
+}

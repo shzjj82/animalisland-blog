@@ -6,21 +6,31 @@ import { env, ossConfigured } from "./env.js";
 const require = createRequire(import.meta.url);
 
 let client: OSS | null = null;
+let OSSCtor: (new (options: OSS.Options) => OSS) | null = null;
+
+function loadOssCtor(): new (options: OSS.Options) => OSS {
+  if (!OSSCtor) {
+    // ali-oss 为 CJS；动态 require 避免启动时硬依赖加载失败拖垮整站
+    OSSCtor = require("ali-oss") as new (options: OSS.Options) => OSS;
+  }
+  return OSSCtor;
+}
 
 function getClient(): OSS {
   if (!ossConfigured()) {
     throw new Error("OSS_NOT_CONFIGURED");
   }
-  if (client) return client;
-  const OSSCtor = require("ali-oss") as typeof import("ali-oss");
-  client = new OSSCtor({
-    region: env.ossRegion,
-    accessKeyId: env.ossAccessKeyId,
-    accessKeySecret: env.ossAccessKeySecret,
-    bucket: env.ossBucket,
-    secure: true,
-    authorizationV4: true,
-  });
+  if (!client) {
+    const Ctor = loadOssCtor();
+    client = new Ctor({
+      region: env.ossRegion,
+      accessKeyId: env.ossAccessKeyId,
+      accessKeySecret: env.ossAccessKeySecret,
+      bucket: env.ossBucket,
+      secure: true,
+      authorizationV4: true,
+    });
+  }
   return client;
 }
 
