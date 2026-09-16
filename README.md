@@ -72,6 +72,13 @@ pnpm docker:down
 Apple Silicon 要给 x86 服务器用时，在本机构建 amd64 再导入，避免在小机器上跑 Vite：
 
 ```bash
+# 推荐：部署脚本（变量用 .env.deploy / DEPLOY_*，与应用 .env 分开）
+cp .env.deploy.example .env.deploy   # 填写 DEPLOY_SSH_HOST 等
+./scripts/docker-pack-upload.sh      # 构建 → gzip → scp
+# 服务器上（仓库目录内，已有 docker-compose.yml 与 .env）：
+./scripts/docker-load.sh             # gunzip | docker load，默认再 compose up --no-build
+
+# 或手动：
 docker buildx build --platform linux/amd64 -t myblog:latest --load .
 docker save myblog:latest | gzip > myblog-amd64.tar.gz
 ```

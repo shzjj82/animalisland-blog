@@ -6,10 +6,15 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Docker 镜像导出包（scripts/docker-pack-upload.sh）
+*.tar.gz
+*.tgz
+
 # 密钥（保留示例）
 .env
 .env.*
 !.env.example
+!.env.deploy.example
 
 # 运行时数据
 data/
