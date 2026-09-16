@@ -9,7 +9,9 @@ import python from "highlight.js/lib/languages/python";
 import rust from "highlight.js/lib/languages/rust";
 import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
+import solidity from "./languages/solidity.js";
 import "highlight.js/styles/atom-one-dark.css";
+import type { LanguageFn } from "highlight.js";
 
 hljs.registerLanguage("javascript", javascript);
 hljs.registerLanguage("typescript", typescript);
@@ -21,6 +23,7 @@ hljs.registerLanguage("python", python);
 hljs.registerLanguage("go", go);
 hljs.registerLanguage("rust", rust);
 hljs.registerLanguage("java", java);
+hljs.registerLanguage("solidity", solidity as LanguageFn);
 
 const aliases: Record<string, string> = {
   typescript: "typescript",
@@ -34,6 +37,8 @@ const aliases: Record<string, string> = {
   go: "go",
   rust: "rust",
   java: "java",
+  solidity: "solidity",
+  sol: "solidity",
 };
 
 function escapeHtml(value: string): string {

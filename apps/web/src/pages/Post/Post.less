@@ -1,14 +1,24 @@
-/* 文章页：版心跟站点 blog-frame / 顶栏一致；短文至少一屏，海浪贴底 */
+/* 文章页锁在视口内：顶栏/海浪/相邻导航固定，只有正文滚动 */
 .blog:has(.post-page) {
+    height: 100dvh;
+    max-height: 100dvh;
     min-height: 100dvh;
+    overflow: hidden;
+
+    .blog-header {
+        flex: 0 0 auto;
+    }
 
     .blog-frame {
         flex: 1 1 auto;
+        min-height: 0;
+        overflow: hidden;
+        padding-bottom: 0;
     }
 
     .blog-sea {
         flex: 0 0 auto;
-        margin-top: auto;
+        margin-top: 0;
         height: 80px;
         overflow: hidden;
 
@@ -48,11 +58,16 @@
     --post-body-size: clamp(1rem, 0.94rem + 0.28vw, 1.125rem);
     --post-body-lh: 1.85;
 
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
     width: 100%;
     max-width: 100%;
+    min-height: 0;
     margin: 0;
-    padding: 0 0 clamp(24px, 4vw, 40px);
+    padding: 0;
     min-width: 0;
+    overflow: hidden;
     color: inherit;
     box-sizing: border-box;
 
@@ -165,6 +180,54 @@
         color: var(--blog-ink);
         overflow-wrap: anywhere;
         word-break: break-word;
+    }
+
+    .post-scroll {
+        flex: 1 1 auto;
+        min-height: 0;
+        min-width: 0;
+        overflow: auto;
+        /* SoftScrollbar / el-scrollbar：默认隐藏，悬停或滚动时显示细条 */
+        scrollbar-width: thin;
+        scrollbar-color: transparent transparent;
+        overscroll-behavior: contain;
+
+        &:hover,
+        &:focus-within,
+        &.is-scrolling {
+            scrollbar-color: color-mix(in srgb, var(--blog-ink) 35%, transparent) transparent;
+        }
+
+        &::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        &::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        &::-webkit-scrollbar-thumb {
+            background-color: transparent;
+            border-radius: 4px;
+            transition: background-color 0.2s ease;
+        }
+
+        &:hover::-webkit-scrollbar-thumb,
+        &:focus-within::-webkit-scrollbar-thumb,
+        &.is-scrolling::-webkit-scrollbar-thumb {
+            background-color: color-mix(in srgb, var(--blog-ink) 35%, transparent);
+        }
+
+        &::-webkit-scrollbar-thumb:hover {
+            background-color: color-mix(in srgb, var(--blog-ink) 55%, transparent);
+        }
+    }
+
+    .post-scroll-view {
+        min-height: min-content;
+        padding-right: 14px;
+        padding-bottom: 8px;
     }
 
     .post-body {
@@ -411,8 +474,9 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 12px;
         width: 100%;
-        margin-top: clamp(28px, 4vw, 40px);
-        padding-top: clamp(18px, 2.5vw, 24px);
+        flex: 0 0 auto;
+        margin-top: 0;
+        padding: clamp(12px, 2vw, 16px) 0 clamp(16px, 2.5vw, 20px);
         border-top: 1px solid color-mix(in srgb, var(--blog-line) 85%, transparent);
 
         button {
@@ -469,7 +533,7 @@
 
         .post-nav {
             grid-template-columns: 1fr;
-            margin-top: 28px;
+            margin-top: 0;
             padding-top: 16px;
             gap: 10px;
 

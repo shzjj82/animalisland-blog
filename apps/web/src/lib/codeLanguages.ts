@@ -10,6 +10,7 @@ export const CODE_LANGUAGES = [
   { id: "go", label: "Go" },
   { id: "rust", label: "Rust" },
   { id: "java", label: "Java" },
+  { id: "solidity", label: "Solidity" },
   { id: "plaintext", label: "纯文本" },
 ] as const;
 

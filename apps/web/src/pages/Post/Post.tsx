@@ -1,10 +1,11 @@
 import { SITE_DESCRIPTION, type Post as BlogPost, type PostListItem } from "@myblog/shared";
 import { ArrowLeft, ArrowRight } from "@icon-park/react";
 import { Button, Card, Loading } from "animal-island-ui";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { BlogContent } from "@/content";
 import { BlogShell } from "@/components/BlogShell";
+import { SoftScrollbar } from "@/components/SoftScrollbar";
 import { Seo } from "@/components/Seo";
 import { api } from "@/lib/api";
 import { useCategories } from "@/lib/categories";
@@ -16,6 +17,7 @@ function Post() {
   const { slug = "" } = useParams();
   const navigate = useNavigate();
   const { categories } = useCategories();
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const [post, setPost] = useState<BlogPost | null>(null);
   const [crumbs, setCrumbs] = useState<PostListItem[]>([]);
   const [siblings, setSiblings] = useState<PostListItem[]>([]);
@@ -25,6 +27,7 @@ function Post() {
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "auto" });
+    scrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
     setLoading(true);
     setMissing(false);
     setSiblings([]);
@@ -119,89 +122,91 @@ function Post() {
         </div>
       ) : post ? (
         <article className="post-page">
-          <div className="post-back">
-            <Button type="text" onClick={() => navigate("/notes")}>
-              <span className="blog-inline-icon">
-                <ArrowLeft {...iconParkOutline} size={14} aria-hidden />
-                返回笔记
-              </span>
-            </Button>
-          </div>
-
-          <header className="post-head">
-            {crumbs.length > 0 ? (
-              <nav className="post-breadcrumb" aria-label="页面路径">
-                {crumbs.map((item, index) => (
-                  <span key={item.id} className="post-crumb-wrap">
-                    {index > 0 ? (
-                      <span className="post-crumb-sep" aria-hidden>
-                        /
-                      </span>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="post-crumb"
-                      onClick={() => navigate(`/post/${item.slug}`)}
-                    >
-                      {pageTitle(item)}
-                    </button>
-                  </span>
-                ))}
-                <span className="post-crumb-wrap">
-                  <span className="post-crumb-sep" aria-hidden>
-                    /
-                  </span>
-                  <span className="post-crumb is-current">{pageTitle(post)}</span>
+          <SoftScrollbar ref={scrollRef} className="post-scroll" contentClassName="post-scroll-view">
+            <div className="post-back">
+              <Button type="text" onClick={() => navigate("/notes")}>
+                <span className="blog-inline-icon">
+                  <ArrowLeft {...iconParkOutline} size={14} aria-hidden />
+                  返回笔记
                 </span>
-              </nav>
-            ) : null}
-            <div className="post-head-meta">
-              <time dateTime={published}>{published}</time>
-              {post.tags?.length ? (
-                <ul className="post-tags" aria-label="分类">
-                  {post.tags.map((tag) => {
-                    const name =
-                      categories.find((item) => item.slug === tag)?.name ??
-                      (tag === post.type ? post.categoryName : tag);
-                    return (
-                      <li key={tag}>
-                        <button type="button" className="post-tag" onClick={() => navigate(`/${tag}`)}>
-                          {name}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : null}
+              </Button>
             </div>
-            <h1 className="post-title">{post.title}</h1>
-          </header>
 
-          <div className="post-body">
-            <BlogContent document={post.body} skipLeadingTitle={post.title} />
-          </div>
+            <header className="post-head">
+              {crumbs.length > 0 ? (
+                <nav className="post-breadcrumb" aria-label="页面路径">
+                  {crumbs.map((item, index) => (
+                    <span key={item.id} className="post-crumb-wrap">
+                      {index > 0 ? (
+                        <span className="post-crumb-sep" aria-hidden>
+                          /
+                        </span>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="post-crumb"
+                        onClick={() => navigate(`/post/${item.slug}`)}
+                      >
+                        {pageTitle(item)}
+                      </button>
+                    </span>
+                  ))}
+                  <span className="post-crumb-wrap">
+                    <span className="post-crumb-sep" aria-hidden>
+                      /
+                    </span>
+                    <span className="post-crumb is-current">{pageTitle(post)}</span>
+                  </span>
+                </nav>
+              ) : null}
+              <div className="post-head-meta">
+                <time dateTime={published}>{published}</time>
+                {post.tags?.length ? (
+                  <ul className="post-tags" aria-label="分类">
+                    {post.tags.map((tag) => {
+                      const name =
+                        categories.find((item) => item.slug === tag)?.name ??
+                        (tag === post.type ? post.categoryName : tag);
+                      return (
+                        <li key={tag}>
+                          <button type="button" className="post-tag" onClick={() => navigate(`/${tag}`)}>
+                            {name}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : null}
+              </div>
+              <h1 className="post-title">{post.title}</h1>
+            </header>
 
-          {looseChildren.length > 0 ? (
-            <section className="post-children" aria-label="子页面">
-              <p className="post-children-label">子页面</p>
-              <ul className="post-children-list">
-                {looseChildren.map((child) => (
-                  <li key={child.id}>
-                    <button
-                      type="button"
-                      className="block-page-link"
-                      onClick={() => navigate(`/post/${child.slug}`)}
-                    >
-                      <span className="block-page-link-icon" aria-hidden>
-                        <PageLinkIcon size={18} />
-                      </span>
-                      <span className="block-page-link-title">{pageTitle(child)}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
+            <div className="post-body">
+              <BlogContent document={post.body} skipLeadingTitle={post.title} />
+            </div>
+
+            {looseChildren.length > 0 ? (
+              <section className="post-children" aria-label="子页面">
+                <p className="post-children-label">子页面</p>
+                <ul className="post-children-list">
+                  {looseChildren.map((child) => (
+                    <li key={child.id}>
+                      <button
+                        type="button"
+                        className="block-page-link"
+                        onClick={() => navigate(`/post/${child.slug}`)}
+                      >
+                        <span className="block-page-link-icon" aria-hidden>
+                          <PageLinkIcon size={18} />
+                        </span>
+                        <span className="block-page-link-title">{pageTitle(child)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+          </SoftScrollbar>
 
           <nav className="post-nav" aria-label="相邻页面">
             {prev ? (

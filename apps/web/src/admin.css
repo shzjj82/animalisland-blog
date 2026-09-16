@@ -1598,6 +1598,10 @@
   background: #2b2418;
 }
 
+.code-tool:focus-within {
+  outline: none;
+}
+
 .code-tool-lang {
   position: absolute;
   top: 8px;
@@ -1657,6 +1661,15 @@
   color: transparent;
   caret-color: #ffe7b0;
   cursor: text !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.code-tool-area:focus,
+.code-tool-area:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  border: 0 !important;
 }
 
 .desk--dark .code-tool {

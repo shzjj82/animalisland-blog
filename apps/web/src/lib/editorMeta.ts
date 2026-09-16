@@ -8,7 +8,48 @@ function plainText(value: unknown): string {
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
+    .replace(/\s+/g, " ")
     .trim();
+}
+
+/** 跳过过短、纯符号、斜杠命令残留等无意义摘要 */
+function isUsefulSummary(text: string): boolean {
+  if (text.length < 8) {
+    return false;
+  }
+  if (/^[\/\\|#*\-_=.。，,!！?？…·\s]+$/.test(text)) {
+    return false;
+  }
+  return true;
+}
+
+function listPlain(data: Record<string, unknown>): string {
+  const items = Array.isArray(data.items) ? data.items : [];
+  return items
+    .map((item) => {
+      if (typeof item === "string") {
+        return plainText(item);
+      }
+      if (item && typeof item === "object" && "content" in item) {
+        return plainText((item as { content: unknown }).content);
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .join("；");
+}
+
+function summaryFromBlock(block: EditorJsBlock): string {
+  if (block.type === "paragraph") {
+    return plainText(block.data.text);
+  }
+  if (block.type === "quote") {
+    return plainText(block.data.text);
+  }
+  if (block.type === "list") {
+    return listPlain(block.data);
+  }
+  return "";
 }
 
 export type EditorMeta = {
@@ -27,8 +68,11 @@ export function metaFromEditorDocument(document: EditorJsDocument, fallback: Par
     if (!title && block.type === "header") {
       title = plainText(block.data.text);
     }
-    if (!summary && block.type === "paragraph") {
-      summary = plainText(block.data.text).slice(0, 160);
+    if (!summary) {
+      const candidate = summaryFromBlock(block).slice(0, 160);
+      if (isUsefulSummary(candidate)) {
+        summary = candidate;
+      }
     }
     if (!coverUrl && block.type === "image") {
       const file = block.data.file as { url?: string } | undefined;
@@ -39,9 +83,10 @@ export function metaFromEditorDocument(document: EditorJsDocument, fallback: Par
     }
   }
 
+  const fallbackSummary = fallback.summary?.trim() || "";
   return {
     title: title || fallback.title?.trim() || "无标题",
-    summary: summary || fallback.summary?.trim() || "",
+    summary: summary || (isUsefulSummary(fallbackSummary) ? fallbackSummary : ""),
     coverUrl: coverUrl || fallback.coverUrl?.trim() || "",
   };
 }

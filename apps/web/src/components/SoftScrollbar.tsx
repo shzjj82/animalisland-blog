@@ -1,4 +1,12 @@
-import { useEffect, useRef, type CSSProperties, type ReactNode, type UIEventHandler } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  type CSSProperties,
+  type ReactNode,
+  type UIEventHandler,
+} from "react";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -10,9 +18,14 @@ type Props = {
 };
 
 /** 类似 Element Plus el-scrollbar：容器内滚动，悬停 / 滚动时显示细滚动条 */
-export function SoftScrollbar({ children, className, contentClassName, style, onScroll }: Props) {
-  const ref = useRef<HTMLDivElement>(null);
+export const SoftScrollbar = forwardRef<HTMLDivElement, Props>(function SoftScrollbar(
+  { children, className, contentClassName, style, onScroll },
+  ref,
+) {
+  const localRef = useRef<HTMLDivElement>(null);
   const timer = useRef<number | null>(null);
+
+  useImperativeHandle(ref, () => localRef.current as HTMLDivElement);
 
   useEffect(() => {
     return () => {
@@ -23,7 +36,7 @@ export function SoftScrollbar({ children, className, contentClassName, style, on
   }, []);
 
   const handleScroll: UIEventHandler<HTMLDivElement> = (event) => {
-    const el = ref.current;
+    const el = localRef.current;
     if (el) {
       el.classList.add("is-scrolling");
       if (timer.current != null) {
@@ -37,8 +50,8 @@ export function SoftScrollbar({ children, className, contentClassName, style, on
   };
 
   return (
-    <div ref={ref} className={cn("ws-scrollbar", className)} style={style} onScroll={handleScroll}>
+    <div ref={localRef} className={cn("ws-scrollbar", className)} style={style} onScroll={handleScroll}>
       <div className={cn("ws-scrollbar__view", contentClassName)}>{children}</div>
     </div>
   );
-}
+});

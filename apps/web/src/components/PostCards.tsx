@@ -1,4 +1,5 @@
 import type { PostListItem } from "@myblog/shared";
+import { isSiteSkillColor } from "@myblog/shared";
 import { ArrowRight } from "@icon-park/react";
 import { Card } from "animal-island-ui";
 import { Link } from "react-router-dom";
@@ -7,6 +8,18 @@ import { pageTitle } from "@/lib/pageTree";
 
 function prefetchPostPage() {
   void import("@/pages/Post/Post");
+}
+
+/** 过短或纯符号的摘要不当正文描述 */
+function cardExcerpt(summary: string | undefined): string {
+  const text = (summary ?? "").replace(/\s+/g, " ").trim();
+  if (text.length < 8) {
+    return "点进去看全文。";
+  }
+  if (/^[\/\\|#*\-_=.。，,!！?？…·\s]+$/.test(text)) {
+    return "点进去看全文。";
+  }
+  return text;
 }
 
 /** 空列表插图：摊开的空白笔记本 */
@@ -67,9 +80,13 @@ export function PostCards({ posts, empty }: { posts: PostListItem[]; empty: stri
           onMouseEnter={prefetchPostPage}
           onFocus={prefetchPostPage}
         >
-          <Card color="app-blue" hoverable className="blog-post-card">
+          <Card
+            color={isSiteSkillColor(post.categoryColor) ? post.categoryColor : "app-yellow"}
+            hoverable
+            className="blog-post-card"
+          >
             <h3 className="blog-post-title">{pageTitle(post)}</h3>
-            <p className="blog-post-excerpt">{post.summary || "点进去看全文。"}</p>
+            <p className="blog-post-excerpt">{cardExcerpt(post.summary)}</p>
             <div className="blog-post-meta">
               <time dateTime={(post.publishedAt ?? post.updatedAt).slice(0, 10)}>
                 {(post.publishedAt ?? post.updatedAt).slice(0, 10)}
