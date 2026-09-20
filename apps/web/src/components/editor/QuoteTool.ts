@@ -1,4 +1,4 @@
-import type { API, BlockTool, BlockToolConstructorOptions } from "@editorjs/editorjs";
+import type { BlockTool, BlockToolConstructorOptions } from "@editorjs/editorjs";
 
 type QuoteData = {
   text: string;
@@ -47,14 +47,12 @@ export class QuoteTool implements BlockTool {
     };
   }
 
-  private api: API;
   private readOnly: boolean;
   private data: QuoteData;
   private quotePlaceholder: string;
   private textEl: HTMLDivElement | null = null;
 
-  constructor({ data, api, readOnly, config }: BlockToolConstructorOptions<QuoteData, QuoteConfig>) {
-    this.api = api;
+  constructor({ data, readOnly, config }: BlockToolConstructorOptions<QuoteData, QuoteConfig>) {
     this.readOnly = Boolean(readOnly);
     this.data = {
       text: typeof data?.text === "string" ? data.text : "",
