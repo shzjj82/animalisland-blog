@@ -18,6 +18,9 @@ import { QuoteTool } from "@/components/editor/QuoteTool";
 import { api } from "@/lib/api";
 
 /** 菜单 / 工具名统一中文，避免中英混杂 */
+const HEADER_ICON =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-width="2" d="M9 7L9 12M9 17V12M9 12L15 12M15 7V12M15 17L15 12"/></svg>';
+
 const EDITOR_I18N = {
   messages: {
     ui: {
@@ -46,7 +49,13 @@ const EDITOR_I18N = {
     toolNames: {
       Text: "正文",
       Heading: "标题",
+      "Heading 1": "一级标题",
+      "Heading 2": "二级标题",
+      "Heading 3": "三级标题",
       List: "列表",
+      "Unordered List": "无序列表",
+      "Ordered List": "有序列表",
+      Checklist: "选项卡",
       Quote: "引用",
       Code: "代码",
       Delimiter: "分隔线",
@@ -68,7 +77,11 @@ const EDITOR_I18N = {
       list: {
         Ordered: "有序列表",
         Unordered: "无序列表",
-        Checklist: "待办列表",
+        Checklist: "选项卡",
+        "Unordered List": "无序列表",
+        "Ordered List": "有序列表",
+        "Start with": "起始编号",
+        "Counter type": "编号样式",
       },
       link: {
         "Add a link": "添加链接",
@@ -117,6 +130,7 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
   useEffect(() => {
     let instance: EditorJS | undefined;
     let changeTimer = 0;
+    let toolbarObserver: MutationObserver | undefined;
 
     const timer = window.setTimeout(() => {
       const pageLinkConfig: PageLinkToolConfig | undefined = pageLink
@@ -177,10 +191,21 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
             class: Header,
             inlineToolbar: true,
             config: { levels: [1, 2, 3], defaultLevel: 1 },
+            // 菜单里分别展示三级标题（仍存为 type=header + level）
+            toolbox: [
+              { title: "一级标题", icon: HEADER_ICON, data: { level: 1 } },
+              { title: "二级标题", icon: HEADER_ICON, data: { level: 2 } },
+              { title: "三级标题", icon: HEADER_ICON, data: { level: 3 } },
+            ],
           },
           list: {
             class: List,
             inlineToolbar: true,
+            toolbox: [
+              { title: "无序列表", data: { style: "unordered" } },
+              { title: "有序列表", data: { style: "ordered" } },
+              { title: "选项卡", data: { style: "checklist" } },
+            ],
           },
           quote: {
             class: QuoteTool,
@@ -189,9 +214,18 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
               quotePlaceholder: "引用内容，Enter 结束 · Shift+Enter 换行",
             },
           },
-          code: CodeTool,
-          delimiter: Delimiter,
-          embed: Embed,
+          code: {
+            class: CodeTool,
+            toolbox: { title: "代码" },
+          },
+          delimiter: {
+            class: Delimiter,
+            toolbox: { title: "分隔线" },
+          },
+          embed: {
+            class: Embed,
+            toolbox: { title: "嵌入" },
+          },
           pageLink: {
             class: PageLinkTool,
             config: pageLinkConfig,
@@ -206,6 +240,7 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
             : {}),
           image: {
             class: ImageTool,
+            toolbox: { title: "图片" },
             config: {
               captionPlaceholder: "图片说明，可空",
               buttonContent: "上传图片",
@@ -224,6 +259,55 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
             return;
           }
           new DragDrop(instance, "2px dashed #d98c3b");
+
+          // 切换标题级别后字号/行高变了，强制重算左侧 + / 拖拽钮垂直位置
+          const realignToolbar = () => {
+            const holder = document.getElementById(holderId);
+            const toolbar = holder?.querySelector<HTMLElement>(".ce-toolbar--opened");
+            const block =
+              holder?.querySelector<HTMLElement>(".ce-block--focused") ??
+              holder?.querySelector<HTMLElement>(".ce-block--selected");
+            const header = block?.querySelector<HTMLElement>("h1.ce-header, h2.ce-header, h3.ce-header");
+            if (!toolbar || !block || !header) {
+              return;
+            }
+            const btn =
+              toolbar.querySelector<HTMLElement>(".ce-toolbar__plus") ??
+              toolbar.querySelector<HTMLElement>(".ce-toolbar__settings-btn");
+            const btnH = btn?.offsetHeight ?? 26;
+            const styles = window.getComputedStyle(header);
+            const lineHeight = parseFloat(styles.lineHeight) || header.getBoundingClientRect().height;
+            const headerOffset = header.getBoundingClientRect().top - block.getBoundingClientRect().top;
+            const nextTop = Math.floor(block.offsetTop + headerOffset + lineHeight / 2 - btnH / 2);
+            if (Math.abs(parseInt(toolbar.style.top || "0", 10) - nextTop) > 1) {
+              toolbar.style.top = `${nextTop}px`;
+            }
+          };
+
+          instance.on("block-changed", () => {
+            requestAnimationFrame(() => {
+              instance?.toolbar.open();
+              realignToolbar();
+            });
+          });
+
+          const holderEl = document.getElementById(holderId);
+          const toolbarEl = holderEl?.querySelector(".ce-toolbar");
+          let alignLock = false;
+          if (toolbarEl) {
+            toolbarObserver = new MutationObserver(() => {
+              if (alignLock) {
+                return;
+              }
+              alignLock = true;
+              realignToolbar();
+              requestAnimationFrame(() => {
+                alignLock = false;
+              });
+            });
+            toolbarObserver.observe(toolbarEl, { attributes: true, attributeFilter: ["style", "class"] });
+          }
+
           onReadyRef.current?.(instance);
         },
       });
@@ -232,6 +316,7 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
     return () => {
       window.clearTimeout(timer);
       window.clearTimeout(changeTimer);
+      toolbarObserver?.disconnect();
       const current = instance;
       if (!current) {
         return;

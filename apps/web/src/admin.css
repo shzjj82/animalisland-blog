@@ -1536,21 +1536,33 @@
   font-weight: 900;
   letter-spacing: 0.01em;
   line-height: 1.25;
+  /* 不要用 margin-top：Editor.js 定位公式会把 margin 和 getBoundingClientRect 偏移算两次，标题越大 +/拖拽钮越往下掉 */
+  margin-top: 0;
+  padding-top: 0;
 }
 
 .editor-holder h1.ce-header {
   font-size: 34px;
-  margin: 4px 0 18px;
+  margin-bottom: 14px;
 }
 
 .editor-holder h2.ce-header {
   font-size: 24px;
-  margin: 18px 0 10px;
+  margin-bottom: 10px;
 }
 
 .editor-holder h3.ce-header {
   font-size: 19px;
-  margin: 14px 0 8px;
+  margin-bottom: 8px;
+}
+
+/* 标题块与上一块的间距放在 ce-block 上，避免干扰工具栏垂直对齐 */
+.editor-holder .ce-block:has(h2.ce-header) {
+  margin-top: 1.15em;
+}
+
+.editor-holder .ce-block:has(h3.ce-header) {
+  margin-top: 0.9em;
 }
 
 .editor-holder .ce-paragraph,
