@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { BlogContent } from "@/content";
 import { BlogShell } from "@/components/BlogShell";
+import { PostShare } from "@/components/PostShare";
 import { SoftScrollbar } from "@/components/SoftScrollbar";
 import { Seo } from "@/components/Seo";
 import { api } from "@/lib/api";
@@ -177,6 +178,11 @@ function Post() {
                     })}
                   </ul>
                 ) : null}
+                <PostShare
+                  title={post.title}
+                  summary={post.summary}
+                  url={typeof window !== "undefined" ? window.location.href : `/post/${post.slug}`}
+                />
               </div>
               <h1 className="post-title">{post.title}</h1>
             </header>

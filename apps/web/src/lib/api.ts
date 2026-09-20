@@ -114,6 +114,12 @@ export const api = {
     request<{ post: Post; parent: Post }>(`/api/posts/id/${parentId}/children`, {
       method: "POST",
     }),
+  /** 把文章挂到另一篇文章下（parentId=null 表示顶层） */
+  reparentPage: (id: string, parentId: string | null) =>
+    request<{ child: Post; oldParent: Post | null; newParent: Post | null }>(`/api/posts/id/${id}/parent`, {
+      method: "PUT",
+      body: JSON.stringify({ parentId }),
+    }),
   updatePost: (id: string, input: UpsertPostInput) =>
     request<{ post: Post }>(`/api/posts/${id}`, {
       method: "PUT",

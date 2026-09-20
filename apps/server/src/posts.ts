@@ -7,7 +7,7 @@ import type {
   PostListItem,
   SiteSkillColor,
 } from "@myblog/shared";
-import { emptyEditorDocument, isPageKind, tagsFromProps, propsWithTags } from "@myblog/shared";
+import { emptyEditorDocument, starterArticleDocument, isPageKind, tagsFromProps, propsWithTags } from "@myblog/shared";
 import { ensureCategoriesFromLabels, getCategoryBySlug, listCategories, listCategorySlugs, resolveExistingCategorySlugs } from "./categories.js";
 import { db, getSchemaMeta, setSchemaMeta } from "./db.js";
 
@@ -650,7 +650,7 @@ export function createLinkedChild(parentId: string): { child: Post; parent: Post
       parentId,
       summary: "",
       coverUrl: "",
-      body: emptyEditorDocument(),
+      body: starterArticleDocument(),
       draft: false,
     });
     const nextParent = appendPageLinkToParent(parentId, child);
@@ -658,6 +658,66 @@ export function createLinkedChild(parentId: string): { child: Post; parent: Post
       throw new Error("INVALID_PARENT");
     }
     return { child, parent: nextParent };
+  });
+  return run();
+}
+
+/**
+ * 把任意文章挂到另一篇文章下（或移回顶层）。
+ * 会同步旧/新父文里的 pageLink，并避免成环。
+ */
+export function reparentArticle(
+  childId: string,
+  newParentId: string | null,
+): { child: Post; oldParent: Post | null; newParent: Post | null } {
+  const run = db.transaction(() => {
+    const child = getPostById(childId);
+    if (!child || child.pageKind !== "article") {
+      throw new Error("NOT_FOUND");
+    }
+
+    const resolvedParentId = resolveArticleParent(newParentId);
+    if (resolvedParentId && wouldCreateCycle(childId, resolvedParentId)) {
+      throw new Error("INVALID_PARENT");
+    }
+    if ((child.parentId ?? null) === resolvedParentId) {
+      return {
+        child,
+        oldParent: child.parentId ? getPostById(child.parentId) ?? null : null,
+        newParent: resolvedParentId ? getPostById(resolvedParentId) ?? null : null,
+      };
+    }
+
+    const oldParentId = child.parentId;
+    if (oldParentId) {
+      stripPageLinkFromParent(oldParentId, childId);
+    }
+
+    const now = new Date().toISOString();
+    const treeSort = nextTreeSort(resolvedParentId, "article");
+    // 挂到父页下后不再当草稿；回到顶层则保持原草稿状态
+    const asDraft = resolvedParentId ? false : child.draft;
+    let publishedAt = child.publishedAt;
+    if (!asDraft && !publishedAt) {
+      publishedAt = now;
+    }
+
+    db.prepare(
+      `UPDATE posts SET parent_id = ?, tree_sort = ?, draft = ?, published_at = ?, updated_at = ?
+       WHERE id = ?`,
+    ).run(resolvedParentId, treeSort, asDraft ? 1 : 0, publishedAt, now, childId);
+
+    const updatedChild = getPostById(childId)!;
+    let newParent: Post | null = null;
+    if (resolvedParentId) {
+      newParent = appendPageLinkToParent(resolvedParentId, updatedChild) ?? null;
+    }
+
+    return {
+      child: updatedChild,
+      oldParent: oldParentId ? getPostById(oldParentId) ?? null : null,
+      newParent,
+    };
   });
   return run();
 }

@@ -11,7 +11,7 @@ type CodeData = {
 export class CodeTool {
   static get toolbox() {
     return {
-      title: "Code",
+      title: "代码",
       icon: '<svg width="17" height="15" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M8.3 6.3 2.6 12l5.7 5.7 1.4-1.4L5.4 12l4.3-4.3-1.4-1.4zm7.4 0-1.4 1.4L18.6 12l-4.3 4.3 1.4 1.4 5.7-5.7-5.7-5.7z"/></svg>',
     };
   }

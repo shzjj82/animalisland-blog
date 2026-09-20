@@ -91,16 +91,22 @@ export function metaFromEditorDocument(document: EditorJsDocument, fallback: Par
   };
 }
 
-/** 打开已有文章时，若正文没有标题块，把库里的标题补成第一块 */
+/** 打开已有文章时，若正文没有标题块，把库里的标题补成第一块；无标题且空文档则给一个空 H1 */
 export function ensureTitleHeader(document: EditorJsDocument, title: string): EditorJsDocument {
   const blocks = [...(document.blocks ?? [])];
   const first = blocks[0];
-  const heading = title.trim();
-  if (!heading) {
-    return { ...document, blocks };
-  }
   if (first?.type === "header") {
     return document;
+  }
+  const heading = title.trim();
+  if (!heading || heading === "无标题" || heading === "未命名") {
+    if (blocks.length === 0) {
+      return {
+        ...document,
+        blocks: [{ type: "header", data: { text: "", level: 1 } }],
+      };
+    }
+    return { ...document, blocks };
   }
   const header: EditorJsBlock = {
     type: "header",

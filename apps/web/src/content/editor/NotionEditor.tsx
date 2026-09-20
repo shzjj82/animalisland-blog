@@ -9,13 +9,88 @@ import Embed from "@editorjs/embed";
 import Header from "@editorjs/header";
 import ImageTool from "@editorjs/image";
 import List from "@editorjs/list";
-import Quote from "@editorjs/quote";
 import DragDrop from "editorjs-drag-drop";
 import type { EditorJsDocument } from "@myblog/shared";
 import { AiAssistTriggerTool, type AiAssistTriggerConfig } from "@/components/editor/AiAssistTriggerTool";
 import { CodeTool } from "@/components/editor/CodeTool";
 import { PageLinkTool, type PageLinkToolConfig } from "@/components/editor/PageLinkTool";
+import { QuoteTool } from "@/components/editor/QuoteTool";
 import { api } from "@/lib/api";
+
+/** 菜单 / 工具名统一中文，避免中英混杂 */
+const EDITOR_I18N = {
+  messages: {
+    ui: {
+      blockTunes: {
+        toggler: {
+          "Click to tune": "点击调整",
+          "or drag to move": "或拖拽移动",
+        },
+      },
+      inlineToolbar: {
+        converter: {
+          "Convert to": "转换为",
+        },
+      },
+      toolbar: {
+        toolbox: {
+          Add: "添加",
+        },
+      },
+      popover: {
+        Filter: "筛选",
+        "Nothing found": "没有找到",
+        "Convert to": "转换为",
+      },
+    },
+    toolNames: {
+      Text: "正文",
+      Heading: "标题",
+      List: "列表",
+      Quote: "引用",
+      Code: "代码",
+      Delimiter: "分隔线",
+      Embed: "嵌入",
+      Image: "图片",
+      Link: "链接",
+      Marker: "高亮",
+      Bold: "粗体",
+      Italic: "斜体",
+      InlineCode: "行内代码",
+      Unlink: "取消链接",
+    },
+    tools: {
+      header: {
+        "Heading 1": "一级标题",
+        "Heading 2": "二级标题",
+        "Heading 3": "三级标题",
+      },
+      list: {
+        Ordered: "有序列表",
+        Unordered: "无序列表",
+        Checklist: "待办列表",
+      },
+      link: {
+        "Add a link": "添加链接",
+      },
+      stub: {
+        "The block can not be displayed correctly.": "该内容块无法正确显示。",
+      },
+    },
+    blockTunes: {
+      delete: {
+        Delete: "删除",
+        "Click to delete": "点击删除",
+      },
+      moveUp: {
+        "Move up": "上移",
+      },
+      moveDown: {
+        "Move down": "下移",
+      },
+    },
+  },
+} as const;
 
 export type NotionEditorProps = {
   initial?: EditorJsDocument;
@@ -76,9 +151,12 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
       instance = new EditorJS({
         holder: holderId,
         autofocus: true,
+        // Enter 后仍用段落写正文；空文档的首块由 initial/starterArticleDocument 提供 header
+        defaultBlock: "paragraph",
         placeholder: slashHint,
         minHeight: 200,
         inlineToolbar: true,
+        i18n: EDITOR_I18N,
         data: initial?.blocks?.length ? (initial as OutputData) : undefined,
         onChange: () => {
           if (!onChangeRef.current || !instance) {
@@ -97,10 +175,20 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
         tools: {
           header: {
             class: Header,
+            inlineToolbar: true,
             config: { levels: [1, 2, 3], defaultLevel: 1 },
           },
-          list: List,
-          quote: Quote,
+          list: {
+            class: List,
+            inlineToolbar: true,
+          },
+          quote: {
+            class: QuoteTool,
+            inlineToolbar: true,
+            config: {
+              quotePlaceholder: "引用内容，Enter 结束 · Shift+Enter 换行",
+            },
+          },
           code: CodeTool,
           delimiter: Delimiter,
           embed: Embed,

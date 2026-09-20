@@ -30,3 +30,30 @@ export function ancestorsOf(pageId: string, pages: PostListItem[]): PostListItem
   }
   return chain;
 }
+
+/** 自身 + 全部子孙 id（挂父页时排除，避免成环） */
+export function selfAndDescendantIds(pageId: string, pages: PostListItem[]): Set<string> {
+  const childrenByParent = new Map<string, string[]>();
+  for (const page of pages) {
+    if (!page.parentId) {
+      continue;
+    }
+    const list = childrenByParent.get(page.parentId) ?? [];
+    list.push(page.id);
+    childrenByParent.set(page.parentId, list);
+  }
+  const ids = new Set<string>();
+  const stack = [pageId];
+  while (stack.length) {
+    const current = stack.pop()!;
+    if (ids.has(current)) {
+      continue;
+    }
+    ids.add(current);
+    const kids = childrenByParent.get(current);
+    if (kids) {
+      stack.push(...kids);
+    }
+  }
+  return ids;
+}

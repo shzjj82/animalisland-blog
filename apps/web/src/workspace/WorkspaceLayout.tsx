@@ -1,4 +1,4 @@
-import { SITE_DESCRIPTION, SITE_NAME, emptyEditorDocument, type PostListItem } from "@myblog/shared";
+import { SITE_DESCRIPTION, SITE_NAME, starterArticleDocument, type PostListItem } from "@myblog/shared";
 import { ExpandLeft, Home, Logout, MenuFold, MenuUnfold, TagOne } from "@icon-park/react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
@@ -109,12 +109,36 @@ export function WorkspaceLayout() {
       parentId: null,
       summary: "",
       coverUrl: "",
-      body: emptyEditorDocument(),
+      body: starterArticleDocument(),
       draft: true,
     });
     await reloadTree();
     navigate(`/admin/p/${post.id}`);
     setMobileTreeOpen(false);
+  };
+
+  const reparentPage = async (pageId: string, parentId: string | null) => {
+    const current = pages.find((p) => p.id === pageId);
+    if (!current || current.pageKind !== "article") {
+      return;
+    }
+    if ((current.parentId ?? null) === parentId) {
+      return;
+    }
+    await suspendWorkspaceAutosave();
+    const oldParentId = current.parentId;
+    try {
+      await api.reparentPage(pageId, parentId);
+      await reloadTree();
+      if (
+        routePageId &&
+        (routePageId === oldParentId || routePageId === parentId || routePageId === pageId)
+      ) {
+        setEditorNonce((n) => n + 1);
+      }
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "调整页面层级失败");
+    }
   };
 
   const removePage = async (page: PostListItem) => {
@@ -218,6 +242,7 @@ export function WorkspaceLayout() {
               collapsed={collapsed}
               onCreateArticle={(parentId) => void createArticle(parentId)}
               onDelete={(page) => void removePage(page)}
+              onReparent={(pageId, parentId) => void reparentPage(pageId, parentId)}
               onCloseMobile={() => setMobileTreeOpen(false)}
             />
           )}

@@ -167,6 +167,18 @@ export const emptyEditorDocument = (): EditorJsDocument => ({
   blocks: [],
 });
 
+/** 新建文章默认：一个空的一级标题块（打开编辑器时焦点在标题，而不是正文段落） */
+export const starterArticleDocument = (): EditorJsDocument => ({
+  time: Date.now(),
+  version: "2.30.7",
+  blocks: [
+    {
+      type: "header",
+      data: { text: "", level: 1 },
+    },
+  ],
+});
+
 export function isEditorJsDocument(value: unknown): value is EditorJsDocument {
   return Boolean(value && typeof value === "object" && Array.isArray((value as EditorJsDocument).blocks));
 }

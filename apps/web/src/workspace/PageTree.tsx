@@ -1,14 +1,16 @@
 import type { PageKind, PostListItem } from "@myblog/shared";
-import { Delete, Down, Info, Notes, Plus, Right } from "@icon-park/react";
-import { useMemo, useState } from "react";
+import { Delete, Down, Drag, Info, Notes, Plus, Right, ToTop } from "@icon-park/react";
+import { useMemo, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { SoftScrollbar } from "@/components/SoftScrollbar";
 import { Button } from "@/components/ui/button";
 import { iconParkOutline } from "@/lib/iconPark";
-import { pageTitle } from "@/lib/pageTree";
+import { pageTitle, selfAndDescendantIds } from "@/lib/pageTree";
 import { cn } from "@/lib/utils";
 
 type TreeNode = PostListItem & { children: TreeNode[] };
+
+type DropTarget = { kind: "page"; id: string } | { kind: "root" } | null;
 
 type Props = {
   pages: PostListItem[];
@@ -16,8 +18,12 @@ type Props = {
   collapsed?: boolean;
   onCreateArticle: (parentId?: string | null) => void;
   onDelete: (page: PostListItem) => void;
+  /** 拖拽挂入：parentId=null 表示回到顶层（外部） */
+  onReparent: (pageId: string, parentId: string | null) => void | Promise<void>;
   onCloseMobile?: () => void;
 };
+
+const DRAG_MIME = "application/x-myblog-page-id";
 
 function kindIcon(kind: PageKind) {
   return kind === "about" ? Info : Notes;
@@ -44,24 +50,42 @@ function buildArticleForest(articles: PostListItem[]): TreeNode[] {
   return walk(null);
 }
 
+function readDragPageId(event: React.DragEvent): string | null {
+  const raw = event.dataTransfer.getData(DRAG_MIME) || event.dataTransfer.getData("text/plain");
+  return raw.trim() || null;
+}
+
 export function PageTree({
   pages,
   selectedId,
   collapsed,
   onCreateArticle,
   onDelete,
+  onReparent,
   onCloseMobile,
 }: Props) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget>(null);
+  const draggingIdRef = useRef<string | null>(null);
 
-  const { about, articleForest } = useMemo(() => {
+  const { about, articleForest, articles } = useMemo(() => {
     const about = pages.find((p) => p.pageKind === "about");
     const articles = pages.filter((p) => p.pageKind === "article");
     return {
       about,
+      articles,
       articleForest: buildArticleForest(articles),
     };
   }, [pages]);
+
+  const blockedIds = useMemo(
+    () => (draggingId ? selfAndDescendantIds(draggingId, articles) : new Set<string>()),
+    [draggingId, articles],
+  );
+
+  const draggingPage = draggingId ? articles.find((item) => item.id === draggingId) : undefined;
+  const showRootDrop = Boolean(draggingId && draggingPage?.parentId);
 
   const isExpanded = (id: string) => expanded[id] !== false;
 
@@ -69,22 +93,124 @@ export function PageTree({
     setExpanded((prev) => ({ ...prev, [id]: !(prev[id] !== false) }));
   };
 
-  const renderRow = (page: PostListItem, opts: { depth: number; hasChildren?: boolean }) => {
+  const clearDrag = () => {
+    draggingIdRef.current = null;
+    setDraggingId(null);
+    setDropTarget(null);
+  };
+
+  const canDropOnPage = (targetId: string, sourceId: string | null = draggingId) => {
+    if (!sourceId) {
+      return false;
+    }
+    const blocked = sourceId === draggingId ? blockedIds : selfAndDescendantIds(sourceId, articles);
+    if (blocked.has(targetId)) {
+      return false;
+    }
+    const current = articles.find((item) => item.id === sourceId);
+    return (current?.parentId ?? null) !== targetId;
+  };
+
+  const acceptDrop = (event: React.DragEvent, target: DropTarget) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const pageId = readDragPageId(event) || draggingIdRef.current || draggingId;
+    clearDrag();
+    if (!pageId || !target) {
+      return;
+    }
+    if (target.kind === "root") {
+      void onReparent(pageId, null);
+      return;
+    }
+    if (selfAndDescendantIds(pageId, articles).has(target.id)) {
+      return;
+    }
+    void onReparent(pageId, target.id);
+  };
+
+  const beginDrag = (event: React.DragEvent, page: PostListItem) => {
+    event.stopPropagation();
+    event.dataTransfer.setData(DRAG_MIME, page.id);
+    event.dataTransfer.setData("text/plain", page.id);
+    event.dataTransfer.effectAllowed = "move";
+    draggingIdRef.current = page.id;
+    // 延后更新 UI，避免 React 重绘打断 HTML5 拖拽（子页尤其容易被取消）
+    window.requestAnimationFrame(() => {
+      if (draggingIdRef.current === page.id) {
+        setDraggingId(page.id);
+      }
+    });
+  };
+
+  const renderRow = (
+    page: PostListItem,
+    opts: { depth: number; hasChildren?: boolean; draggable?: boolean },
+  ) => {
     const Icon = kindIcon(page.pageKind);
     const canDelete = page.pageKind === "article";
     const canAddChild = page.pageKind === "article";
     const depthPad = collapsed ? 0 : Math.min(opts.depth, 6) * 12;
+    const isDragging = draggingId === page.id;
+    const isDropTarget =
+      dropTarget?.kind === "page" && dropTarget.id === page.id && canDropOnPage(page.id);
 
     return (
       <div
         key={page.id}
-        className="group flex items-center gap-0.5 rounded-lg"
+        className={cn(
+          "workspace-tree-row group relative flex items-center gap-0.5 rounded-lg transition-colors duration-150",
+          isDragging && "workspace-tree-row--dragging",
+          isDropTarget && "workspace-tree-row--drop-into",
+        )}
         style={{ marginLeft: depthPad }}
+        onDragOver={(event) => {
+          const sourceId = draggingIdRef.current || draggingId;
+          if (!opts.draggable || !sourceId || !canDropOnPage(page.id, sourceId)) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = "move";
+          setDropTarget({ kind: "page", id: page.id });
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            setDropTarget((prev) => (prev?.kind === "page" && prev.id === page.id ? null : prev));
+          }
+        }}
+        onDrop={(event) => {
+          if (!opts.draggable) {
+            return;
+          }
+          event.stopPropagation();
+          acceptDrop(event, { kind: "page", id: page.id });
+          setExpanded((prev) => ({ ...prev, [page.id]: true }));
+        }}
       >
+        {!collapsed && opts.draggable ? (
+          <button
+            type="button"
+            className="workspace-tree-drag-handle relative z-[2] inline-grid size-6 shrink-0 cursor-grab place-items-center rounded-md text-muted-foreground opacity-50 hover:bg-sidebar-accent hover:text-sidebar-foreground hover:opacity-100 active:cursor-grabbing group-hover:opacity-100"
+            title="拖拽调整层级"
+            aria-label={`拖拽 ${pageTitle(page)}`}
+            draggable
+            onDragStart={(event) => beginDrag(event, page)}
+            onDragEnd={clearDrag}
+            onClick={(event) => event.preventDefault()}
+          >
+            <Drag {...iconParkOutline} size={14} />
+          </button>
+        ) : !collapsed && opts.hasChildren ? (
+          <span className="inline-block size-6 shrink-0" aria-hidden />
+        ) : (
+          <span className={cn("inline-block size-6 shrink-0", collapsed && "hidden")} aria-hidden />
+        )}
+
         {!collapsed && opts.hasChildren ? (
           <button
             type="button"
-            className="inline-grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            className="relative z-[2] inline-grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
             aria-label={isExpanded(page.id) ? "收起" : "展开"}
             onClick={() => toggle(page.id)}
           >
@@ -97,17 +223,23 @@ export function PageTree({
         ) : (
           <span className={cn("inline-block size-6 shrink-0", collapsed && "hidden")} aria-hidden />
         )}
+
         <NavLink
           to={`/admin/p/${page.id}`}
-          title={pageTitle(page)}
+          title={
+            opts.draggable
+              ? `${pageTitle(page)}（按住左侧拖柄可调整层级）`
+              : pageTitle(page)
+          }
           onClick={onCloseMobile}
+          draggable={false}
           className={({ isActive }) =>
             cn(
-              "flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors",
+              "relative z-[2] flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors",
               collapsed && "justify-center px-0",
               isActive || selectedId === page.id
-                ? "bg-sidebar-accent font-medium text-sidebar-primary"
-                : "text-muted-foreground hover:bg-sidebar-accent/70 hover:text-sidebar-foreground",
+                ? "bg-sidebar-accent/80 font-medium text-sidebar-primary"
+                : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
             )
           }
         >
@@ -124,7 +256,7 @@ export function PageTree({
         {!collapsed && canAddChild ? (
           <button
             type="button"
-            className="inline-grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover:opacity-100"
+            className="relative z-[2] inline-grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover:opacity-100"
             title="新建子页面"
             aria-label={`在 ${pageTitle(page)} 下新建子页面`}
             onClick={() => {
@@ -138,7 +270,7 @@ export function PageTree({
         {!collapsed && canDelete ? (
           <button
             type="button"
-            className="inline-grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+            className="relative z-[2] inline-grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
             title="删除"
             aria-label={`删除 ${pageTitle(page)}`}
             onClick={() => onDelete(page)}
@@ -152,12 +284,14 @@ export function PageTree({
 
   const renderArticleNode = (node: TreeNode, depth: number) => (
     <div key={node.id} className="space-y-0.5">
-      {renderRow(node, { depth, hasChildren: node.children.length > 0 })}
+      {renderRow(node, { depth, hasChildren: node.children.length > 0, draggable: true })}
       {node.children.length > 0 && isExpanded(node.id) && !collapsed
         ? node.children.map((child) => renderArticleNode(child, depth + 1))
         : null}
     </div>
   );
+
+  const rootDropActive = dropTarget?.kind === "root";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -172,16 +306,51 @@ export function PageTree({
             {about ? renderRow(about, { depth: 0 }) : null}
           </div>
 
-          <div className="space-y-0.5">
+          <div className="space-y-1.5">
             {!collapsed ? (
-              <p className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/80">
+              <p className="px-2.5 pb-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/80">
                 页面
               </p>
             ) : null}
+
+            {showRootDrop && !collapsed ? (
+              <div
+                className={cn(
+                  "workspace-tree-root-drop mx-0.5 flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-xs transition-colors duration-150",
+                  rootDropActive
+                    ? "workspace-tree-root-drop--active"
+                    : "bg-sidebar-accent/35 text-muted-foreground",
+                )}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  event.dataTransfer.dropEffect = "move";
+                  setDropTarget({ kind: "root" });
+                }}
+                onDragLeave={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                    setDropTarget((prev) => (prev?.kind === "root" ? null : prev));
+                  }
+                }}
+                onDrop={(event) => {
+                  event.stopPropagation();
+                  acceptDrop(event, { kind: "root" });
+                }}
+              >
+                <ToTop {...iconParkOutline} size={14} className="shrink-0 opacity-80" />
+                <div className="min-w-0 leading-snug">
+                  <p className="font-medium text-sidebar-foreground">移出到顶层</p>
+                  <p className="text-[10px] text-muted-foreground">把子页面从当前父页下拖出来</p>
+                </div>
+              </div>
+            ) : null}
+
             {articleForest.length === 0 && !collapsed ? (
               <p className="px-2.5 text-xs text-muted-foreground">还没有页面，点下方新建</p>
             ) : (
-              articleForest.map((node) => renderArticleNode(node, 0))
+              <div className="space-y-0.5">
+                {articleForest.map((node) => renderArticleNode(node, 0))}
+              </div>
             )}
           </div>
         </nav>

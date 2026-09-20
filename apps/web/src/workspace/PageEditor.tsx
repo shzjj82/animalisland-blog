@@ -1,6 +1,7 @@
 import {
   DEFAULT_ABOUT,
   emptyEditorDocument,
+  starterArticleDocument,
   isSiteSkillColor,
   type EditorJsDocument,
   type Post,
@@ -152,7 +153,13 @@ export function PageEditor({ onSaved }: Props) {
           setInitial(p.body?.blocks?.length ? p.body : emptyEditorDocument());
         } else if (p.pageKind === "article") {
           const named = p.title.trim() && p.title !== "无标题" && p.title !== "未命名";
-          setInitial(named ? ensureTitleHeader(p.body, p.title) : p.body?.blocks?.length ? p.body : emptyEditorDocument());
+          if (named) {
+            setInitial(ensureTitleHeader(p.body, p.title));
+          } else if (p.body?.blocks?.length) {
+            setInitial(ensureTitleHeader(p.body, ""));
+          } else {
+            setInitial(starterArticleDocument());
+          }
         } else {
           setInitial(p.body?.blocks?.length ? p.body : emptyEditorDocument());
         }
@@ -228,7 +235,7 @@ export function PageEditor({ onSaved }: Props) {
       parentId: post.id,
       summary: "",
       coverUrl: "",
-      body: emptyEditorDocument(),
+      body: starterArticleDocument(),
       draft: false,
     });
     setPendingLinkIds((prev) => (prev.includes(child.id) ? prev : [...prev, child.id]));
@@ -267,7 +274,7 @@ export function PageEditor({ onSaved }: Props) {
         parentId: post.id,
         summary: "",
         coverUrl: "",
-        body: emptyEditorDocument(),
+        body: starterArticleDocument(),
         draft: false,
       });
       const { post: saved } = await api.updatePost(post.id, {

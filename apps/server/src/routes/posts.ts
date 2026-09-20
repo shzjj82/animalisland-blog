@@ -14,6 +14,7 @@ import {
   listAncestors,
   listPosts,
   listWorkspaceTree,
+  reparentArticle,
   updatePost,
 } from "../posts.js";
 import { syncSiteFromAboutPage } from "../site.js";
@@ -243,6 +244,27 @@ postsRouter.post("/id/:id/children", requireAuth, (req, res) => {
     const message = err instanceof Error ? err.message : "SERVER_ERROR";
     if (message === "INVALID_PARENT" || message === "INVALID_CATEGORY" || message === "PAGE_EXISTS") {
       fail(res, message);
+      return;
+    }
+    throw err;
+  }
+});
+
+/** 把任意文章挂到当前文章下（或 body.parentId=null 移回顶层） */
+postsRouter.put("/id/:id/parent", requireAuth, (req, res) => {
+  const raw = (req.body ?? {}) as { parentId?: string | null };
+  const parentId = raw.parentId === undefined ? null : raw.parentId;
+  if (parentId !== null && (typeof parentId !== "string" || !parentId.trim())) {
+    fail(res, "INVALID_INPUT");
+    return;
+  }
+  try {
+    const result = reparentArticle(req.params.id, parentId);
+    ok(res, result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "SERVER_ERROR";
+    if (message === "INVALID_PARENT" || message === "NOT_FOUND") {
+      fail(res, message, message === "NOT_FOUND" ? 404 : 400);
       return;
     }
     throw err;

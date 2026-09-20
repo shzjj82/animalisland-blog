@@ -164,6 +164,20 @@
   padding-top: 14px;
 }
 
+/* 侧栏页面树：拖拽挂入 / 移出顶层（不要左侧竖线） */
+.workspace-tree-row--drop-into {
+  background: color-mix(in oklab, var(--sidebar-accent, #f5f0e8) 92%, transparent);
+}
+
+.workspace-tree-row--dragging {
+  opacity: 0.4;
+}
+
+.workspace-tree-root-drop--active {
+  background: color-mix(in oklab, var(--sidebar-accent, #f5f0e8) 88%, transparent) !important;
+  color: var(--sidebar-foreground, inherit);
+}
+
 .desk-side-top {
   display: flex;
   flex-direction: column;
