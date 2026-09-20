@@ -18,7 +18,7 @@ export type PageLinkToolConfig = {
 export class PageLinkTool implements BlockTool {
   static get toolbox() {
     return {
-      title: "子页面",
+      title: "子页面 · page",
       icon: PAGE_LINK_TOOLBOX_SVG,
     };
   }

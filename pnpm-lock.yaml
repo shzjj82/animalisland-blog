@@ -105,6 +105,9 @@ importers:
       '@editorjs/quote':
         specifier: ^2.7.6
         version: 2.7.6
+      '@editorjs/table':
+        specifier: ^2.4.5
+        version: 2.4.6
       '@fontsource-variable/geist':
         specifier: ^5.3.0
         version: 5.3.0
@@ -349,6 +352,9 @@ packages:
   '@codexteam/icons@0.0.5':
     resolution: {integrity: sha512-s6H2KXhLz2rgbMZSkRm8dsMJvyUNZsEjxobBEg9ztdrb1B2H3pEzY6iTwI4XUPJWJ3c3qRKwV4TrO3J5jUdoQA==}
 
+  '@codexteam/icons@0.0.6':
+    resolution: {integrity: sha512-L7Q5PET8PjKcBT5wp7VR+FCjwCi5PUp7rd/XjsgQ0CI5FJz0DphyHGRILMuDUdCW2MQT9NHbVr4QP31vwAkS/A==}
+
   '@codexteam/icons@0.3.3':
     resolution: {integrity: sha512-cp7mkZPgmBuSxigTm3Vb+DtVHYeX7qXfQd7o05vcLD8Ag5WvRlol2QSn5P10k0CDAJwmkH9nQGQLBycErS9lsQ==}
 
@@ -398,6 +404,9 @@ packages:
 
   '@editorjs/quote@2.7.6':
     resolution: {integrity: sha512-D01KUMSDj2r+6Z+xjDkQqI+y6URpeHCvj0+P4pah+GtkG040lWjFb2H4pgHFXuol2cbfyAoraYSw85fuPheCvw==}
+
+  '@editorjs/table@2.4.6':
+    resolution: {integrity: sha512-2dtum3RGqyXHX9OoMsmz92piSrzwy+QWnpN/Kt5n0oVHFfpeJwd25xLzwPVjwMlvUYrun1VPrKio5/63SLGbuQ==}
 
   '@esbuild/aix-ppc64@0.25.12':
     resolution: {integrity: sha512-Hhmwd6CInZ3dwpuGTF8fJG6yoWmsToE+vYgD4nytZVxcu1ulHpUQRAB1UJ8+N1Am3Mz4+xOByoQoSZf4D+CpkA==}
@@ -1879,6 +1888,7 @@ packages:
   animal-island-ui@1.8.0:
     resolution: {integrity: sha512-wAxsa12C/yFu0Sj29Nx7GWTXYdlDFIog8kzALzYuvfKgUyOVKT5JYgesWphGAe+Nebz5yhuuvQDXg9O21Kplgg==}
     engines: {node: '>=18'}
+    deprecated: This version contains content removed for copyright reasons. Please upgrade to >= 1.9.0.
     peerDependencies:
       classnames: ^2.5.1
       react: '>=17.0.0'
@@ -2044,6 +2054,7 @@ packages:
 
   charm@0.1.2:
     resolution: {integrity: sha512-syedaZ9cPe7r3hoQA9twWYKu5AIyCswN5+szkmPBe9ccdLrj4bYaCnLVPTLd2kgVRc7+zoX4tyPgRnFKCj5YjQ==}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
 
   chokidar@3.6.0:
     resolution: {integrity: sha512-7VT13fmjotKpGipCW9JEQAusEPE+Ei8nl6/g4FBAmIm0GOOLMua9NDDo/DWp0ZAxCr3cPq5ZpBqmPAQgDda2Pw==}
@@ -4296,6 +4307,8 @@ snapshots:
 
   '@codexteam/icons@0.0.5': {}
 
+  '@codexteam/icons@0.0.6': {}
+
   '@codexteam/icons@0.3.3': {}
 
   '@dotenvx/dotenvx@1.75.1':
@@ -4372,6 +4385,10 @@ snapshots:
     dependencies:
       '@codexteam/icons': 0.3.3
       '@editorjs/dom': 0.0.5
+
+  '@editorjs/table@2.4.6':
+    dependencies:
+      '@codexteam/icons': 0.0.6
 
   '@esbuild/aix-ppc64@0.25.12':
     optional: true

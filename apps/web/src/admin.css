@@ -1530,6 +1530,8 @@
 
 .editor-holder .ce-toolbar {
   left: 0 !important;
+  /* Editor.js 仍写 top；垂直微调走合成层，避免改 top 触发大范围 reflow */
+  transform: translate3d(0, var(--ce-toolbar-nudge, 0px), 0);
 }
 
 .editor-holder .ce-header {
@@ -1610,6 +1612,171 @@
 
 .editor-holder .ce-toolbar__settings-btn:active {
   cursor: grabbing !important;
+}
+
+/* / 与 + 菜单：稍大、暖色输入框与 hover，贴合写作台 */
+.editor-holder .ce-popover__container {
+  --width: 268px;
+  --max-height: 380px;
+  --padding: 8px;
+  --border-radius: 12px;
+  --color-border: var(--border, var(--blog-line, #e8e2d6));
+  --color-shadow: color-mix(in oklab, var(--foreground, #3a3228) 16%, transparent);
+  --color-background: var(--background, var(--blog-surface, #fffaf0));
+  --color-text-primary: var(--foreground, var(--blog-ink, #3a3228));
+  --color-text-secondary: var(--muted-foreground, #8a7f70);
+  --color-border-icon: color-mix(in oklab, var(--border, #e8e2d6) 90%, transparent);
+  --color-background-item-hover: var(--muted, #f3eee4);
+  --color-background-item-focus: color-mix(in oklab, var(--sidebar-primary, #d98c3b) 14%, var(--muted, #f3eee4));
+  border-radius: var(--border-radius);
+  box-shadow:
+    0 1px 0 color-mix(in oklab, var(--border, #e8e2d6) 80%, transparent),
+    0 14px 36px var(--color-shadow);
+}
+
+.editor-holder .ce-popover__search {
+  margin-bottom: 8px;
+}
+
+.editor-holder .ce-popover__search .cdx-search-field {
+  background: var(--muted, #f3eee4);
+  border: 1px solid color-mix(in oklab, var(--border, #e8e2d6) 85%, transparent);
+  border-radius: 9px;
+  padding: 4px 6px;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.editor-holder .ce-popover__search .cdx-search-field:hover {
+  background: color-mix(in oklab, var(--muted, #f3eee4) 70%, var(--background, #fffaf0));
+  border-color: color-mix(in oklab, var(--sidebar-primary, #d98c3b) 28%, var(--border, #e8e2d6));
+}
+
+.editor-holder .ce-popover__search .cdx-search-field:focus-within {
+  background: var(--background, #fffaf0);
+  border-color: color-mix(in oklab, var(--sidebar-primary, #d98c3b) 45%, var(--border, #e8e2d6));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--sidebar-primary, #d98c3b) 16%, transparent);
+}
+
+.editor-holder .ce-popover__search .cdx-search-field__icon svg {
+  color: var(--muted-foreground, #8a7f70);
+}
+
+.editor-holder .ce-popover__search .cdx-search-field__input {
+  color: var(--foreground, var(--blog-ink, #3a3228));
+  font-size: 13.5px;
+}
+
+.editor-holder .ce-popover__search .cdx-search-field__input::placeholder {
+  color: var(--muted-foreground, #8a7f70);
+  opacity: 0.85;
+}
+
+.editor-holder .ce-popover-item {
+  border-radius: 8px;
+  min-height: 34px;
+}
+
+.editor-holder .ce-popover-item__title {
+  font-weight: 600;
+  font-size: 13.5px;
+  letter-spacing: 0.01em;
+}
+
+.editor-holder .ce-popover-item__icon--tool {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  border-color: color-mix(in oklab, var(--border, #e8e2d6) 80%, transparent);
+  background: color-mix(in oklab, var(--muted, #f3eee4) 55%, var(--background, #fffaf0));
+}
+
+/* 菜单视觉分组：文字 / 列表 / 媒体（首项不加顶部分隔） */
+.editor-holder .ce-popover-item[data-item-name="header"]:not(:first-child),
+.editor-holder .ce-popover-item[data-item-name="list"],
+.editor-holder .ce-popover-item[data-item-name="table"] {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in oklab, var(--border, #e8e2d6) 80%, transparent);
+  border-radius: 0 0 8px 8px;
+}
+
+.editor-holder .ce-popover-item[data-item-name="header"] + .ce-popover-item[data-item-name="header"],
+.editor-holder .ce-popover-item[data-item-name="list"] + .ce-popover-item[data-item-name="list"] {
+  margin-top: 0;
+  padding-top: var(--item-padding, 3px);
+  border-top: 0;
+}
+
+.desk--dark .editor-holder .ce-popover__container {
+  --color-border: color-mix(in oklab, #f3e9d2 16%, transparent);
+  --color-shadow: rgb(0 0 0 / 35%);
+  --color-background: #2b2418;
+  --color-text-primary: #f3e9d2;
+  --color-text-secondary: color-mix(in oklab, #f3e9d2 55%, transparent);
+  --color-border-icon: color-mix(in oklab, #f3e9d2 14%, transparent);
+  --color-background-item-hover: color-mix(in oklab, #f3e9d2 8%, #2b2418);
+  --color-background-item-focus: color-mix(in oklab, #d98c3b 18%, #2b2418);
+}
+
+.desk--dark .editor-holder .ce-popover__search .cdx-search-field {
+  background: color-mix(in oklab, #f3e9d2 8%, #2b2418);
+  border-color: color-mix(in oklab, #f3e9d2 14%, transparent);
+}
+
+.desk--dark .editor-holder .ce-popover__search .cdx-search-field:hover,
+.desk--dark .editor-holder .ce-popover__search .cdx-search-field:focus-within {
+  background: color-mix(in oklab, #f3e9d2 12%, #2b2418);
+  border-color: color-mix(in oklab, #d98c3b 40%, transparent);
+}
+
+.desk--dark .editor-holder .ce-popover__search .cdx-search-field__icon svg {
+  color: color-mix(in oklab, #f3e9d2 55%, transparent);
+}
+
+.desk--dark .editor-holder .ce-popover__search .cdx-search-field__input {
+  color: #f3e9d2;
+}
+
+.desk--dark .editor-holder .ce-popover-item__icon--tool {
+  background: color-mix(in oklab, #f3e9d2 8%, #2b2418);
+  border-color: color-mix(in oklab, #f3e9d2 14%, transparent);
+}
+
+/* 表格块：贴合写作台配色，并用 contain 把增删行列的重排关在块内 */
+.editor-holder .ce-block:has(.tc-wrap) {
+  contain: layout;
+}
+
+.editor-holder .tc-wrap {
+  --color-background: color-mix(in srgb, var(--blog-surface, #fff) 88%, var(--blog-line, #e8e2d6));
+  --color-text-secondary: color-mix(in srgb, var(--blog-ink, #3a3228) 55%, transparent);
+  --color-border: var(--blog-line, #e8e2d6);
+  margin-top: 8px;
+  contain: layout paint;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
+}
+
+.editor-holder .tc-table {
+  font-size: 14.5px;
+  color: var(--blog-ink, #3a3228);
+  /* 插件本身是 grid；固定轨道减少单元格内容变化时的连锁重排 */
+  grid-auto-rows: minmax(34px, auto);
+}
+
+.editor-holder .tc-cell {
+  min-height: 34px;
+  contain: paint;
+}
+
+.desk--dark .editor-holder .tc-wrap {
+  --color-background: color-mix(in oklab, #2b2418 88%, #f3e9d2);
+  --color-text-secondary: color-mix(in oklab, #f3e9d2 55%, transparent);
+  --color-border: color-mix(in oklab, #f3e9d2 18%, transparent);
+}
+
+.desk--dark .editor-holder .tc-table {
+  color: #f3e9d2;
 }
 
 .editor-holder .ce-block--drop-target .ce-block__content {

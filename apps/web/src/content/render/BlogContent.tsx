@@ -73,6 +73,40 @@ function BlockView({ block }: { block: EditorJsBlock }) {
     return <LazyCodeBlock code={code} language={language} />;
   }
 
+  if (type === "table") {
+    const content = Array.isArray(data.content) ? data.content : [];
+    const rows = content.filter((row): row is unknown[] => Array.isArray(row));
+    if (!rows.length) {
+      return null;
+    }
+    const withHeadings = Boolean(data.withHeadings);
+    const bodyRows = withHeadings ? rows.slice(1) : rows;
+    return (
+      <div className={data.stretched ? "block-table-wrap block-table-wrap--stretched" : "block-table-wrap"}>
+        <table className="block-table">
+          {withHeadings && rows[0] ? (
+            <thead>
+              <tr>
+                {rows[0].map((cell, i) => (
+                  <th key={i} dangerouslySetInnerHTML={{ __html: html(cell) }} />
+                ))}
+              </tr>
+            </thead>
+          ) : null}
+          <tbody>
+            {bodyRows.map((row, ri) => (
+              <tr key={ri}>
+                {row.map((cell, ci) => (
+                  <td key={ci} dangerouslySetInnerHTML={{ __html: html(cell) }} />
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
   if (type === "delimiter") {
     return (
       <div className="block-delimiter">

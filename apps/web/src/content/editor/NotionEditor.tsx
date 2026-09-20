@@ -9,6 +9,7 @@ import Embed from "@editorjs/embed";
 import Header from "@editorjs/header";
 import ImageTool from "@editorjs/image";
 import List from "@editorjs/list";
+import Table from "@editorjs/table";
 import DragDrop from "editorjs-drag-drop";
 import type { EditorJsDocument } from "@myblog/shared";
 import { AiAssistTriggerTool, type AiAssistTriggerConfig } from "@/components/editor/AiAssistTriggerTool";
@@ -17,9 +18,9 @@ import { PageLinkTool, type PageLinkToolConfig } from "@/components/editor/PageL
 import { QuoteTool } from "@/components/editor/QuoteTool";
 import { api } from "@/lib/api";
 
-/** 菜单 / 工具名统一中文，避免中英混杂 */
-const HEADER_ICON =
-  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-width="2" d="M9 7L9 12M9 17V12M9 12L15 12M15 7V12M15 17L15 12"/></svg>';
+/** H1/H2/H3 用字号区分，避免三个标题共用一个图标 */
+const headingIcon = (label: string) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><text x="12" y="16.5" text-anchor="middle" font-size="${label === "H1" ? 13 : label === "H2" ? 12 : 11}" font-weight="800" font-family="ui-sans-serif,system-ui,sans-serif" fill="currentColor">${label}</text></svg>`;
 
 const EDITOR_I18N = {
   messages: {
@@ -41,7 +42,7 @@ const EDITOR_I18N = {
         },
       },
       popover: {
-        Filter: "筛选",
+        Filter: "筛选块…",
         "Nothing found": "没有找到",
         "Convert to": "转换为",
       },
@@ -55,12 +56,13 @@ const EDITOR_I18N = {
       List: "列表",
       "Unordered List": "无序列表",
       "Ordered List": "有序列表",
-      Checklist: "选项卡",
+      Checklist: "待办",
       Quote: "引用",
-      Code: "代码",
+      Code: "代码块 · code",
+      Table: "表格 · table",
       Delimiter: "分隔线",
-      Embed: "嵌入",
-      Image: "图片",
+      Embed: "嵌入媒体 · embed",
+      Image: "图片 · image",
       Link: "链接",
       Marker: "高亮",
       Bold: "粗体",
@@ -77,11 +79,24 @@ const EDITOR_I18N = {
       list: {
         Ordered: "有序列表",
         Unordered: "无序列表",
-        Checklist: "选项卡",
+        Checklist: "待办",
         "Unordered List": "无序列表",
         "Ordered List": "有序列表",
         "Start with": "起始编号",
         "Counter type": "编号样式",
+      },
+      table: {
+        "Add column to left": "向左插入列",
+        "Add column to right": "向右插入列",
+        "Delete column": "删除列",
+        "Add row above": "在上方插入行",
+        "Add row below": "在下方插入行",
+        "Delete row": "删除行",
+        "With headings": "带表头",
+        "Without headings": "不带表头",
+        Stretch: "拉满宽度",
+        Collapse: "收起宽度",
+        Heading: "表头",
       },
       link: {
         "Add a link": "添加链接",
@@ -155,12 +170,12 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
 
       const slashHint =
         pageLink?.createChild && aiAssist
-          ? "写一个大标题，回车后继续正文。输入 / 可选「子页面」「写作助手」。"
+          ? "写标题后回车继续。输入 / 可搜「标题、待办、表格、子页面、写作助手」…"
           : pageLink?.createChild
-            ? "写一个大标题，回车后继续正文。输入 / 选「子页面」可建子页。"
+            ? "写标题后回车继续。输入 / 可搜「标题、待办、表格、子页面」…"
             : aiAssist
-              ? "写一个大标题，回车后继续正文。输入 / 选「写作助手」在光标处生成。"
-              : "写一个大标题，回车后继续正文。左侧 + 可加块。";
+              ? "写标题后回车继续。输入 / 可搜「标题、待办、表格、写作助手」…"
+              : "写标题后回车继续。左侧 + 或输入 / 添加块。";
 
       instance = new EditorJS({
         holder: holderId,
@@ -187,24 +202,31 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
           }, 320);
         },
         tools: {
+          // 顺序即 / 菜单顺序：页面与 AI → 文字 → 列表 → 媒体
+          ...(pageLinkConfig
+            ? {
+                pageLink: {
+                  class: PageLinkTool,
+                  config: pageLinkConfig,
+                },
+              }
+            : {}),
+          ...(aiAssistConfig
+            ? {
+                aiAssist: {
+                  class: AiAssistTriggerTool,
+                  config: aiAssistConfig,
+                },
+              }
+            : {}),
           header: {
             class: Header,
             inlineToolbar: true,
             config: { levels: [1, 2, 3], defaultLevel: 1 },
-            // 菜单里分别展示三级标题（仍存为 type=header + level）
             toolbox: [
-              { title: "一级标题", icon: HEADER_ICON, data: { level: 1 } },
-              { title: "二级标题", icon: HEADER_ICON, data: { level: 2 } },
-              { title: "三级标题", icon: HEADER_ICON, data: { level: 3 } },
-            ],
-          },
-          list: {
-            class: List,
-            inlineToolbar: true,
-            toolbox: [
-              { title: "无序列表", data: { style: "unordered" } },
-              { title: "有序列表", data: { style: "ordered" } },
-              { title: "选项卡", data: { style: "checklist" } },
+              { title: "一级标题 · H1", icon: headingIcon("H1"), data: { level: 1 } },
+              { title: "二级标题 · H2", icon: headingIcon("H2"), data: { level: 2 } },
+              { title: "三级标题 · H3", icon: headingIcon("H3"), data: { level: 3 } },
             ],
           },
           quote: {
@@ -214,33 +236,31 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
               quotePlaceholder: "引用内容，Enter 结束 · Shift+Enter 换行",
             },
           },
+          list: {
+            class: List,
+            inlineToolbar: true,
+            toolbox: [
+              { title: "无序列表 · ul", data: { style: "unordered" } },
+              { title: "有序列表 · ol", data: { style: "ordered" } },
+              { title: "待办 · todo", data: { style: "checklist" } },
+            ],
+          },
+          table: {
+            class: Table,
+            inlineToolbar: true,
+            config: {
+              rows: 3,
+              cols: 3,
+              maxrows: 40,
+              maxcols: 12,
+              withHeadings: true,
+            },
+          },
           code: {
             class: CodeTool,
-            toolbox: { title: "代码" },
           },
-          delimiter: {
-            class: Delimiter,
-            toolbox: { title: "分隔线" },
-          },
-          embed: {
-            class: Embed,
-            toolbox: { title: "嵌入" },
-          },
-          pageLink: {
-            class: PageLinkTool,
-            config: pageLinkConfig,
-          },
-          ...(aiAssistConfig
-            ? {
-                aiAssist: {
-                  class: AiAssistTriggerTool,
-                  config: aiAssistConfig,
-                },
-              }
-            : {}),
           image: {
             class: ImageTool,
-            toolbox: { title: "图片" },
             config: {
               captionPlaceholder: "图片说明，可空",
               buttonContent: "上传图片",
@@ -253,6 +273,12 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
               },
             },
           },
+          embed: {
+            class: Embed,
+          },
+          delimiter: {
+            class: Delimiter,
+          },
         },
         onReady: () => {
           if (!instance) {
@@ -260,15 +286,23 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
           }
           new DragDrop(instance, "2px dashed #d98c3b");
 
-          // 切换标题级别后字号/行高变了，强制重算左侧 + / 拖拽钮垂直位置
+          // 标题块工具栏：只用 transform 微调，避免反复改 top 引发整页重排
+          const clearToolbarNudge = (toolbar?: HTMLElement | null) => {
+            toolbar?.style.setProperty("--ce-toolbar-nudge", "0px");
+          };
+
           const realignToolbar = () => {
             const holder = document.getElementById(holderId);
             const toolbar = holder?.querySelector<HTMLElement>(".ce-toolbar--opened");
+            if (!toolbar) {
+              return;
+            }
             const block =
               holder?.querySelector<HTMLElement>(".ce-block--focused") ??
               holder?.querySelector<HTMLElement>(".ce-block--selected");
             const header = block?.querySelector<HTMLElement>("h1.ce-header, h2.ce-header, h3.ce-header");
-            if (!toolbar || !block || !header) {
+            if (!block || !header) {
+              clearToolbarNudge(toolbar);
               return;
             }
             const btn =
@@ -278,22 +312,19 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
             const styles = window.getComputedStyle(header);
             const lineHeight = parseFloat(styles.lineHeight) || header.getBoundingClientRect().height;
             const headerOffset = header.getBoundingClientRect().top - block.getBoundingClientRect().top;
-            const nextTop = Math.floor(block.offsetTop + headerOffset + lineHeight / 2 - btnH / 2);
-            if (Math.abs(parseInt(toolbar.style.top || "0", 10) - nextTop) > 1) {
-              toolbar.style.top = `${nextTop}px`;
+            const idealTop = Math.floor(block.offsetTop + headerOffset + lineHeight / 2 - btnH / 2);
+            const baseTop = parseInt(toolbar.style.top || "0", 10) || 0;
+            const nudge = idealTop - baseTop;
+            const prev = parseFloat(toolbar.style.getPropertyValue("--ce-toolbar-nudge") || "0");
+            if (Math.abs(prev - nudge) > 0.5) {
+              toolbar.style.setProperty("--ce-toolbar-nudge", `${nudge}px`);
             }
           };
 
-          /** H1→H2 等换标签后，等布局落地再对齐（单次 rAF 经常还是旧高度） */
           const scheduleRealign = () => {
-            const run = () => {
+            requestAnimationFrame(() => {
               instance?.toolbar.open();
               realignToolbar();
-            };
-            run();
-            requestAnimationFrame(() => {
-              run();
-              requestAnimationFrame(run);
             });
           };
 
@@ -302,25 +333,60 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
           });
 
           const holderEl = document.getElementById(holderId);
-          const toolbarEl = holderEl?.querySelector(".ce-toolbar");
+          const toolbarEl = holderEl?.querySelector<HTMLElement>(".ce-toolbar");
           const redactorEl = holderEl?.querySelector(".codex-editor__redactor");
-          let alignLock = false;
+
+          // 只在 Editor.js 改 top / 开关状态时跟一次；不监听我们自己的 CSS 变量写入
           if (toolbarEl) {
+            let lastTop = toolbarEl.style.top;
+            let lastOpened = toolbarEl.classList.contains("ce-toolbar--opened");
             const toolbarObserver = new MutationObserver(() => {
-              if (alignLock) {
+              const opened = toolbarEl.classList.contains("ce-toolbar--opened");
+              const top = toolbarEl.style.top;
+              if (top === lastTop && opened === lastOpened) {
                 return;
               }
-              alignLock = true;
+              lastTop = top;
+              lastOpened = opened;
+              if (!opened) {
+                clearToolbarNudge(toolbarEl);
+                return;
+              }
               realignToolbar();
-              requestAnimationFrame(() => {
-                alignLock = false;
-              });
             });
             toolbarObserver.observe(toolbarEl, { attributes: true, attributeFilter: ["style", "class"] });
             disconnectObservers.push(() => toolbarObserver.disconnect());
           }
 
-          // Header.setLevel 是 replaceChild(h1→h2)，用 DOM 变化兜住「移出再移入才正常」的时机
+          // 标题换级后尺寸变化：ResizeObserver 比反复 rAF 更稳，且不强迫整页重排
+          const headerResizeObserver = new ResizeObserver(() => {
+            realignToolbar();
+          });
+          let watchedHeader: HTMLElement | null = null;
+          const watchFocusedHeader = () => {
+            const holder = document.getElementById(holderId);
+            const block =
+              holder?.querySelector<HTMLElement>(".ce-block--focused") ??
+              holder?.querySelector<HTMLElement>(".ce-block--selected");
+            const header =
+              block?.querySelector<HTMLElement>("h1.ce-header, h2.ce-header, h3.ce-header") ?? null;
+            if (header === watchedHeader) {
+              return;
+            }
+            if (watchedHeader) {
+              headerResizeObserver.unobserve(watchedHeader);
+            }
+            watchedHeader = header;
+            if (header) {
+              headerResizeObserver.observe(header);
+            }
+            realignToolbar();
+          };
+          disconnectObservers.push(() => {
+            headerResizeObserver.disconnect();
+            watchedHeader = null;
+          });
+
           if (redactorEl) {
             const headerDomObserver = new MutationObserver((mutations) => {
               const headerSwapped = mutations.some((mutation) => {
@@ -333,12 +399,21 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
                 );
               });
               if (headerSwapped) {
+                watchFocusedHeader();
                 scheduleRealign();
               }
             });
             headerDomObserver.observe(redactorEl, { childList: true, subtree: true });
             disconnectObservers.push(() => headerDomObserver.disconnect());
           }
+
+          holderEl?.addEventListener(
+            "click",
+            () => {
+              requestAnimationFrame(watchFocusedHeader);
+            },
+            true,
+          );
 
           onReadyRef.current?.(instance);
         },

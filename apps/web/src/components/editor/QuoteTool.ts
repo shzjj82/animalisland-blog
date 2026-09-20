@@ -20,7 +20,7 @@ const QUOTE_ICON =
 export class QuoteTool implements BlockTool {
   static get toolbox() {
     return {
-      title: "引用",
+      title: "引用 · quote",
       icon: QUOTE_ICON,
     };
   }

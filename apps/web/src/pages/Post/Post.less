@@ -439,6 +439,60 @@
         opacity: 0.7;
     }
 
+    .block-table-wrap {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        border: 1px solid var(--blog-line);
+        border-radius: 12px;
+        background: color-mix(in srgb, var(--blog-surface, #fff) 92%, transparent);
+        /* 滚动与单元格内容变化时，把布局影响关在容器内 */
+        contain: layout paint style;
+        content-visibility: auto;
+        contain-intrinsic-size: 100% 7.5rem;
+    }
+
+    .block-table-wrap--stretched {
+        width: 100%;
+    }
+
+    .block-table {
+        width: 100%;
+        min-width: 280px;
+        border-collapse: collapse;
+        table-layout: fixed;
+        font-size: calc(var(--post-body-size) * 0.94);
+        line-height: 1.55;
+    }
+
+    .block-table th,
+    .block-table td {
+        padding: 0.55em 0.75em;
+        border-bottom: 1px solid var(--blog-line);
+        border-right: 1px solid color-mix(in srgb, var(--blog-line) 70%, transparent);
+        text-align: left;
+        vertical-align: top;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+
+    .block-table th:last-child,
+    .block-table td:last-child {
+        border-right: 0;
+    }
+
+    .block-table tr:last-child td {
+        border-bottom: 0;
+    }
+
+    .block-table thead th {
+        font-weight: 700;
+        background: color-mix(in srgb, var(--blog-accent, #d98c3b) 10%, transparent);
+        color: var(--blog-ink);
+    }
+
     .block-code {
         position: relative;
         margin: 0.2rem 0;
