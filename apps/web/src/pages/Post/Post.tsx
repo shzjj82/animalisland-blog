@@ -1,10 +1,11 @@
 import { SITE_DESCRIPTION, type Post as BlogPost, type PostListItem } from "@myblog/shared";
 import { ArrowLeft, ArrowRight } from "@icon-park/react";
-import { Button, Card, Loading } from "animal-island-ui";
+import { Button, Card } from "animal-island-ui";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { BlogContent } from "@/content";
 import { BlogShell } from "@/components/BlogShell";
+import { useDeferredIslandLoading } from "@/components/IslandLoadingHost";
 import { PostShare } from "@/components/PostShare";
 import { SoftScrollbar } from "@/components/SoftScrollbar";
 import { Seo } from "@/components/Seo";
@@ -25,6 +26,8 @@ function Post() {
   const [children, setChildren] = useState<PostListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [missing, setMissing] = useState(false);
+
+  useDeferredIslandLoading(loading);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "auto" });
@@ -103,10 +106,6 @@ function Post() {
           }}
         />
       ) : null}
-
-      <div className={`post-loading${loading ? " is-active" : ""}`} aria-hidden={!loading}>
-        <Loading active={loading} />
-      </div>
 
       {missing || (!loading && !post) ? (
         <div className="post-page">

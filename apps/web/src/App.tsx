@@ -1,6 +1,7 @@
 import { Cursor } from "animal-island-ui";
 import { lazy, Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { IslandLoadingHost } from "@/components/IslandLoadingHost";
 import { AuthProvider } from "@/lib/auth";
 import { CategoriesProvider } from "@/lib/categories";
 import { ThemeProvider } from "@/lib/theme";
@@ -34,6 +35,7 @@ function App() {
         <AuthProvider>
           <CategoriesProvider>
             <Cursor forceAll={false}>
+              <IslandLoadingHost />
               <Suspense fallback={<div className="route-fallback" />}>
                 <Routes>
                   <Route path="/" element={<Home />} />
