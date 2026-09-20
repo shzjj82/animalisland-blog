@@ -130,7 +130,7 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
   useEffect(() => {
     let instance: EditorJS | undefined;
     let changeTimer = 0;
-    let toolbarObserver: MutationObserver | undefined;
+    const disconnectObservers: Array<() => void> = [];
 
     const timer = window.setTimeout(() => {
       const pageLinkConfig: PageLinkToolConfig | undefined = pageLink
@@ -284,18 +284,29 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
             }
           };
 
-          instance.on("block-changed", () => {
-            requestAnimationFrame(() => {
+          /** H1→H2 等换标签后，等布局落地再对齐（单次 rAF 经常还是旧高度） */
+          const scheduleRealign = () => {
+            const run = () => {
               instance?.toolbar.open();
               realignToolbar();
+            };
+            run();
+            requestAnimationFrame(() => {
+              run();
+              requestAnimationFrame(run);
             });
+          };
+
+          instance.on("block-changed", () => {
+            scheduleRealign();
           });
 
           const holderEl = document.getElementById(holderId);
           const toolbarEl = holderEl?.querySelector(".ce-toolbar");
+          const redactorEl = holderEl?.querySelector(".codex-editor__redactor");
           let alignLock = false;
           if (toolbarEl) {
-            toolbarObserver = new MutationObserver(() => {
+            const toolbarObserver = new MutationObserver(() => {
               if (alignLock) {
                 return;
               }
@@ -306,6 +317,27 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
               });
             });
             toolbarObserver.observe(toolbarEl, { attributes: true, attributeFilter: ["style", "class"] });
+            disconnectObservers.push(() => toolbarObserver.disconnect());
+          }
+
+          // Header.setLevel 是 replaceChild(h1→h2)，用 DOM 变化兜住「移出再移入才正常」的时机
+          if (redactorEl) {
+            const headerDomObserver = new MutationObserver((mutations) => {
+              const headerSwapped = mutations.some((mutation) => {
+                if (mutation.type !== "childList") {
+                  return false;
+                }
+                const nodes = [...mutation.addedNodes, ...mutation.removedNodes];
+                return nodes.some(
+                  (node) => node instanceof HTMLElement && node.classList.contains("ce-header"),
+                );
+              });
+              if (headerSwapped) {
+                scheduleRealign();
+              }
+            });
+            headerDomObserver.observe(redactorEl, { childList: true, subtree: true });
+            disconnectObservers.push(() => headerDomObserver.disconnect());
           }
 
           onReadyRef.current?.(instance);
@@ -316,7 +348,7 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
     return () => {
       window.clearTimeout(timer);
       window.clearTimeout(changeTimer);
-      toolbarObserver?.disconnect();
+      disconnectObservers.forEach((disconnect) => disconnect());
       const current = instance;
       if (!current) {
         return;

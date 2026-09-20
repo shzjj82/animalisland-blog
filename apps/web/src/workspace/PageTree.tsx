@@ -1,5 +1,5 @@
 import type { PageKind, PostListItem } from "@myblog/shared";
-import { Delete, Down, Drag, Info, Notes, Plus, Right, ToTop } from "@icon-park/react";
+import { Delete, Down, Info, Notes, Plus, Right, ToTop } from "@icon-park/react";
 import { useMemo, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { SoftScrollbar } from "@/components/SoftScrollbar";
@@ -188,25 +188,6 @@ export function PageTree({
           setExpanded((prev) => ({ ...prev, [page.id]: true }));
         }}
       >
-        {!collapsed && opts.draggable ? (
-          <button
-            type="button"
-            className="workspace-tree-drag-handle relative z-[2] inline-grid size-6 shrink-0 cursor-grab place-items-center rounded-md text-muted-foreground opacity-50 hover:bg-sidebar-accent hover:text-sidebar-foreground hover:opacity-100 active:cursor-grabbing group-hover:opacity-100"
-            title="拖拽调整层级"
-            aria-label={`拖拽 ${pageTitle(page)}`}
-            draggable
-            onDragStart={(event) => beginDrag(event, page)}
-            onDragEnd={clearDrag}
-            onClick={(event) => event.preventDefault()}
-          >
-            <Drag {...iconParkOutline} size={14} />
-          </button>
-        ) : !collapsed && opts.hasChildren ? (
-          <span className="inline-block size-6 shrink-0" aria-hidden />
-        ) : (
-          <span className={cn("inline-block size-6 shrink-0", collapsed && "hidden")} aria-hidden />
-        )}
-
         {!collapsed && opts.hasChildren ? (
           <button
             type="button"
@@ -226,16 +207,21 @@ export function PageTree({
 
         <NavLink
           to={`/admin/p/${page.id}`}
-          title={
-            opts.draggable
-              ? `${pageTitle(page)}（按住左侧拖柄可调整层级）`
-              : pageTitle(page)
-          }
+          title={opts.draggable ? `${pageTitle(page)}（拖拽可调整层级）` : pageTitle(page)}
           onClick={onCloseMobile}
-          draggable={false}
+          draggable={Boolean(opts.draggable)}
+          onDragStart={(event) => {
+            if (!opts.draggable) {
+              event.preventDefault();
+              return;
+            }
+            beginDrag(event, page);
+          }}
+          onDragEnd={clearDrag}
           className={({ isActive }) =>
             cn(
               "relative z-[2] flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors",
+              opts.draggable && "cursor-grab active:cursor-grabbing",
               collapsed && "justify-center px-0",
               isActive || selectedId === page.id
                 ? "bg-sidebar-accent/80 font-medium text-sidebar-primary"
