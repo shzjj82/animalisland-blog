@@ -145,6 +145,7 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
   useEffect(() => {
     let instance: EditorJS | undefined;
     let changeTimer = 0;
+    let alive = true;
     const disconnectObservers: Array<() => void> = [];
 
     const timer = window.setTimeout(() => {
@@ -188,14 +189,20 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
         i18n: EDITOR_I18N,
         data: initial?.blocks?.length ? (initial as OutputData) : undefined,
         onChange: () => {
-          if (!onChangeRef.current || !instance) {
+          if (!alive || !onChangeRef.current || !instance) {
             return;
           }
           window.clearTimeout(changeTimer);
           changeTimer = window.setTimeout(() => {
+            if (!alive || !instance) {
+              return;
+            }
             void instance
-              ?.save()
+              .save()
               .then((data) => {
+                if (!alive) {
+                  return;
+                }
                 onChangeRef.current?.(data as EditorJsDocument);
               })
               .catch(() => undefined);
@@ -415,12 +422,39 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
             true,
           );
 
+          // Cmd/Ctrl+A：一次选中整篇可编辑内容，便于全文复制（绕开 Editor.js 需连按两次的行为）
+          const onSelectAll = (event: KeyboardEvent) => {
+            if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "a") {
+              return;
+            }
+            if (event.isComposing || event.keyCode === 229) {
+              return;
+            }
+            const redactor = holderEl?.querySelector<HTMLElement>(".codex-editor__redactor");
+            if (!redactor || !holderEl?.contains(event.target as Node)) {
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            const selection = window.getSelection();
+            if (!selection) {
+              return;
+            }
+            const range = document.createRange();
+            range.selectNodeContents(redactor);
+            selection.removeAllRanges();
+            selection.addRange(range);
+          };
+          holderEl?.addEventListener("keydown", onSelectAll, true);
+          disconnectObservers.push(() => holderEl?.removeEventListener("keydown", onSelectAll, true));
+
           onReadyRef.current?.(instance);
         },
       });
     }, 0);
 
     return () => {
+      alive = false;
       window.clearTimeout(timer);
       window.clearTimeout(changeTimer);
       disconnectObservers.forEach((disconnect) => disconnect());

@@ -383,6 +383,10 @@ export function InlineAiAssist({ editor, insertIndex, onClose, onAccepted }: Pro
                 }
               }}
               onKeyDown={(e) => {
+                // 拼音/IME 组词时的回车只上屏，不触发生成
+                if (e.nativeEvent.isComposing || e.keyCode === 229) {
+                  return;
+                }
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   void generate(prompt);

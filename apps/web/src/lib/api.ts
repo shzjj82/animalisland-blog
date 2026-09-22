@@ -102,8 +102,9 @@ export const api = {
       ancestors: PostListItem[];
       siblings: PostListItem[];
       children: PostListItem[];
-    }>(`/api/posts/${slug}`),
-  getById: (id: string) => request<{ post: Post }>(`/api/posts/id/${id}`),
+    }>(`/api/posts/${slug}`, { cache: "no-store" }),
+  getById: (id: string) =>
+    request<{ post: Post }>(`/api/posts/id/${id}`, { cache: "no-store" }),
   createPost: (input: UpsertPostInput) =>
     request<{ post: Post }>("/api/posts", {
       method: "POST",

@@ -150,6 +150,10 @@ export function usePagePersist({
         if (seq !== saveSeqRef.current) {
           return;
         }
+        // 切页后旧请求不得写回当前编辑器状态
+        if (liveRef.current.post?.id !== saved.id) {
+          return;
+        }
 
         if (kind === "article" && saved.parentId && saved.title !== current.title) {
           try {

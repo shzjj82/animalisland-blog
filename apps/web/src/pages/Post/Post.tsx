@@ -34,6 +34,8 @@ function Post() {
     scrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
     setLoading(true);
     setMissing(false);
+    // 立刻清掉上一篇，避免请求期间继续展示旧正文
+    setPost(null);
     setSiblings([]);
     setChildren([]);
     setCrumbs([]);
@@ -80,6 +82,39 @@ function Post() {
       .filter(Boolean),
   );
   const looseChildren = children.filter((child) => !linkedChildIds.has(child.id));
+
+  useEffect(() => {
+    if (!post) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "a") {
+        return;
+      }
+      if (event.isComposing || event.keyCode === 229) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) {
+        return;
+      }
+      const root = document.querySelector<HTMLElement>(".post-page .post-select-root");
+      if (!root) {
+        return;
+      }
+      event.preventDefault();
+      const selection = window.getSelection();
+      if (!selection) {
+        return;
+      }
+      const range = document.createRange();
+      range.selectNodeContents(root);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [post?.id]);
 
   return (
     <BlogShell>
@@ -183,11 +218,13 @@ function Post() {
                   url={typeof window !== "undefined" ? window.location.href : `/post/${post.slug}`}
                 />
               </div>
-              <h1 className="post-title">{post.title}</h1>
             </header>
 
-            <div className="post-body">
-              <BlogContent document={post.body} skipLeadingTitle={post.title} />
+            <div className="post-select-root">
+              <h1 className="post-title">{post.title}</h1>
+              <div className="post-body">
+                <BlogContent document={post.body} skipLeadingTitle={post.title} />
+              </div>
             </div>
 
             {looseChildren.length > 0 ? (

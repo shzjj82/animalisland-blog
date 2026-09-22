@@ -1,4 +1,4 @@
-import { useOutletContext } from "react-router-dom";
+import { useOutletContext, useParams } from "react-router-dom";
 import { PageEditor } from "@/workspace/PageEditor";
 import type { PostListItem } from "@myblog/shared";
 
@@ -10,6 +10,8 @@ type WorkspaceOutlet = {
 };
 
 export function WorkspacePage() {
+  const { id = "" } = useParams();
   const { reloadTree, editorNonce } = useOutletContext<WorkspaceOutlet>();
-  return <PageEditor key={editorNonce} onSaved={() => void reloadTree()} />;
+  // 按页面 id 卸载重建，避免切页时残留上一篇的 body / 编辑器状态
+  return <PageEditor key={`${id}:${editorNonce}`} onSaved={() => void reloadTree()} />;
 }
