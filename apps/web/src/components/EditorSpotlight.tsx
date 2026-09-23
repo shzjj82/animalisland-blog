@@ -1,6 +1,6 @@
 import type { AiAttachment, AiChatMessage, EditorJsBlock } from "@myblog/shared";
 import EditorJS from "@editorjs/editorjs";
-import { Close, Paperclip, Plus, Robot, Search } from "@icon-park/react";
+import { Close, FileText, Paperclip, Pic, Plus, Robot, Search } from "@icon-park/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -24,16 +24,17 @@ export type SpotlightAction = {
   icon?: "robot" | "search";
 };
 
+type LocalAttachment =
+  | { id: string; kind: "image"; name: string; url: string }
+  | { id: string; kind: "text"; name: string; text: string };
+
 type ChatBubble = {
   id: string;
   role: "user" | "assistant";
   content: string;
   quote?: string;
+  attachments?: LocalAttachment[];
 };
-
-type LocalAttachment =
-  | { id: string; kind: "image"; name: string; url: string }
-  | { id: string; kind: "text"; name: string; text: string };
 
 type Props = {
   open: boolean;
@@ -77,6 +78,19 @@ function isTextFile(file: File): boolean {
   }
   const lower = file.name.toLowerCase();
   return [...TEXT_EXTS].some((ext) => lower.endsWith(ext));
+}
+
+function downloadTextAttachment(file: Extract<LocalAttachment, { kind: "text" }>) {
+  const blob = new Blob([file.text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = window.document.createElement("a");
+  link.href = url;
+  link.download = file.name || "attachment.txt";
+  link.rel = "noopener";
+  window.document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function aiErrorMessage(message: string): string {
@@ -336,7 +350,7 @@ export function EditorSpotlight({
 
   const send = async () => {
     const text = prompt.trim();
-    const attach = attachmentsRef.current;
+    const attach = [...attachmentsRef.current];
     if ((!text && !attach.length && !quote) || sending) {
       return;
     }
@@ -354,11 +368,13 @@ export function EditorSpotlight({
       role: "user",
       content: userContent,
       quote: quote || undefined,
+      attachments: attach.length ? attach : undefined,
     };
     const nextBubbles = [...bubblesRef.current, userBubble];
     setBubbles(nextBubbles);
     setPrompt("");
     setQuote("");
+    setAttachments([]);
     setError("");
     setSending(true);
 
@@ -373,13 +389,15 @@ export function EditorSpotlight({
         ...prev,
         { id: uid(), role: "assistant", content: result.reply.trim() || "（空回复）" },
       ]);
-      setAttachments([]);
     } catch (err) {
       setError(aiErrorMessage(err instanceof Error ? err.message : "发送失败"));
       setBubbles((prev) => prev.filter((item) => item.id !== userBubble.id));
       setPrompt(text);
       if (userBubble.quote) {
         setQuote(userBubble.quote);
+      }
+      if (attach.length) {
+        setAttachments(attach);
       }
     } finally {
       setSending(false);
@@ -574,10 +592,12 @@ export function EditorSpotlight({
               />
             </>
           )}
-          <kbd className="editor-spotlight-kbd">esc</kbd>
-          <button type="button" className="editor-spotlight-close" aria-label="关闭" onClick={closeAll}>
-            <Close {...iconParkOutline} size={14} />
-          </button>
+          <div className="editor-spotlight-search-end">
+            <kbd className="editor-spotlight-kbd">esc</kbd>
+            <button type="button" className="editor-spotlight-close" aria-label="关闭" onClick={closeAll}>
+              <Close {...iconParkOutline} size={14} />
+            </button>
+          </div>
         </div>
 
         {!inChat ? (
@@ -597,7 +617,7 @@ export function EditorSpotlight({
                       onClick={() => enterAction(item)}
                     >
                       <span className="editor-spotlight-item-icon" aria-hidden>
-                        <Robot {...iconParkOutline} size={18} />
+                        <Robot {...iconParkOutline} size={28} />
                       </span>
                       <span className="editor-spotlight-item-copy">
                         <span className="editor-spotlight-item-title">{item.title}</span>
@@ -638,6 +658,41 @@ export function EditorSpotlight({
                         className="editor-spotlight-bubble-text"
                         compact={item.role === "user"}
                       />
+                      {item.attachments?.length ? (
+                        <div className="editor-spotlight-bubble-attach">
+                          {item.attachments.map((file) =>
+                            file.kind === "image" ? (
+                              <a
+                                key={file.id}
+                                href={file.url}
+                                download={file.name}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="editor-spotlight-bubble-attach-item"
+                                title={`下载 ${file.name}`}
+                              >
+                                <span className="editor-spotlight-bubble-attach-icon" aria-hidden>
+                                  <Pic {...iconParkOutline} size={16} />
+                                </span>
+                                <span className="truncate">{file.name}</span>
+                              </a>
+                            ) : (
+                              <button
+                                key={file.id}
+                                type="button"
+                                className="editor-spotlight-bubble-attach-item"
+                                title={`下载 ${file.name}`}
+                                onClick={() => downloadTextAttachment(file)}
+                              >
+                                <span className="editor-spotlight-bubble-attach-icon" aria-hidden>
+                                  <FileText {...iconParkOutline} size={16} />
+                                </span>
+                                <span className="truncate">{file.name}</span>
+                              </button>
+                            ),
+                          )}
+                        </div>
+                      ) : null}
                       {item.role === "assistant" ? (
                         <div className="editor-spotlight-bubble-actions">
                           <Button
@@ -712,12 +767,14 @@ export function EditorSpotlight({
               <div className="editor-spotlight-attach">
                 {attachments.map((item) => (
                   <span key={item.id} className="editor-spotlight-attach-chip">
-                    {item.kind === "image" ? (
-                      <img src={item.url} alt="" className="editor-spotlight-attach-thumb" />
-                    ) : null}
-                    <span className="truncate">
-                      {item.kind === "image" ? "图" : "文"} · {item.name}
+                    <span className="editor-spotlight-attach-icon" aria-hidden>
+                      {item.kind === "image" ? (
+                        <Pic {...iconParkOutline} size={14} />
+                      ) : (
+                        <FileText {...iconParkOutline} size={14} />
+                      )}
                     </span>
+                    <span className="truncate">{item.name}</span>
                     <button
                       type="button"
                       aria-label={`移除 ${item.name}`}

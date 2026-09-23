@@ -545,7 +545,7 @@ export function AiChatPanel({ editor, insertIndex, selection, onClose, onInserte
                 onChange={(e) => {
                   const files = e.currentTarget.files;
                   if (files?.length) {
-                    void addFiles(files);
+                    void addFiles(Array.from(files));
                   }
                 }}
               />
