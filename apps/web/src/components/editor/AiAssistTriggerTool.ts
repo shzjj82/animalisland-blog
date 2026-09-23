@@ -15,7 +15,7 @@ export type AiAssistTriggerConfig = {
 export class AiAssistTriggerTool implements BlockTool {
   static get toolbox() {
     return {
-      title: "写作助手 · ai",
+      title: "智能 AI 聊天 · ai",
       icon: AI_ASSIST_TOOLBOX_SVG,
     };
   }

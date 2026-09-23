@@ -171,11 +171,11 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
 
       const slashHint =
         pageLink?.createChild && aiAssist
-          ? "写标题后回车继续。输入 / 可搜「标题、待办、表格、子页面、写作助手」…"
+          ? "写标题后回车继续。⌘K 打开命令 · / 可搜「标题、表格、子页面、智能 AI」…"
           : pageLink?.createChild
             ? "写标题后回车继续。输入 / 可搜「标题、待办、表格、子页面」…"
             : aiAssist
-              ? "写标题后回车继续。输入 / 可搜「标题、待办、表格、写作助手」…"
+              ? "写标题后回车继续。⌘K 智能 AI · / 可搜块与助手…"
               : "写标题后回车继续。左侧 + 或输入 / 添加块。";
 
       instance = new EditorJS({

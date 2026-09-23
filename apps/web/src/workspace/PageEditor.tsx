@@ -16,7 +16,8 @@ import { isAvatarUrl } from "@/components/AboutAvatar";
 import { AboutSkillsDialog } from "@/components/AboutSkillsDialog";
 import { SoftScrollbar } from "@/components/SoftScrollbar";
 import type { PageLinkData } from "@/components/editor/PageLinkTool";
-import { InlineAiAssist } from "@/components/InlineAiAssist";
+import { EditorSpotlight, type SpotlightAction } from "@/components/EditorSpotlight";
+import { SelectionAskChip } from "@/components/SelectionAskChip";
 import { PublishDialog } from "@/components/PublishDialog";
 import { Button } from "@/components/ui/button";
 import { NotionEditor, saveEditor } from "@/content";
@@ -50,7 +51,12 @@ export function PageEditor({ onSaved }: Props) {
   const draftBodyRef = useRef<EditorJsDocument | null>(null);
 
   const [editorReady, setEditorReady] = useState(false);
-  const [inlineAi, setInlineAi] = useState<{ insertIndex: number } | null>(null);
+  const [spotlightOpen, setSpotlightOpen] = useState(false);
+  const [spotlightLaunch, setSpotlightLaunch] = useState<{
+    actionId?: string;
+    insertIndex: number;
+    selection?: string;
+  } | null>(null);
   const [post, setPost] = useState<Post | null>(null);
   const [title, setTitle] = useState("");
   const [slug, setSlug] = useState("");
@@ -112,6 +118,8 @@ export function PageEditor({ onSaved }: Props) {
     setSaveHint("idle");
     setPendingLinkIds([]);
     setEditorEpoch(0);
+    setSpotlightLaunch(null);
+    setSpotlightOpen(false);
     editorReadyRef.current = false;
     draftBodyRef.current = null;
     void api
@@ -178,6 +186,79 @@ export function PageEditor({ onSaved }: Props) {
       window.clearTimeout(autosaveTimerRef.current);
     };
   }, [id, autosaveTimerRef, previewTreeTitle, saveSeqRef]);
+
+  const resolveInsertIndex = (fallback?: number) => {
+    if (typeof fallback === "number" && fallback >= 0) {
+      return fallback;
+    }
+    if (editorRef.current) {
+      try {
+        const idx = editorRef.current.blocks.getCurrentBlockIndex();
+        if (typeof idx === "number" && idx >= 0) {
+          return idx;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    return 0;
+  };
+
+  const captureSelection = () => {
+    const sel = window.getSelection();
+    const text = sel?.toString().replace(/\u200b/g, "").trim() ?? "";
+    const editorEl = document.querySelector(".notion-editor");
+    if (
+      text.length >= 2 &&
+      text.length <= 4000 &&
+      sel &&
+      sel.rangeCount > 0 &&
+      editorEl?.contains(sel.getRangeAt(0).commonAncestorContainer)
+    ) {
+      return text;
+    }
+    return "";
+  };
+
+  /** 打开命令面板；可直接进入 AI 聊天 */
+  const openSpotlight = (opts?: { actionId?: string; insertIndex?: number; selection?: string }) => {
+    const selection = opts?.selection?.trim() || captureSelection() || undefined;
+    setSpotlightLaunch({
+      actionId: opts?.actionId,
+      insertIndex: resolveInsertIndex(opts?.insertIndex),
+      selection,
+    });
+    setSpotlightOpen(true);
+  };
+
+  useEffect(() => {
+    if (!loaded || !editorReady) {
+      return;
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "k") {
+        return;
+      }
+      if (event.isComposing || event.keyCode === 229) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (target?.closest(".editor-spotlight-panel")) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      if (spotlightOpen) {
+        setSpotlightOpen(false);
+        setSpotlightLaunch(null);
+        return;
+      }
+      openSpotlight();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, editorReady, spotlightOpen]);
 
   if (!loaded) {
     return <p className="px-6 py-10 text-sm text-muted-foreground">加载中…</p>;
@@ -448,7 +529,7 @@ export function PageEditor({ onSaved }: Props) {
                 showEditor
                   ? {
                       onInvoke: ({ blockIndex }) => {
-                        setInlineAi({ insertIndex: blockIndex });
+                        openSpotlight({ actionId: "ai-chat", insertIndex: blockIndex });
                       },
                     }
                   : undefined
@@ -476,13 +557,38 @@ export function PageEditor({ onSaved }: Props) {
             ) : null}
           </SoftScrollbar>
         ) : null}
-        {showEditor && inlineAi && editorReady ? (
-          <InlineAiAssist
+        {showEditor && editorReady ? (
+          <SelectionAskChip
+            disabled={spotlightOpen}
+            onAsk={(text) => openSpotlight({ actionId: "ai-chat", selection: text })}
+          />
+        ) : null}
+        {showEditor ? (
+          <EditorSpotlight
+            open={spotlightOpen}
+            onOpenChange={(open) => {
+              setSpotlightOpen(open);
+              if (!open) {
+                setSpotlightLaunch(null);
+              }
+            }}
+            actions={
+              [
+                {
+                  id: "ai-chat",
+                  title: "智能 AI 聊天",
+                  chip: "AI智能聊天",
+                  subtitle: "对话后点选回答再写入正文 · 支持划词提问",
+                  keywords: "ai 写作 助手 聊天 chat gpt 智能",
+                  icon: "robot",
+                },
+              ] satisfies SpotlightAction[]
+            }
             editor={editorRef.current}
-            insertIndex={inlineAi.insertIndex}
-            onClose={() => setInlineAi(null)}
-            onAccepted={() => {
-              setInlineAi(null);
+            insertIndex={spotlightLaunch?.insertIndex ?? 0}
+            launchActionId={spotlightLaunch?.actionId}
+            selection={spotlightLaunch?.selection}
+            onInserted={() => {
               draftBodyRef.current = null;
               scheduleAutosave();
             }}
