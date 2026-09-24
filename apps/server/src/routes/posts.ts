@@ -2,7 +2,7 @@ import { Router } from "express";
 import type { EditorJsDocument, PageKind } from "@myblog/shared";
 import { isPageKind, normalizeTags } from "@myblog/shared";
 import { optionalAuth, requireAuth } from "../auth.js";
-import { listCategories } from "../categories.js";
+import { DocsError } from "../docs-client.js";
 import { fail, ok } from "../http.js";
 import {
   createLinkedChild,
@@ -10,8 +10,7 @@ import {
   deletePost,
   getPageByKind,
   getPostById,
-  getPostBySlug,
-  listAncestors,
+  getPostPage,
   listPosts,
   listWorkspaceTree,
   reparentArticle,
@@ -52,10 +51,6 @@ function readBody(input: unknown): EditorJsDocument | null {
   return doc;
 }
 
-function defaultTypeForKind(_pageKind: PageKind): string {
-  return listCategories().find((c) => c.kind === "article")?.slug ?? "life";
-}
-
 function parseUpsert(raw: unknown): ParsedUpsert {
   const {
     title,
@@ -86,7 +81,7 @@ function parseUpsert(raw: unknown): ParsedUpsert {
   };
 
   const pageKind = typeof rawKind === "string" && isPageKind(rawKind) ? rawKind : undefined;
-  const resolvedType = type?.trim() || (pageKind ? defaultTypeForKind(pageKind) : defaultTypeForKind("article"));
+  const resolvedType = type?.trim() || "life";
 
   if (!title?.trim()) {
     return { ok: false, error: "INVALID_INPUT" };
@@ -101,7 +96,7 @@ function parseUpsert(raw: unknown): ParsedUpsert {
     value: {
       title: title.trim(),
       slug,
-      type: resolvedType || defaultTypeForKind(pageKind ?? "article"),
+      type: resolvedType,
       pageKind,
       parentId: parentId === undefined ? undefined : parentId,
       treeSort: typeof treeSort === "number" ? treeSort : undefined,
@@ -115,112 +110,138 @@ function parseUpsert(raw: unknown): ParsedUpsert {
   };
 }
 
-postsRouter.get("/", optionalAuth, (req, res) => {
-  if (req.query.tree === "1" || req.query.tree === "true") {
-    if (!req.authed) {
-      fail(res, "UNAUTHORIZED", 401);
+function failDocs(res: Parameters<typeof fail>[0], err: unknown, fallback = "SERVER_ERROR"): boolean {
+  if (!(err instanceof DocsError)) {
+    return false;
+  }
+  fail(res, err.code || fallback, err.status || 400);
+  return true;
+}
+
+postsRouter.get("/", optionalAuth, async (req, res, next) => {
+  try {
+    if (req.query.tree === "1" || req.query.tree === "true") {
+      if (!req.authed) {
+        fail(res, "UNAUTHORIZED", 401);
+        return;
+      }
+      const posts = await listWorkspaceTree(true);
+      ok(res, { posts, total: posts.length });
       return;
     }
-    const posts = listWorkspaceTree(true);
-    ok(res, { posts, total: posts.length });
-    return;
-  }
 
-  const type = typeof req.query.type === "string" ? req.query.type : undefined;
-  const kind = req.query.kind === "article" ? req.query.kind : undefined;
-  const pageKind =
-    typeof req.query.pageKind === "string" && isPageKind(req.query.pageKind)
-      ? req.query.pageKind
-      : undefined;
-  const parentId =
-    req.query.parentId === "null"
-      ? null
-      : typeof req.query.parentId === "string"
-        ? req.query.parentId
+    const type = typeof req.query.type === "string" ? req.query.type : undefined;
+    const kind = req.query.kind === "article" ? req.query.kind : undefined;
+    const pageKind =
+      typeof req.query.pageKind === "string" && isPageKind(req.query.pageKind)
+        ? req.query.pageKind
         : undefined;
-  const parsedLimit = Number(req.query.limit);
-  const limit = Number.isFinite(parsedLimit) ? parsedLimit : undefined;
-  const parsedPage = Number(req.query.page);
-  const parsedPageSize = Number(req.query.pageSize);
-  const page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : undefined;
-  const pageSize = Number.isFinite(parsedPageSize) && parsedPageSize > 0 ? parsedPageSize : undefined;
-  const { posts, total } = listPosts({
-    type,
-    kind,
-    pageKind,
-    parentId,
-    limit,
-    page,
-    pageSize,
-    includeDrafts: Boolean(req.authed),
-    treeOrder: Boolean(pageKind || parentId !== undefined),
-  });
-  if (!req.authed) {
-    res.set("Cache-Control", "public, max-age=30");
+    const parentId =
+      req.query.parentId === "null"
+        ? null
+        : typeof req.query.parentId === "string"
+          ? req.query.parentId
+          : undefined;
+    const parsedLimit = Number(req.query.limit);
+    const limit = Number.isFinite(parsedLimit) ? parsedLimit : undefined;
+    const parsedPage = Number(req.query.page);
+    const parsedPageSize = Number(req.query.pageSize);
+    const page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : undefined;
+    const pageSize = Number.isFinite(parsedPageSize) && parsedPageSize > 0 ? parsedPageSize : undefined;
+    const { posts, total } = await listPosts({
+      type,
+      kind,
+      pageKind,
+      parentId,
+      limit,
+      page,
+      pageSize,
+      includeDrafts: Boolean(req.authed),
+      treeOrder: Boolean(pageKind || parentId !== undefined),
+    });
+    if (!req.authed) {
+      res.set("Cache-Control", "public, max-age=30");
+    }
+    ok(res, { posts, total, page: page ?? 1, pageSize: pageSize ?? posts.length });
+  } catch (err) {
+    if (failDocs(res, err)) {
+      return;
+    }
+    next(err);
   }
-  ok(res, { posts, total, page: page ?? 1, pageSize: pageSize ?? posts.length });
 });
 
-postsRouter.get("/workspace/specials", requireAuth, (_req, res) => {
-  ok(res, {
-    about: getPageByKind("about") ?? null,
-  });
+postsRouter.get("/workspace/specials", requireAuth, async (_req, res, next) => {
+  try {
+    ok(res, {
+      about: (await getPageByKind("about")) ?? null,
+    });
+  } catch (err) {
+    if (failDocs(res, err)) {
+      return;
+    }
+    next(err);
+  }
 });
 
-postsRouter.get("/id/:id", requireAuth, (req, res) => {
-  const post = getPostById(req.params.id);
-  if (!post) {
-    fail(res, "NOT_FOUND", 404);
-    return;
+postsRouter.get("/id/:id", requireAuth, async (req, res, next) => {
+  try {
+    const post = await getPostById(req.params.id);
+    if (!post) {
+      fail(res, "NOT_FOUND", 404);
+      return;
+    }
+    ok(res, { post });
+  } catch (err) {
+    if (failDocs(res, err)) {
+      return;
+    }
+    next(err);
   }
-  ok(res, { post });
 });
 
-postsRouter.get("/:slug", optionalAuth, (req, res) => {
-  const includeDrafts = Boolean(req.authed);
-  const post = getPostBySlug(req.params.slug, includeDrafts);
-  // 前台 /post/:slug 只服务普通文章；about 走工作区
-  if (!post || post.pageKind !== "article") {
-    fail(res, "NOT_FOUND", 404);
-    return;
+postsRouter.get("/:slug", optionalAuth, async (req, res, next) => {
+  try {
+    const includeDrafts = Boolean(req.authed);
+    const page = await getPostPage(req.params.slug, includeDrafts);
+    const post = page?.post;
+    if (!post || post.pageKind !== "article") {
+      fail(res, "NOT_FOUND", 404);
+      return;
+    }
+    if (!req.authed) {
+      res.set("Cache-Control", "public, max-age=60");
+    }
+    ok(res, {
+      post,
+      ancestors: page.ancestors,
+      siblings: page.siblings,
+      children: includeDrafts ? page.children : page.children.filter((item) => !item.draft),
+    });
+  } catch (err) {
+    if (failDocs(res, err)) {
+      return;
+    }
+    next(err);
   }
-  if (!req.authed) {
-    res.set("Cache-Control", "public, max-age=60");
-  }
-  const ancestors = listAncestors(post.id, includeDrafts);
-  const { posts: siblings } = listPosts({
-    pageKind: "article",
-    parentId: post.parentId ?? null,
-    includeDrafts,
-    treeOrder: true,
-  });
-  const { posts: children } = listPosts({
-    pageKind: "article",
-    parentId: post.id,
-    includeDrafts,
-    treeOrder: true,
-  });
-  ok(res, {
-    post,
-    ancestors,
-    siblings,
-    children: includeDrafts ? children : children.filter((item) => !item.draft),
-  });
 });
 
-postsRouter.post("/", requireAuth, (req, res) => {
+postsRouter.post("/", requireAuth, async (req, res, next) => {
   const parsed = parseUpsert(req.body);
   if (!parsed.ok) {
     fail(res, parsed.error);
     return;
   }
   try {
-    const post = createPost(parsed.value);
+    const post = await createPost(parsed.value);
     if (post.pageKind === "about") {
       syncSiteFromAboutPage(post);
     }
     ok(res, { post }, 201);
   } catch (err) {
+    if (failDocs(res, err)) {
+      return;
+    }
     const message = err instanceof Error ? err.message : "SERVER_ERROR";
     if (
       message === "PAGE_EXISTS" ||
@@ -231,27 +252,30 @@ postsRouter.post("/", requireAuth, (req, res) => {
       fail(res, message);
       return;
     }
-    throw err;
+    next(err);
   }
 });
 
 /** 侧栏建子页：创建子页 + 父文 pageLink，避免与打开中的编辑器竞态冲掉链接 */
-postsRouter.post("/id/:id/children", requireAuth, (req, res) => {
+postsRouter.post("/id/:id/children", requireAuth, async (req, res, next) => {
   try {
-    const { child, parent } = createLinkedChild(req.params.id);
+    const { child, parent } = await createLinkedChild(req.params.id);
     ok(res, { post: child, parent }, 201);
   } catch (err) {
+    if (failDocs(res, err)) {
+      return;
+    }
     const message = err instanceof Error ? err.message : "SERVER_ERROR";
     if (message === "INVALID_PARENT" || message === "INVALID_CATEGORY" || message === "PAGE_EXISTS") {
       fail(res, message);
       return;
     }
-    throw err;
+    next(err);
   }
 });
 
 /** 把任意文章挂到当前文章下（或 body.parentId=null 移回顶层） */
-postsRouter.put("/id/:id/parent", requireAuth, (req, res) => {
+postsRouter.put("/id/:id/parent", requireAuth, async (req, res, next) => {
   const raw = (req.body ?? {}) as { parentId?: string | null };
   const parentId = raw.parentId === undefined ? null : raw.parentId;
   if (parentId !== null && (typeof parentId !== "string" || !parentId.trim())) {
@@ -259,26 +283,29 @@ postsRouter.put("/id/:id/parent", requireAuth, (req, res) => {
     return;
   }
   try {
-    const result = reparentArticle(req.params.id, parentId);
+    const result = await reparentArticle(req.params.id, parentId);
     ok(res, result);
   } catch (err) {
+    if (failDocs(res, err)) {
+      return;
+    }
     const message = err instanceof Error ? err.message : "SERVER_ERROR";
     if (message === "INVALID_PARENT" || message === "NOT_FOUND") {
       fail(res, message, message === "NOT_FOUND" ? 404 : 400);
       return;
     }
-    throw err;
+    next(err);
   }
 });
 
-postsRouter.put("/:id", requireAuth, (req, res) => {
+postsRouter.put("/:id", requireAuth, async (req, res, next) => {
   const parsed = parseUpsert(req.body);
   if (!parsed.ok) {
     fail(res, parsed.error);
     return;
   }
   try {
-    const post = updatePost(req.params.id, parsed.value);
+    const post = await updatePost(req.params.id, parsed.value);
     if (!post) {
       fail(res, "NOT_FOUND", 404);
       return;
@@ -288,28 +315,34 @@ postsRouter.put("/:id", requireAuth, (req, res) => {
     }
     ok(res, { post });
   } catch (err) {
+    if (failDocs(res, err)) {
+      return;
+    }
     const message = err instanceof Error ? err.message : "SERVER_ERROR";
     if (message === "INVALID_CATEGORY" || message === "PAGE_KIND_FIXED" || message === "EMPTY_BODY" || message === "INVALID_PARENT") {
       fail(res, message);
       return;
     }
-    throw err;
+    next(err);
   }
 });
 
-postsRouter.delete("/:id", requireAuth, (req, res) => {
+postsRouter.delete("/:id", requireAuth, async (req, res, next) => {
   try {
-    if (!deletePost(req.params.id)) {
+    if (!(await deletePost(req.params.id))) {
       fail(res, "NOT_FOUND", 404);
       return;
     }
     ok(res, null);
   } catch (err) {
+    if (failDocs(res, err)) {
+      return;
+    }
     const message = err instanceof Error ? err.message : "SERVER_ERROR";
     if (message === "PAGE_FIXED") {
       fail(res, message);
       return;
     }
-    throw err;
+    next(err);
   }
 });

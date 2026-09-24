@@ -6,6 +6,7 @@ import {
   type SiteSkill,
 } from "@myblog/shared";
 import { requireAuth } from "../auth.js";
+import { DocsError } from "../docs-client.js";
 import { fail, ok } from "../http.js";
 import { getAbout, saveAbout } from "../site.js";
 
@@ -54,16 +55,32 @@ function readAbout(input: unknown): SiteAbout | null {
   };
 }
 
-siteRouter.get("/", (_req, res) => {
-  res.set("Cache-Control", "public, max-age=60");
-  ok(res, { about: getAbout() });
+siteRouter.get("/", async (_req, res, next) => {
+  try {
+    res.set("Cache-Control", "public, max-age=60");
+    ok(res, { about: await getAbout() });
+  } catch (err) {
+    if (err instanceof DocsError) {
+      fail(res, err.code, err.status || 400);
+      return;
+    }
+    next(err);
+  }
 });
 
-siteRouter.put("/", requireAuth, (req, res) => {
+siteRouter.put("/", requireAuth, async (req, res, next) => {
   const about = readAbout(req.body);
   if (!about || !about.name) {
     fail(res, "INVALID_INPUT");
     return;
   }
-  ok(res, { about: saveAbout(about) });
+  try {
+    ok(res, { about: await saveAbout(about) });
+  } catch (err) {
+    if (err instanceof DocsError) {
+      fail(res, err.code, err.status || 400);
+      return;
+    }
+    next(err);
+  }
 });

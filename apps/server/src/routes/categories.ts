@@ -8,6 +8,7 @@ import {
   listCategories,
   updateCategory,
 } from "../categories.js";
+import { DocsError } from "../docs-client.js";
 import { fail, ok } from "../http.js";
 
 export const categoriesRouter = Router();
@@ -45,31 +46,55 @@ function parseUpsert(raw: unknown): UpsertCategoryInput | null {
   };
 }
 
-categoriesRouter.get("/", (_req, res) => {
-  // 管理端会改排序/显隐，不能公共缓存，否则上移下移后仍读到旧列表
-  res.set("Cache-Control", "private, no-store");
-  ok(res, { categories: listCategories() });
-});
-
-categoriesRouter.get("/:slug", (req, res) => {
-  const category = getCategoryBySlug(req.params.slug);
-  if (!category) {
-    fail(res, "NOT_FOUND", 404);
-    return;
+function failDocs(res: Parameters<typeof fail>[0], err: unknown): boolean {
+  if (!(err instanceof DocsError)) {
+    return false;
   }
-  res.set("Cache-Control", "private, no-store");
-  ok(res, { category });
+  fail(res, err.code, err.status || 400);
+  return true;
+}
+
+categoriesRouter.get("/", async (_req, res, next) => {
+  try {
+    res.set("Cache-Control", "private, no-store");
+    ok(res, { categories: await listCategories() });
+  } catch (err) {
+    if (failDocs(res, err)) {
+      return;
+    }
+    next(err);
+  }
 });
 
-categoriesRouter.post("/", requireAuth, (req, res) => {
+categoriesRouter.get("/:slug", async (req, res, next) => {
+  try {
+    const category = await getCategoryBySlug(req.params.slug);
+    if (!category) {
+      fail(res, "NOT_FOUND", 404);
+      return;
+    }
+    res.set("Cache-Control", "private, no-store");
+    ok(res, { category });
+  } catch (err) {
+    if (failDocs(res, err)) {
+      return;
+    }
+    next(err);
+  }
+});
+
+categoriesRouter.post("/", requireAuth, async (req, res, next) => {
   const parsed = parseUpsert(req.body);
   if (!parsed) {
     fail(res, "INVALID_INPUT");
     return;
   }
   try {
-    ok(res, { category: createCategory(parsed) }, 201);
+    ok(res, { category: await createCategory(parsed) }, 201);
   } catch (err) {
+    if (failDocs(res, err)) {
+      return;
+    }
     const message = err instanceof Error ? err.message : "SERVER_ERROR";
     if (
       message.startsWith("TAG_NAME_INVALID:") ||
@@ -79,24 +104,27 @@ categoriesRouter.post("/", requireAuth, (req, res) => {
       fail(res, message);
       return;
     }
-    throw err;
+    next(err);
   }
 });
 
-categoriesRouter.put("/:id", requireAuth, (req, res) => {
+categoriesRouter.put("/:id", requireAuth, async (req, res, next) => {
   const parsed = parseUpsert(req.body);
   if (!parsed) {
     fail(res, "INVALID_INPUT");
     return;
   }
   try {
-    const category = updateCategory(req.params.id, parsed);
+    const category = await updateCategory(req.params.id, parsed);
     if (!category) {
       fail(res, "NOT_FOUND", 404);
       return;
     }
     ok(res, { category });
   } catch (err) {
+    if (failDocs(res, err)) {
+      return;
+    }
     const message = err instanceof Error ? err.message : "SERVER_ERROR";
     if (
       message.startsWith("TAG_NAME_INVALID:") ||
@@ -106,19 +134,21 @@ categoriesRouter.put("/:id", requireAuth, (req, res) => {
       fail(res, message);
       return;
     }
-    throw err;
+    next(err);
   }
 });
 
-categoriesRouter.delete("/:id", requireAuth, (req, res) => {
+categoriesRouter.delete("/:id", requireAuth, async (req, res, next) => {
   try {
-    if (!deleteCategory(req.params.id)) {
+    if (!(await deleteCategory(req.params.id))) {
       fail(res, "NOT_FOUND", 404);
       return;
     }
     ok(res, null);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "SERVER_ERROR";
-    fail(res, message);
+    if (failDocs(res, err)) {
+      return;
+    }
+    next(err);
   }
 });

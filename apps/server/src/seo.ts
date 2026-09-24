@@ -45,8 +45,8 @@ function absoluteUrl(origin: string, value?: string): string | undefined {
   return `${origin}${value.startsWith("/") ? value : `/${value}`}`;
 }
 
-function websiteJsonLd(origin: string) {
-  const about = getAbout();
+async function websiteJsonLd(origin: string) {
+  const about = await getAbout();
   return {
     "@context": "https://schema.org",
     "@type": "WebSite",
@@ -61,7 +61,7 @@ function websiteJsonLd(origin: string) {
   };
 }
 
-export function metaForRequest(req: Request): PageMeta {
+export async function metaForRequest(req: Request): Promise<PageMeta> {
   const origin = publicOrigin(req);
   const path = req.path;
 
@@ -78,7 +78,7 @@ export function metaForRequest(req: Request): PageMeta {
 
   if (path.startsWith("/post/")) {
     const slug = decodeURIComponent(path.slice("/post/".length)).split("/")[0] ?? "";
-    const post = slug ? getPostBySlug(slug, false) : undefined;
+    const post = slug ? await getPostBySlug(slug, false) : undefined;
     if (!post || post.pageKind !== "article") {
       return {
         status: 404,
@@ -90,7 +90,7 @@ export function metaForRequest(req: Request): PageMeta {
       };
     }
     const url = `${origin}/post/${post.slug}`;
-    const about = getAbout();
+    const about = await getAbout();
     const image = absoluteUrl(origin, post.coverUrl);
     return {
       status: 200,
@@ -122,7 +122,7 @@ export function metaForRequest(req: Request): PageMeta {
       description: SITE_DESCRIPTION,
       path,
       type: "website",
-      jsonLd: websiteJsonLd(origin),
+      jsonLd: await websiteJsonLd(origin),
     };
   }
 
@@ -139,7 +139,7 @@ export function metaForRequest(req: Request): PageMeta {
   // 分类页 /:slug（排除已处理路径）
   if (path.length > 1 && !path.slice(1).includes("/")) {
     const slug = decodeURIComponent(path.slice(1));
-    const category = getCategoryBySlug(slug);
+    const category = await getCategoryBySlug(slug);
     if (category && category.kind === "article") {
       return {
         status: 200,
@@ -206,11 +206,11 @@ export function robotsTxt(origin: string): string {
   ].join("\n");
 }
 
-export function sitemapXml(origin: string): string {
-  const { posts } = listPosts({ includeDrafts: false, pageKind: "article" });
+export async function sitemapXml(origin: string): Promise<string> {
+  const { posts } = await listPosts({ includeDrafts: false, pageKind: "article" });
   // 只收录顶层文章；子页由正文 pageLink 发现，避免空「无标题」子页进地图
   const topLevel = posts.filter((post) => !post.parentId);
-  const categoryPages = listCategories()
+  const categoryPages = (await listCategories())
     .filter((item) => item.kind === "article" && item.nav)
     .map((item) => ({
       loc: `/${item.slug}`,

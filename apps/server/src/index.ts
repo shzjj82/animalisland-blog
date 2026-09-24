@@ -4,13 +4,9 @@ import compression from "compression";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import express from "express";
-import { db } from "./db.js";
+import { docsHealth } from "./docs-client.js";
 import { ensureDataDirs, env, repoRoot } from "./env.js";
-import "./categories.js";
-import { ensureWorkspacePages } from "./posts.js";
 import { authRouter } from "./routes/auth.js";
-
-ensureWorkspacePages();
 import { aiRouter } from "./routes/ai.js";
 import { categoriesRouter } from "./routes/categories.js";
 import { postsRouter } from "./routes/posts.js";
@@ -43,12 +39,12 @@ app.use(
   }),
 );
 
-app.get("/api/health", (_req, res) => {
+app.get("/api/health", async (_req, res) => {
   try {
-    db.prepare("SELECT 1 AS ok").get();
-    ok(res, { status: "up", db: "up" });
+    const docs = await docsHealth();
+    ok(res, { status: "up", docs: docs.status ?? "up" });
   } catch {
-    fail(res, "DB_DOWN", 503, "数据库不可用");
+    fail(res, "DOCS_DOWN", 503, "文档服务不可用");
   }
 });
 
@@ -62,8 +58,12 @@ app.use("/api/upload", uploadRouter);
 app.get("/robots.txt", (req, res) => {
   res.type("text/plain").set("Cache-Control", "public, max-age=3600").send(robotsTxt(publicOrigin(req)));
 });
-app.get("/sitemap.xml", (req, res) => {
-  res.type("application/xml").set("Cache-Control", "public, max-age=300").send(sitemapXml(publicOrigin(req)));
+app.get("/sitemap.xml", async (req, res, next) => {
+  try {
+    res.type("application/xml").set("Cache-Control", "public, max-age=300").send(await sitemapXml(publicOrigin(req)));
+  } catch (err) {
+    next(err);
+  }
 });
 
 const webDist = path.join(repoRoot, "apps/web/dist");
@@ -82,16 +82,25 @@ if (env.isProd && fs.existsSync(indexPath)) {
       },
     }),
   );
-  app.get("*", (req, res) => {
-    const origin = publicOrigin(req);
-    const meta = metaForRequest(req);
-    res.status(meta.status);
-    res.setHeader("Cache-Control", "no-cache");
-    res.type("html").send(applyHtmlMeta(indexHtml, origin, meta));
+  app.get("*", async (req, res, next) => {
+    try {
+      const origin = publicOrigin(req);
+      const meta = await metaForRequest(req);
+      res.status(meta.status);
+      res.setHeader("Cache-Control", "no-cache");
+      res.type("html").send(applyHtmlMeta(indexHtml, origin, meta));
+    } catch (err) {
+      next(err);
+    }
   });
 }
 
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (err && typeof err === "object" && "name" in err && err.name === "DocsError") {
+    const docsErr = err as { code?: string; status?: number };
+    fail(res, docsErr.code || "DOCS_UNAVAILABLE", docsErr.status || 503);
+    return;
+  }
   const message = err instanceof Error ? err.message : "SERVER_ERROR";
   if (message === "UNSUPPORTED_TYPE" || message === "INVALID_CATEGORY") {
     fail(res, message);

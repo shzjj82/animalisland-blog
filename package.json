@@ -7,6 +7,7 @@
     "dev": "pnpm --parallel --filter @myblog/shared --filter @myblog/web --filter @myblog/server dev",
     "build": "pnpm --filter @myblog/shared build && pnpm --filter @myblog/web build && pnpm --filter @myblog/server build",
     "start": "pnpm --filter @myblog/server start",
+    "migrate:docs": "pnpm --filter @myblog/server exec tsx ../../scripts/migrate-sqlite-to-docs.ts",
     "docker:build": "docker build -t myblog:latest .",
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",

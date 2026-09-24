@@ -55,6 +55,9 @@ export const env = {
   ossPrefix: (process.env.OSS_PREFIX ?? "blog").replace(/^\/+|\/+$/g, ""),
   ossPublicBase: (process.env.OSS_PUBLIC_BASE ?? "").replace(/\/$/, ""),
   siteUrl: (process.env.SITE_URL ?? "").replace(/\/$/, ""),
+  /** Next.js / Express 只调文档网关；登录、上传、AI 仍走本服务 */
+  docsBaseUrl: (process.env.DOCS_BASE_URL ?? "http://127.0.0.1:3000").replace(/\/$/, ""),
+  docsServiceKey: process.env.DOCS_SERVICE_KEY ?? "dev-docs-key",
   /** OpenAI 兼容接口（也可填 DeepSeek / 通义 / 本地代理等） */
   aiApiBase: (process.env.AI_API_BASE ?? "https://api.openai.com/v1").replace(/\/$/, ""),
   aiApiKey: process.env.AI_API_KEY ?? "",
