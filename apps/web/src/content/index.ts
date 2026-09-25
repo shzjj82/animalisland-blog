@@ -10,7 +10,5 @@ export { NotionEditor, type NotionEditorProps } from "@/content/editor/NotionEdi
 export {
   saveEditor,
   insertEditorBlocksAt,
-  removeEditorBlocksRange,
-  markEditorPreviewBlocks,
 } from "@/content/editor/persist";
 export { BlogContent, type BlogContentProps } from "@/content/render/BlogContent";

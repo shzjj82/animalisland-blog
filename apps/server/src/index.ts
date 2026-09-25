@@ -4,8 +4,7 @@ import compression from "compression";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import express from "express";
-import { docsHealth } from "./docs-client.js";
-import { ensureDataDirs, env, repoRoot } from "./env.js";
+import { ensureDataDirs, env, isDocsBackend, isLocalBackend, repoRoot } from "./env.js";
 import { authRouter } from "./routes/auth.js";
 import { aiRouter } from "./routes/ai.js";
 import { categoriesRouter } from "./routes/categories.js";
@@ -41,10 +40,17 @@ app.use(
 
 app.get("/api/health", async (_req, res) => {
   try {
-    const docs = await docsHealth();
-    ok(res, { status: "up", docs: docs.status ?? "up" });
+    if (isDocsBackend()) {
+      const { docsHealth } = await import("./docs-client.js");
+      const docs = await docsHealth();
+      ok(res, { status: "up", backend: "docs", docs: docs.status ?? "up" });
+      return;
+    }
+    const { db } = await import("./db.js");
+    db.prepare("SELECT 1 AS ok").get();
+    ok(res, { status: "up", backend: "local", db: "up" });
   } catch {
-    fail(res, "DOCS_DOWN", 503, "文档服务不可用");
+    fail(res, isDocsBackend() ? "DOCS_DOWN" : "DB_DOWN", 503, isDocsBackend() ? "文档服务不可用" : "数据库不可用");
   }
 });
 
@@ -127,6 +133,30 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
   fail(res, "SERVER_ERROR", 500);
 });
 
-app.listen(env.port, env.host, () => {
-  console.log(`myblog server http://${env.host}:${env.port} (${env.nodeEnv})`);
+async function start() {
+  if (isLocalBackend()) {
+    const { ensureWorkspacePages } = await import("./posts.js");
+    await ensureWorkspacePages();
+  }
+
+  if (isDocsBackend()) {
+    try {
+      const { docsHealth } = await import("./docs-client.js");
+      const docs = await docsHealth();
+      console.log(`docs health: ${docs.status ?? "up"} (${env.docsBaseUrl})`);
+    } catch (err) {
+      const code = err instanceof Error ? err.message : String(err);
+      console.warn(`docs health check failed (${code}); continuing listen → ${env.docsBaseUrl}`);
+    }
+  }
+
+  app.listen(env.port, env.host, () => {
+    const mode = isDocsBackend() ? `docs → ${env.docsBaseUrl}` : `local sqlite → ${env.databasePath}`;
+    console.log(`myblog server http://${env.host}:${env.port} (${env.nodeEnv}, ${mode})`);
+  });
+}
+
+void start().catch((err) => {
+  console.error("server failed to start:", err);
+  process.exit(1);
 });

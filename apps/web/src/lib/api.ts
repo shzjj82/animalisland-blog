@@ -135,14 +135,16 @@ export const api = {
   },
   aiStatus: () =>
     request<{ enabled: boolean; model: string | null; base: string | null }>("/api/ai/status"),
-  aiChat: (input: AiChatInput) =>
+  aiChat: (input: AiChatInput, init?: { signal?: AbortSignal }) =>
     request<AiChatResult>("/api/ai/chat", {
       method: "POST",
       body: JSON.stringify(input),
+      signal: init?.signal,
     }),
-  aiToEditor: (input: AiToEditorInput) =>
+  aiToEditor: (input: AiToEditorInput, init?: { signal?: AbortSignal }) =>
     request<AiToEditorResult>("/api/ai/to-editor", {
       method: "POST",
       body: JSON.stringify(input),
+      signal: init?.signal,
     }),
 };

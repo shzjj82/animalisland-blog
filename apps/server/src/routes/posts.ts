@@ -235,7 +235,7 @@ postsRouter.post("/", requireAuth, async (req, res, next) => {
   try {
     const post = await createPost(parsed.value);
     if (post.pageKind === "about") {
-      syncSiteFromAboutPage(post);
+      await syncSiteFromAboutPage(post);
     }
     ok(res, { post }, 201);
   } catch (err) {
@@ -311,7 +311,7 @@ postsRouter.put("/:id", requireAuth, async (req, res, next) => {
       return;
     }
     if (post.pageKind === "about") {
-      syncSiteFromAboutPage(post);
+      await syncSiteFromAboutPage(post);
     }
     ok(res, { post });
   } catch (err) {

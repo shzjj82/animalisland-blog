@@ -1,66 +1,36 @@
+/**
+ * 分类后端门面：按 CONTENT_BACKEND 选择本地 SQLite 或远程 docs API。
+ */
 import type { Category, CategoryKind, UpsertCategoryInput } from "@myblog/shared";
-import { DocsError, docsRequest } from "./docs-client.js";
+import { loadCategories } from "./content-backend.js";
 
 export async function listCategories(): Promise<Category[]> {
-  const data = await docsRequest<{ categories: Category[] }>("GET", "/docs/categories");
-  return data.categories;
+  return (await loadCategories()).listCategories();
 }
 
 export async function listCategorySlugs(kind: CategoryKind): Promise<string[]> {
-  return (await listCategories())
-    .filter((item) => item.kind === kind)
-    .map((item) => item.slug);
+  return (await loadCategories()).listCategorySlugs(kind);
 }
 
 export async function getCategoryBySlug(slug: string): Promise<Category | undefined> {
-  try {
-    const data = await docsRequest<{ category: Category }>(
-      "GET",
-      `/docs/categories/${encodeURIComponent(slug)}`,
-    );
-    return data.category;
-  } catch (err) {
-    if (err instanceof DocsError && err.status === 404) {
-      return undefined;
-    }
-    throw err;
-  }
+  return (await loadCategories()).getCategoryBySlug(slug);
 }
 
 export async function createCategory(input: UpsertCategoryInput): Promise<Category> {
-  const data = await docsRequest<{ category: Category }>("POST", "/docs/categories", { body: input });
-  return data.category;
+  return (await loadCategories()).createCategory(input);
 }
 
 export async function updateCategory(
   id: string,
   input: UpsertCategoryInput,
 ): Promise<Category | undefined> {
-  try {
-    const data = await docsRequest<{ category: Category }>(
-      "PUT",
-      `/docs/categories/${encodeURIComponent(id)}`,
-      { body: input },
-    );
-    return data.category;
-  } catch (err) {
-    if (err instanceof DocsError && err.status === 404) {
-      return undefined;
-    }
-    throw err;
-  }
+  return (await loadCategories()).updateCategory(id, input);
 }
 
 export async function deleteCategory(id: string): Promise<boolean> {
-  try {
-    await docsRequest<null>("DELETE", `/docs/categories/${encodeURIComponent(id)}`);
-    return true;
-  } catch (err) {
-    if (err instanceof DocsError && err.status === 404) {
-      return false;
-    }
-    throw err;
-  }
+  return (await loadCategories()).deleteCategory(id);
 }
 
-export function ensureDefaultCategories(): void {}
+export async function ensureDefaultCategories(): Promise<void> {
+  (await loadCategories()).ensureDefaultCategories();
+}

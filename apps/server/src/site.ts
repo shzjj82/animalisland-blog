@@ -1,19 +1,21 @@
+/**
+ * 站点关于页门面：按 CONTENT_BACKEND 选择本地 SQLite 或远程 docs API。
+ */
 import type { SiteAbout } from "@myblog/shared";
-import { docsRequest } from "./docs-client.js";
+import { loadSite } from "./content-backend.js";
 
 export async function getAbout(): Promise<SiteAbout> {
-  const data = await docsRequest<{ about: SiteAbout }>("GET", "/docs/site");
-  return data.about;
+  return (await loadSite()).getAbout();
 }
 
 export async function saveAbout(input: SiteAbout): Promise<SiteAbout> {
-  const data = await docsRequest<{ about: SiteAbout }>("PUT", "/docs/site", { body: input });
-  return data.about;
+  return (await loadSite()).saveAbout(input);
 }
 
-/** about 页权威源在 Nest；工作区保存后网关会自己镜像，这里不必再写 */
-export function syncSiteFromAboutPage(_page: {
+export async function syncSiteFromAboutPage(page: {
   title: string;
   body: unknown;
   props: Record<string, unknown>;
-}): void {}
+}): Promise<void> {
+  (await loadSite()).syncSiteFromAboutPage(page);
+}

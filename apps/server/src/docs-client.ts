@@ -1,6 +1,5 @@
 /**
- * Next.js / 博客服务端只通过网关读写文档。
- * 登录、上传、AI、SEO 仍留在本仓库，不归 Nest。
+ * 只请求文档服务：分类和文档的存查。
  * x-docs-key 只放服务端，不要下发到浏览器。
  */
 import { env } from "./env.js";
@@ -45,7 +44,8 @@ export async function docsRequest<T>(
     body?: unknown;
   },
 ): Promise<T> {
-  const url = `${env.docsBaseUrl}${path}${queryString(opts?.query)}`;
+  const query = { ...opts?.query, appCode: env.docsAppCode };
+  const url = `${env.docsBaseUrl}${path}${queryString(query)}`;
   const headers: Record<string, string> = {
     Accept: "application/json",
     "x-docs-key": env.docsServiceKey,
@@ -53,13 +53,24 @@ export async function docsRequest<T>(
   const init: RequestInit = { method, headers };
   if (opts?.body !== undefined) {
     headers["Content-Type"] = "application/json";
-    init.body = JSON.stringify(opts.body);
+    const body =
+      opts.body && typeof opts.body === "object" && !Array.isArray(opts.body)
+        ? { ...(opts.body as Record<string, unknown>), appCode: env.docsAppCode }
+        : opts.body;
+    init.body = JSON.stringify(body);
   }
+
+  const timeoutMs = Number.isFinite(env.docsTimeoutMs) && env.docsTimeoutMs > 0 ? env.docsTimeoutMs : 15_000;
+  init.signal = AbortSignal.timeout(timeoutMs);
 
   let response: Response;
   try {
     response = await fetch(url, init);
-  } catch {
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "";
+    if (name === "TimeoutError" || name === "AbortError") {
+      throw new DocsError("DOCS_TIMEOUT", 504);
+    }
     throw new DocsError("DOCS_UNAVAILABLE", 503);
   }
 

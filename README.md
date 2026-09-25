@@ -93,6 +93,8 @@ docker save myblog:latest | gzip > myblog-amd64.tar.gz
 
 | 变量 | 说明 |
 |------|------|
+| `CONTENT_BACKEND` | `local`（默认，本机 SQLite）或 `docs` / `api`（远程文档服务） |
+| `DOCS_*` | 仅远程模式需要：`DOCS_BASE_URL` / `DOCS_SERVICE_KEY` / `DOCS_APP_CODE` |
 | `JWT_SECRET` | ≥ 24 位随机串，禁止示例弱值 |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 单用户登录；密码 ≥ 8 且勿用常见弱口令 |
 | `SITE_URL` | 对外地址，sitemap / OG 用 |
@@ -102,7 +104,7 @@ docker save myblog:latest | gzip > myblog-amd64.tar.gz
 
 登录 cookie 在生产带 `Secure`，**纯 HTTP 域名/IP 下浏览器不会保存**，需要 HTTPS 才能在网页里登录。
 
-健康检查：`GET /api/health`（会探 SQLite）。
+健康检查：`GET /api/health`（返回 `backend: "local" | "docs"`；local 探 SQLite，docs 探文档服务）。启动日志也会打印当前后端。
 
 ---
 
@@ -160,6 +162,8 @@ AI 助手产物会清洗：去掉表单标签，不插入 `quote` / `code` / `de
 pnpm dev              # 三包并行开发
 pnpm build            # shared → web → server
 pnpm start            # 跑编译后的 server
+pnpm check:backend    # 内容后端别名与门面导出契约
+pnpm migrate:docs     # SQLite → 文档服务（可加 -- --dry-run）
 pnpm docker:build
 pnpm pm2:start        # 本机 pm2，见 ecosystem.config.cjs
 ```

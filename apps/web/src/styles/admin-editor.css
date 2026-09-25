@@ -1,0 +1,789 @@
+/* AI / 手工块：引用不要长得像大输入框（库默认 min-height:158px） */
+.editor-holder .cdx-quote {
+  margin: 10px 0;
+  padding: 2px 0 2px 14px;
+  border: 0;
+  border-radius: 0;
+  border-left: 3px solid color-mix(in oklab, #d98c3b 70%, transparent);
+  background: transparent;
+}
+
+.editor-holder .cdx-quote .cdx-input,
+.editor-holder .cdx-quote__text,
+.editor-holder .cdx-quote__caption {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.editor-holder .cdx-quote__text {
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  font-size: 16px;
+  line-height: 1.7;
+  font-weight: 600;
+  color: color-mix(in oklab, var(--foreground, #1c1917) 78%, transparent);
+}
+
+.editor-holder .cdx-quote__caption {
+  margin-top: 6px;
+  padding: 0 !important;
+  font-size: 13px;
+  opacity: 0.72;
+}
+
+.editor-holder .cdx-quote__caption:empty {
+  display: none !important;
+}
+
+.editor-holder .cdx-list {
+  margin: 4px 0 8px;
+  padding-left: 1.35em;
+}
+
+.editor-holder .cdx-list__item {
+  padding: 2px 0;
+  line-height: 1.75;
+}
+
+.editor-holder .ce-delimiter {
+  margin: 18px 0;
+  line-height: 1;
+  text-align: center;
+  letter-spacing: 0.35em;
+  opacity: 0.45;
+}
+
+.form-col,
+
+.editor-holder {
+  margin: 0;
+  background: transparent;
+  border-radius: 0;
+  padding: 18px 16px 56px;
+  min-height: 520px;
+  border: 0;
+  color: var(--blog-ink);
+}
+
+/* Editor.js 默认把内容锁在约 650px 居中，写作台会两侧空一大块 */
+.editor-holder .codex-editor__redactor {
+  padding-bottom: 140px !important;
+  margin-right: 0 !important;
+}
+
+.editor-holder .ce-block__content,
+.editor-holder .ce-toolbar__content {
+  max-width: none !important;
+  width: calc(100% - 56px);
+  margin-left: 48px;
+  margin-right: 8px;
+}
+
+.editor-holder .ce-toolbar {
+  left: 0 !important;
+  /* Editor.js 仍写 top；垂直微调走合成层，避免改 top 触发大范围 reflow */
+  transform: translate3d(0, var(--ce-toolbar-nudge, 0px), 0);
+}
+
+.editor-holder .ce-header {
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  line-height: 1.25;
+  /* 不要用 margin-top：Editor.js 定位公式会把 margin 和 getBoundingClientRect 偏移算两次，标题越大 +/拖拽钮越往下掉 */
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.editor-holder h1.ce-header {
+  font-size: 34px;
+  margin-bottom: 14px;
+}
+
+.editor-holder h2.ce-header {
+  font-size: 24px;
+  margin-bottom: 10px;
+}
+
+.editor-holder h3.ce-header {
+  font-size: 19px;
+  margin-bottom: 8px;
+}
+
+/* 标题块与上一块的间距放在 ce-block 上，避免干扰工具栏垂直对齐 */
+.editor-holder .ce-block:has(h2.ce-header) {
+  margin-top: 1.15em;
+}
+
+.editor-holder .ce-block:has(h3.ce-header) {
+  margin-top: 0.9em;
+}
+
+.editor-holder .ce-paragraph,
+.editor-holder .cdx-block {
+  font-size: 16.5px;
+  line-height: 1.85;
+}
+
+.editor-holder .ce-block {
+  margin: 0.15em 0;
+}
+
+.editor-holder .ce-header[contentEditable="true"][data-placeholder]:empty::before,
+.editor-holder .ce-paragraph[data-placeholder]:empty::before {
+  opacity: 0.38;
+  font-weight: 600;
+}
+
+.animal-cursor--force .editor-holder [contenteditable="true"],
+.editor-holder [contenteditable="true"],
+.editor-holder .ce-paragraph,
+.editor-holder .cdx-block {
+  pointer-events: auto !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text !important;
+}
+
+.editor-holder .ce-toolbar,
+.editor-holder .ce-toolbar__content,
+.editor-holder .ce-toolbar__actions,
+.editor-holder .ce-toolbar__plus,
+.editor-holder .ce-toolbar__settings-btn,
+.editor-holder .ce-settings,
+.editor-holder .ce-popover,
+.editor-holder .ce-inline-toolbar {
+  pointer-events: auto !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.editor-holder .ce-toolbar__settings-btn {
+  cursor: grab !important;
+}
+
+.editor-holder .ce-toolbar__settings-btn:active {
+  cursor: grabbing !important;
+}
+
+/* / 与 + 菜单：稍大、暖色输入框与 hover，贴合写作台 */
+.editor-holder .ce-popover__container {
+  --width: 268px;
+  --max-height: 380px;
+  --padding: 8px;
+  --border-radius: 12px;
+  --color-border: var(--border, var(--blog-line, #e8e2d6));
+  --color-shadow: color-mix(in oklab, var(--foreground, #3a3228) 16%, transparent);
+  --color-background: var(--background, var(--blog-surface, #fffaf0));
+  --color-text-primary: var(--foreground, var(--blog-ink, #3a3228));
+  --color-text-secondary: var(--muted-foreground, #8a7f70);
+  --color-border-icon: color-mix(in oklab, var(--border, #e8e2d6) 90%, transparent);
+  --color-background-item-hover: var(--muted, #f3eee4);
+  --color-background-item-focus: color-mix(in oklab, var(--sidebar-primary, #d98c3b) 14%, var(--muted, #f3eee4));
+  --color-background-item-confirm: color-mix(in oklab, #b4533a 88%, #3a3228);
+  --color-background-item-confirm-hover: color-mix(in oklab, #9a3f2c 90%, #3a3228);
+  border-radius: var(--border-radius);
+  box-shadow:
+    0 1px 0 color-mix(in oklab, var(--border, #e8e2d6) 80%, transparent),
+    0 14px 36px var(--color-shadow);
+}
+
+.editor-holder .ce-popover__search {
+  margin-bottom: 8px;
+}
+
+.editor-holder .ce-popover__search .cdx-search-field {
+  background: var(--muted, #f3eee4);
+  border: 1px solid color-mix(in oklab, var(--border, #e8e2d6) 85%, transparent);
+  border-radius: 9px;
+  padding: 4px 6px;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.editor-holder .ce-popover__search .cdx-search-field:hover {
+  background: color-mix(in oklab, var(--muted, #f3eee4) 70%, var(--background, #fffaf0));
+  border-color: color-mix(in oklab, var(--sidebar-primary, #d98c3b) 28%, var(--border, #e8e2d6));
+}
+
+.editor-holder .ce-popover__search .cdx-search-field:focus-within {
+  background: var(--background, #fffaf0);
+  border-color: color-mix(in oklab, var(--sidebar-primary, #d98c3b) 45%, var(--border, #e8e2d6));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--sidebar-primary, #d98c3b) 16%, transparent);
+}
+
+.editor-holder .ce-popover__search .cdx-search-field__icon svg {
+  color: var(--muted-foreground, #8a7f70);
+}
+
+.editor-holder .ce-popover__search .cdx-search-field__input {
+  color: var(--foreground, var(--blog-ink, #3a3228));
+  font-size: 13.5px;
+}
+
+.editor-holder .ce-popover__search .cdx-search-field__input::placeholder {
+  color: var(--muted-foreground, #8a7f70);
+  opacity: 0.85;
+}
+
+.editor-holder .ce-popover-item {
+  border-radius: 8px;
+  min-height: 34px;
+}
+
+.editor-holder .ce-popover-item__title {
+  font-weight: 600;
+  font-size: 13.5px;
+  letter-spacing: 0.01em;
+}
+
+.editor-holder .ce-popover-item__icon--tool {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  border-color: color-mix(in oklab, var(--border, #e8e2d6) 80%, transparent);
+  background: color-mix(in oklab, var(--muted, #f3eee4) 55%, var(--background, #fffaf0));
+}
+
+/* 二次确认删除：图标底不要留浅色块，贴合暖色写作台 */
+.editor-holder .ce-popover-item--confirmation {
+  border-radius: 8px;
+}
+
+.editor-holder .ce-popover-item--confirmation .ce-popover-item__icon,
+.editor-holder .ce-popover-item--confirmation .ce-popover-item__icon--tool {
+  background: color-mix(in oklab, #fff 16%, transparent);
+  border-color: color-mix(in oklab, #fff 22%, transparent);
+  color: #fff;
+  box-shadow: none;
+}
+
+.editor-holder .ce-popover-item--confirmation .ce-popover-item__icon svg,
+.editor-holder .ce-popover-item--confirmation .ce-popover-item__title {
+  color: #fff;
+}
+
+/* 菜单视觉分组：文字 / 列表 / 媒体（首项不加顶部分隔） */
+.editor-holder .ce-popover-item[data-item-name="header"]:not(:first-child),
+.editor-holder .ce-popover-item[data-item-name="list"],
+.editor-holder .ce-popover-item[data-item-name="table"] {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in oklab, var(--border, #e8e2d6) 80%, transparent);
+  border-radius: 0 0 8px 8px;
+}
+
+.editor-holder .ce-popover-item[data-item-name="header"] + .ce-popover-item[data-item-name="header"],
+.editor-holder .ce-popover-item[data-item-name="list"] + .ce-popover-item[data-item-name="list"] {
+  margin-top: 0;
+  padding-top: var(--item-padding, 3px);
+  border-top: 0;
+}
+
+.desk--dark .editor-holder .ce-popover__container {
+  --color-border: color-mix(in oklab, #f3e9d2 16%, transparent);
+  --color-shadow: rgb(0 0 0 / 35%);
+  --color-background: #2b2418;
+  --color-text-primary: #f3e9d2;
+  --color-text-secondary: color-mix(in oklab, #f3e9d2 55%, transparent);
+  --color-border-icon: color-mix(in oklab, #f3e9d2 14%, transparent);
+  --color-background-item-hover: color-mix(in oklab, #f3e9d2 8%, #2b2418);
+  --color-background-item-focus: color-mix(in oklab, #d98c3b 18%, #2b2418);
+  --color-background-item-confirm: color-mix(in oklab, #b4533a 70%, #2b2418);
+  --color-background-item-confirm-hover: color-mix(in oklab, #9a3f2c 75%, #2b2418);
+}
+
+.desk--dark .editor-holder .ce-popover__search .cdx-search-field {
+  background: color-mix(in oklab, #f3e9d2 8%, #2b2418);
+  border-color: color-mix(in oklab, #f3e9d2 14%, transparent);
+}
+
+.desk--dark .editor-holder .ce-popover__search .cdx-search-field:hover,
+.desk--dark .editor-holder .ce-popover__search .cdx-search-field:focus-within {
+  background: color-mix(in oklab, #f3e9d2 12%, #2b2418);
+  border-color: color-mix(in oklab, #d98c3b 40%, transparent);
+}
+
+.desk--dark .editor-holder .ce-popover__search .cdx-search-field__icon svg {
+  color: color-mix(in oklab, #f3e9d2 55%, transparent);
+}
+
+.desk--dark .editor-holder .ce-popover__search .cdx-search-field__input {
+  color: #f3e9d2;
+}
+
+.desk--dark .editor-holder .ce-popover-item__icon--tool {
+  background: color-mix(in oklab, #f3e9d2 8%, #2b2418);
+  border-color: color-mix(in oklab, #f3e9d2 14%, transparent);
+}
+
+/* 表格块：贴合写作台配色；勿用 paint/content-visibility，否则会裁掉行列工具菜单 */
+.editor-holder .ce-block:has(.tc-wrap) {
+  overflow: visible;
+}
+
+.editor-holder .tc-wrap {
+  --color-background: color-mix(in srgb, var(--blog-surface, #fff) 88%, var(--blog-line, #e8e2d6));
+  --color-text-secondary: color-mix(in srgb, var(--blog-ink, #3a3228) 55%, transparent);
+  --color-border: var(--blog-line, #e8e2d6);
+  --toggler-dots-color: color-mix(in srgb, var(--blog-ink, #3a3228) 45%, transparent);
+  --toggler-dots-color-hovered: var(--blog-ink, #3a3228);
+  margin-top: 8px;
+  overflow: visible;
+  z-index: 1;
+}
+
+.editor-holder .tc-table {
+  font-size: 14.5px;
+  color: var(--blog-ink, #3a3228);
+  grid-auto-rows: minmax(34px, auto);
+}
+
+.editor-holder .tc-cell {
+  min-height: 34px;
+}
+
+.editor-holder .tc-popover {
+  --color-border: var(--border, #e8e2d6);
+  --color-background: var(--background, #fffaf0);
+  --color-background-hover: var(--muted, #f3eee4);
+  --color-background-confirm: color-mix(in oklab, #b4533a 88%, #3a3228);
+  --color-background-confirm-hover: color-mix(in oklab, #9a3f2c 90%, #3a3228);
+  --color-text-confirm: #fff;
+  border-radius: 10px;
+  box-shadow:
+    0 1px 0 color-mix(in oklab, var(--border, #e8e2d6) 80%, transparent),
+    0 10px 28px color-mix(in oklab, var(--foreground, #3a3228) 14%, transparent);
+  z-index: 5;
+}
+
+.editor-holder .tc-popover__item--confirm .tc-popover__item-icon {
+  background: color-mix(in oklab, #fff 16%, transparent);
+  border-color: color-mix(in oklab, #fff 22%, transparent);
+  color: #fff;
+}
+
+.desk--dark .editor-holder .tc-wrap {
+  --color-background: color-mix(in oklab, #2b2418 88%, #f3e9d2);
+  --color-text-secondary: color-mix(in oklab, #f3e9d2 55%, transparent);
+  --color-border: color-mix(in oklab, #f3e9d2 18%, transparent);
+  --toggler-dots-color: color-mix(in oklab, #f3e9d2 45%, transparent);
+  --toggler-dots-color-hovered: #f3e9d2;
+}
+
+.desk--dark .editor-holder .tc-table {
+  color: #f3e9d2;
+}
+
+.desk--dark .editor-holder .tc-popover {
+  --color-border: color-mix(in oklab, #f3e9d2 16%, transparent);
+  --color-background: #2b2418;
+  --color-background-hover: color-mix(in oklab, #f3e9d2 8%, #2b2418);
+  --color-background-confirm: color-mix(in oklab, #b4533a 70%, #2b2418);
+  --color-background-confirm-hover: color-mix(in oklab, #9a3f2c 75%, #2b2418);
+}
+
+.editor-holder .ce-block--drop-target .ce-block__content {
+  transition: border-color 0.15s ease;
+}
+
+.code-tool {
+  position: relative;
+  overflow: hidden;
+  border: 2px solid #e8e2d6;
+  border-radius: 14px;
+  background: #2b2418;
+}
+
+.code-tool:focus-within {
+  outline: none;
+}
+
+.code-tool-lang {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  min-width: 120px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgba(243, 233, 210, 0.2);
+  border-radius: 8px;
+  background: #3a3125;
+  color: #f3e9d2;
+  font: inherit;
+  font-size: 12px;
+}
+
+.code-tool-body {
+  position: relative;
+}
+
+.code-tool-hl,
+.code-tool-area {
+  box-sizing: border-box;
+  margin: 0;
+  width: 100%;
+  min-height: 180px;
+  padding: 44px 14px 14px;
+  border: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  tab-size: 2;
+}
+
+.code-tool-hl {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  color: #f3e9d2;
+}
+
+.code-tool-hl .hljs,
+.block-code-pre .hljs {
+  background: transparent;
+  padding: 0;
+}
+
+.code-tool-area {
+  position: relative;
+  z-index: 1;
+  display: block;
+  resize: vertical;
+  background: transparent;
+  color: transparent;
+  caret-color: #ffe7b0;
+  cursor: text !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.code-tool-area:focus,
+.code-tool-area:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  border: 0 !important;
+}
+
+.desk--dark .code-tool {
+  border-color: #4a3f2f;
+}
+
+.block-code {
+  position: relative;
+}
+
+.block-code-lang {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 1;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #f3e9d2;
+  opacity: 0.7;
+}
+
+.block-code-pre,
+.block-embed iframe {
+  margin: 0;
+}
+
+.block-code-pre {
+  overflow-x: auto;
+  padding: 44px 16px 16px;
+  border-radius: 14px;
+  background: #2b2418;
+  color: #f3e9d2;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.block-code-pre code {
+  font: inherit;
+}
+
+.block-embed {
+  margin: 0;
+}
+
+.block-embed iframe {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  border-radius: 14px;
+  background: #2b2418;
+}
+
+.block-image {
+  margin: 0;
+}
+
+.block-image figcaption,
+.block-embed figcaption {
+  margin-top: 8px;
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.write-card {
+  padding: 24px;
+  margin-top: 12px;
+}
+
+.write-more {
+  border: 1px solid var(--blog-line);
+  border-radius: 16px;
+  background: rgba(255, 253, 245, 0.72);
+  padding: 0 14px;
+}
+
+.write-more summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 12px 0;
+  font-size: 13px;
+  font-weight: 800;
+  opacity: 0.72;
+}
+
+.write-more summary::-webkit-details-marker {
+  display: none;
+}
+
+.write-more summary::after {
+  content: "▾";
+  float: right;
+  opacity: 0.45;
+}
+
+.write-more[open] summary::after {
+  content: "▴";
+}
+
+.write-more-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 0 14px;
+}
+
+.write-more-tip {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.block-article {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.block-h {
+  margin: 8px 0 0;
+}
+
+.block-p,
+.block-list {
+  line-height: 1.8;
+  margin: 0;
+}
+
+.block-list {
+  padding-left: 1.4em;
+}
+
+.error {
+  color: var(--blog-danger);
+  font-weight: 700;
+}
+
+.file-pick-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.file-pick-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 96px;
+  padding: 16px;
+  border: 2px dashed var(--blog-line);
+  border-radius: 20px;
+  background: var(--blog-input);
+  color: var(--blog-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.2s, background 0.2s;
+}
+
+.file-pick-btn:hover,
+.file-pick-btn.is-over {
+  border-color: var(--blog-accent);
+  background: var(--blog-surface);
+  transform: translateY(-1px);
+}
+
+.file-pick-btn.has-preview {
+  min-height: 160px;
+  overflow: hidden;
+  position: relative;
+  border-style: solid;
+  padding: 0;
+}
+
+.file-pick-preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.file-pick-btn.has-preview .file-pick-copy {
+  position: relative;
+  z-index: 1;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(255, 253, 245, 0.9);
+  box-shadow: 0 8px 24px -16px var(--blog-shadow);
+}
+
+.desk--dark .file-pick-btn.has-preview .file-pick-copy {
+  background: rgba(42, 36, 26, 0.88);
+}
+
+.file-pick-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.file-pick-copy strong {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.file-pick-copy em {
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 600;
+  opacity: 0.6;
+}
+
+.file-pick--compact {
+  width: auto;
+}
+
+.file-pick--compact .file-pick-btn {
+  min-height: 32px;
+  height: 32px;
+  width: auto;
+  padding: 0 14px;
+  border-radius: 999px;
+  border-style: solid;
+  gap: 0;
+}
+
+.file-pick--compact .file-pick-copy em {
+  display: none;
+}
+
+.empty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 36px 24px;
+  text-align: center;
+}
+
+.desk--dark .editor-holder {
+  background: transparent;
+  border-color: transparent;
+  color: #f3e9d2;
+}
+
+.desk--dark .editor-holder .ce-paragraph,
+.desk--dark .editor-holder .ce-header,
+.desk--dark .editor-holder .cdx-block,
+.desk--dark .editor-holder .ce-toolbar__plus,
+.desk--dark .editor-holder .ce-toolbar__settings-btn {
+  color: inherit;
+}
+
+
+.about-body,
+.about-color {
+  width: 100%;
+  border: 0;
+  border-radius: 16px;
+  padding: 12px 16px;
+  font: inherit;
+  color: var(--blog-ink);
+  background: var(--blog-input);
+  box-shadow: 0 3px var(--blog-line);
+  resize: vertical;
+}
+
+.about-color {
+  width: auto;
+  min-width: 140px;
+}
+
+.about-editor {
+  border-radius: 16px;
+  border: 1px solid var(--blog-line);
+  overflow: hidden;
+  background: var(--blog-surface);
+}
+
+.about-editor .editor-holder {
+  min-height: 260px;
+  padding-bottom: 28px;
+}
+
+.about-edit-card {
+  max-width: 920px;
+}
+
+.about-skill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.about-skill-chip {
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--blog-ink);
+  background: var(--blog-mark);
+  cursor: pointer;
+}
+
+.about-skill-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+

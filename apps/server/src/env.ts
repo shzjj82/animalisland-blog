@@ -15,6 +15,7 @@ const isProd = (process.env.NODE_ENV ?? "development") === "production";
 
 const WEAK_JWT = new Set(["dev-only-change-me", "please-change-this-to-a-long-random-string", "secret", "change-me"]);
 const WEAK_PASSWORD = new Set(["changeme", "password", "admin", "123456"]);
+const WEAK_DOCS_KEY = new Set(["dev-docs-key", "changeme", "secret", "docs-key"]);
 
 function required(name: string, fallback?: string): string {
   const value = process.env[name] ?? (isProd ? undefined : fallback);
@@ -32,14 +33,40 @@ function requireSecret(name: string, fallback: string, weak: Set<string>, minLen
   return value;
 }
 
+function resolveDocsServiceKey(): string {
+  const fallback = "dev-docs-key";
+  // 仅 docs 后端在生产强制强密钥；local 模式可保留弱默认
+  if (resolveContentBackend() === "docs") {
+    return requireSecret("DOCS_SERVICE_KEY", fallback, WEAK_DOCS_KEY, 16);
+  }
+  return process.env.DOCS_SERVICE_KEY ?? fallback;
+}
+
 function resolveFromRoot(p: string): string {
   return path.isAbsolute(p) ? p : path.resolve(repoRoot, p);
+}
+
+/**
+ * 内容存储后端：
+ * - local / express / sqlite → 本机 Express + SQLite（默认）
+ * - docs / api / remote → 远程文档服务 API
+ */
+export function resolveContentBackend(
+  raw = process.env.CONTENT_BACKEND ?? process.env.DATA_BACKEND ?? "local",
+): "local" | "docs" {
+  const value = String(raw).trim().toLowerCase();
+  if (value === "docs" || value === "api" || value === "remote") {
+    return "docs";
+  }
+  return "local";
 }
 
 export const env = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: Number(process.env.PORT ?? 3001),
   host: process.env.HOST ?? "0.0.0.0",
+  /** local=本机 SQLite；docs=远程文档 API */
+  contentBackend: resolveContentBackend(),
   databasePath: resolveFromRoot(process.env.DATABASE_PATH ?? "./data/blog.db"),
   uploadDir: resolveFromRoot(process.env.UPLOAD_DIR ?? "./data/uploads"),
   corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:5173",
@@ -55,15 +82,24 @@ export const env = {
   ossPrefix: (process.env.OSS_PREFIX ?? "blog").replace(/^\/+|\/+$/g, ""),
   ossPublicBase: (process.env.OSS_PUBLIC_BASE ?? "").replace(/\/$/, ""),
   siteUrl: (process.env.SITE_URL ?? "").replace(/\/$/, ""),
-  /** Next.js / Express 只调文档网关；登录、上传、AI 仍走本服务 */
   docsBaseUrl: (process.env.DOCS_BASE_URL ?? "http://127.0.0.1:3000").replace(/\/$/, ""),
-  docsServiceKey: process.env.DOCS_SERVICE_KEY ?? "dev-docs-key",
+  docsServiceKey: resolveDocsServiceKey(),
+  docsAppCode: process.env.DOCS_APP_CODE ?? "blog",
+  docsTimeoutMs: Number(process.env.DOCS_TIMEOUT_MS ?? 15_000),
   /** OpenAI 兼容接口（也可填 DeepSeek / 通义 / 本地代理等） */
   aiApiBase: (process.env.AI_API_BASE ?? "https://api.openai.com/v1").replace(/\/$/, ""),
   aiApiKey: process.env.AI_API_KEY ?? "",
   aiModel: process.env.AI_MODEL ?? "gpt-4o-mini",
   aiTimeoutMs: Number(process.env.AI_TIMEOUT_MS ?? 90_000),
 };
+
+export function isDocsBackend(): boolean {
+  return env.contentBackend === "docs";
+}
+
+export function isLocalBackend(): boolean {
+  return env.contentBackend === "local";
+}
 
 export function ossConfigured(): boolean {
   return Boolean(env.ossAccessKeyId && env.ossAccessKeySecret && env.ossRegion && env.ossBucket);
