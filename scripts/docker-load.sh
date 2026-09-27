@@ -127,7 +127,8 @@ case "$ARCHIVE_PATH" in
 esac
 
 echo "==> docker load 完成"
-docker image ls "$IMAGE" || true
+docker image ls "$IMAGE_API" || true
+docker image ls "$IMAGE_WEB" || true
 
 if [[ "$COMPOSE_UP" == "1" || "$COMPOSE_UP" == "true" || "$COMPOSE_UP" == "yes" ]]; then
   if [[ ! -f "$ROOT/docker-compose.yml" ]]; then
