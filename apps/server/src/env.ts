@@ -13,67 +13,93 @@ dotenv.config({ path: path.join(repoRoot, ".env") });
 
 const isProd = (process.env.NODE_ENV ?? "development") === "production";
 
-const WEAK_JWT = new Set(["dev-only-change-me", "please-change-this-to-a-long-random-string", "secret", "change-me"]);
-const WEAK_PASSWORD = new Set(["changeme", "password", "admin", "123456"]);
-const WEAK_DOCS_KEY = new Set(["dev-docs-key", "changeme", "secret", "docs-key"]);
+const WEAK_SERVICE_KEY = new Set(["dev-docs-key", "changeme", "secret", "docs-key"]);
 
-function required(name: string, fallback?: string): string {
-  const value = process.env[name] ?? (isProd ? undefined : fallback);
-  if (!value) {
-    throw new Error(`缺少环境变量 ${name}`);
-  }
-  return value;
+/** 是否显式配置了 Nest 网关地址 */
+export function hasGatewayConfig(): boolean {
+  return Boolean(
+    process.env.GATEWAY_BASE_URL?.trim() ||
+      process.env.NEST_BASE_URL?.trim() ||
+      process.env.AUTH_BASE_URL?.trim() ||
+      process.env.DOCS_BASE_URL?.trim(),
+  );
 }
 
-function requireSecret(name: string, fallback: string, weak: Set<string>, minLen: number): string {
-  const value = required(name, fallback);
-  if (isProd && (weak.has(value) || value.length < minLen)) {
-    throw new Error(`生产环境请设置足够强的 ${name}（勿用默认值，长度 ≥ ${minLen}）`);
+/**
+ * 内容后端：
+ * - 显式传入 raw（单测）时只解析别名
+ * - 否则：配了 GATEWAY_* → Nest；CONTENT_BACKEND=docs|… → Nest；默认 local
+ */
+export function resolveContentBackend(raw?: string): "local" | "docs" {
+  if (raw !== undefined) {
+    const value = String(raw).trim().toLowerCase();
+    if (
+      value === "docs" ||
+      value === "api" ||
+      value === "remote" ||
+      value === "nest" ||
+      value === "gateway"
+    ) {
+      return "docs";
+    }
+    return "local";
   }
-  return value;
+  if (hasGatewayConfig()) {
+    return "docs";
+  }
+  const fromEnv = String(process.env.CONTENT_BACKEND ?? process.env.DATA_BACKEND ?? "local")
+    .trim()
+    .toLowerCase();
+  if (
+    fromEnv === "docs" ||
+    fromEnv === "api" ||
+    fromEnv === "remote" ||
+    fromEnv === "nest" ||
+    fromEnv === "gateway"
+  ) {
+    return "docs";
+  }
+  return "local";
 }
 
-function resolveDocsServiceKey(): string {
+function resolveGatewayBase(): string {
+  const raw =
+    process.env.GATEWAY_BASE_URL ||
+    process.env.NEST_BASE_URL ||
+    process.env.AUTH_BASE_URL ||
+    process.env.DOCS_BASE_URL ||
+    (resolveContentBackend() === "docs" ? "http://127.0.0.1:3000" : "");
+  return raw.replace(/\/$/, "");
+}
+
+function resolveGatewayServiceKey(): string {
   const fallback = "dev-docs-key";
-  // 仅 docs 后端在生产强制强密钥；local 模式可保留弱默认
-  if (resolveContentBackend() === "docs") {
-    return requireSecret("DOCS_SERVICE_KEY", fallback, WEAK_DOCS_KEY, 16);
+  const value = process.env.GATEWAY_SERVICE_KEY ?? process.env.DOCS_SERVICE_KEY ?? fallback;
+  if (isProd && resolveContentBackend() === "docs" && (WEAK_SERVICE_KEY.has(value) || value.length < 16)) {
+    throw new Error("生产环境请设置足够强的 GATEWAY_SERVICE_KEY（或 DOCS_SERVICE_KEY，勿用默认值，长度 ≥ 16）");
   }
-  return process.env.DOCS_SERVICE_KEY ?? fallback;
+  return value;
 }
 
 function resolveFromRoot(p: string): string {
   return path.isAbsolute(p) ? p : path.resolve(repoRoot, p);
 }
 
-/**
- * 内容存储后端：
- * - local / express / sqlite → 本机 Express + SQLite（默认）
- * - docs / api / remote → 远程文档服务 API
- */
-export function resolveContentBackend(
-  raw = process.env.CONTENT_BACKEND ?? process.env.DATA_BACKEND ?? "local",
-): "local" | "docs" {
-  const value = String(raw).trim().toLowerCase();
-  if (value === "docs" || value === "api" || value === "remote") {
-    return "docs";
-  }
-  return "local";
-}
+const contentBackend = resolveContentBackend();
+const gatewayBase = resolveGatewayBase();
 
 export const env = {
   nodeEnv: process.env.NODE_ENV ?? "development",
-  port: Number(process.env.PORT ?? 3001),
+  port: Number(process.env.API_PORT ?? process.env.PORT ?? 3001),
   host: process.env.HOST ?? "0.0.0.0",
-  /** local=本机 SQLite；docs=远程文档 API */
-  contentBackend: resolveContentBackend(),
+  /** local=本机 SQLite；docs=Nest 网关 */
+  contentBackend,
   databasePath: resolveFromRoot(process.env.DATABASE_PATH ?? "./data/blog.db"),
   uploadDir: resolveFromRoot(process.env.UPLOAD_DIR ?? "./data/uploads"),
-  corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:5173",
-  jwtSecret: requireSecret("JWT_SECRET", "dev-only-change-me", WEAK_JWT, 24),
-  adminUsername: required("ADMIN_USERNAME", "admin"),
-  adminPassword: requireSecret("ADMIN_PASSWORD", "changeme", WEAK_PASSWORD, 8),
-  jwtExpiresDays: Number(process.env.JWT_EXPIRES_DAYS ?? 7),
+  // 浏览器直连 API 才需要；经 Next 同源 /api 代理时可留空。开发默认对齐 WEB_PORT
+  corsOrigin:
+    process.env.CORS_ORIGIN ??
+    (isProd ? "" : `http://localhost:${process.env.WEB_PORT ?? 5173}`),
   isProd,
   ossAccessKeyId: process.env.OSS_ACCESS_KEY_ID ?? "",
   ossAccessKeySecret: process.env.OSS_ACCESS_KEY_SECRET ?? "",
@@ -82,11 +108,21 @@ export const env = {
   ossPrefix: (process.env.OSS_PREFIX ?? "blog").replace(/^\/+|\/+$/g, ""),
   ossPublicBase: (process.env.OSS_PUBLIC_BASE ?? "").replace(/\/$/, ""),
   siteUrl: (process.env.SITE_URL ?? "").replace(/\/$/, ""),
-  docsBaseUrl: (process.env.DOCS_BASE_URL ?? "http://127.0.0.1:3000").replace(/\/$/, ""),
-  docsServiceKey: resolveDocsServiceKey(),
+  /** Nest 网关根地址（/auth/* + /docs/*） */
+  gatewayBaseUrl: gatewayBase,
+  /**
+   * Nest 账密登录接入端编码（uc_clients.appCode），种子默认 web。
+   * 一般不用配；仅多接入端时用 AUTH_APP_CODE 覆盖。
+   */
+  authAppCode: process.env.AUTH_APP_CODE ?? "web",
+  /**
+   * Nest 文档应用隔离码（doc_documents.app_code），本站固定 blog。
+   * Nest 文档隔离编码（必填；服务端不再默认 blog）。多应用共库时用 DOCS_APP_CODE 覆盖。
+   */
   docsAppCode: process.env.DOCS_APP_CODE ?? "blog",
-  docsTimeoutMs: Number(process.env.DOCS_TIMEOUT_MS ?? 15_000),
-  /** OpenAI 兼容接口（也可填 DeepSeek / 通义 / 本地代理等） */
+  /** Nest 服务密钥（x-docs-key）；写操作优先用户 JWT */
+  docsServiceKey: resolveGatewayServiceKey(),
+  docsTimeoutMs: Number(process.env.GATEWAY_TIMEOUT_MS ?? process.env.DOCS_TIMEOUT_MS ?? 15_000),
   aiApiBase: (process.env.AI_API_BASE ?? "https://api.openai.com/v1").replace(/\/$/, ""),
   aiApiKey: process.env.AI_API_KEY ?? "",
   aiModel: process.env.AI_MODEL ?? "gpt-4o-mini",

@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import type { EditorJsDocument, PageKind, Post } from "@myblog/shared";
+import type { EditorJsDocument, PageKind, Post, PostVisibility } from "@myblog/shared";
 import { starterArticleDocument, propsWithTags, tagsFromProps } from "@myblog/shared";
 import {
   ensureCategoriesFromLabels,
@@ -8,6 +8,7 @@ import {
   resolveExistingCategorySlugs,
 } from "./categories.local.js";
 import { db } from "./db.js";
+import { getAuthUser } from "./request-context.js";
 import {
   bodyHasBlocks,
   nextTreeSort,
@@ -15,7 +16,7 @@ import {
   uniqueSlug,
   type PostRow,
 } from "./posts.local.shared.js";
-import { getPageByKind, getPostById } from "./posts.local.read.js";
+import { getPostById } from "./posts.local.read.js";
 
 export type PostWriteInput = {
   title: string;
@@ -29,8 +30,12 @@ export type PostWriteInput = {
   props?: Record<string, unknown>;
   tags?: string[];
   body: EditorJsDocument;
-  draft: boolean;
+  visibility: PostVisibility;
 };
+
+function visibilityToDraft(visibility: PostVisibility): boolean {
+  return visibility === "private";
+}
 
 function wouldCreateCycle(pageId: string, newParentId: string): boolean {
   if (pageId === newParentId) {
@@ -67,20 +72,14 @@ function resolveArticleParent(parentId: string | null | undefined): string | nul
 
 export function createPost(input: PostWriteInput): Post {
   const pageKind = input.pageKind ?? "article";
-  if (pageKind === "about") {
-    const existing = getPageByKind(pageKind);
-    if (existing) {
-      throw new Error("PAGE_EXISTS");
-    }
-  }
 
   let parentId: string | null = null;
   if (pageKind === "article") {
     parentId = resolveArticleParent(input.parentId);
   }
 
-  // 子页面不参与草稿：始终已发布，可见性跟祖先顶层文章的草稿状态
-  const asDraft = parentId ? false : Boolean(input.draft);
+  // 子页面不参与可见性：始终公开，可见性跟祖先顶层文章
+  const asDraft = parentId ? false : visibilityToDraft(input.visibility);
 
   const rawTags =
     input.tags !== undefined
@@ -113,11 +112,12 @@ export function createPost(input: PostWriteInput): Post {
       : input.tags !== undefined
         ? propsWithTags(input.props, input.tags)
         : propsWithTags(input.props, tagsFromProps(input.props));
+  const authorId = getAuthUser()?.id ?? null;
 
   db.prepare(
     `INSERT INTO posts
-      (id, slug, title, type, page_kind, parent_id, tree_sort, summary, cover_url, props, body, draft, published_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, slug, title, type, page_kind, parent_id, tree_sort, summary, cover_url, props, body, draft, author_id, published_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     slug,
@@ -131,6 +131,7 @@ export function createPost(input: PostWriteInput): Post {
     JSON.stringify(props),
     JSON.stringify(input.body),
     asDraft ? 1 : 0,
+    authorId,
     publishedAt,
     now,
     now,
@@ -146,11 +147,6 @@ export function updatePost(id: string, input: PostWriteInput): Post | undefined 
   }
 
   const pageKind = input.pageKind ?? existing.pageKind;
-  if (existing.pageKind === "about") {
-    if (pageKind !== existing.pageKind) {
-      throw new Error("PAGE_KIND_FIXED");
-    }
-  }
 
   let parentId = existing.parentId;
   if (pageKind === "article") {
@@ -164,8 +160,8 @@ export function updatePost(id: string, input: PostWriteInput): Post | undefined 
     parentId = null;
   }
 
-  // 子页面不参与草稿
-  const asDraft = parentId ? false : Boolean(input.draft);
+  // 子页面不参与可见性
+  const asDraft = parentId ? false : visibilityToDraft(input.visibility);
 
   const now = new Date().toISOString();
   const slug = uniqueSlug(input.slug || input.title || existing.slug, id);
@@ -205,11 +201,18 @@ export function updatePost(id: string, input: PostWriteInput): Post | undefined 
     throw new Error("EMPTY_BODY");
   }
 
+  const actorId = getAuthUser()?.id;
+  if (existing.authorId && actorId && existing.authorId !== actorId) {
+    throw new Error("FORBIDDEN");
+  }
+  // 旧文无作者：首次由当前用户认领
+  const authorId = existing.authorId ?? actorId ?? null;
+
   db.prepare(
     `UPDATE posts SET
       slug = ?, title = ?, type = ?, page_kind = ?, parent_id = ?, tree_sort = ?,
       summary = ?, cover_url = ?, props = ?, body = ?,
-      draft = ?, published_at = ?, updated_at = ?
+      draft = ?, author_id = ?, published_at = ?, updated_at = ?
      WHERE id = ?`,
   ).run(
     slug,
@@ -223,6 +226,7 @@ export function updatePost(id: string, input: PostWriteInput): Post | undefined 
     JSON.stringify(props),
     JSON.stringify(input.body),
     asDraft ? 1 : 0,
+    authorId,
     publishedAt,
     now,
     id,
@@ -309,7 +313,7 @@ export function createLinkedChild(parentId: string): { child: Post; parent: Post
       summary: "",
       coverUrl: "",
       body: starterArticleDocument(),
-      draft: false,
+      visibility: "public",
     });
     const nextParent = appendPageLinkToParent(parentId, child);
     if (!nextParent) {
@@ -353,8 +357,8 @@ export function reparentArticle(
 
     const now = new Date().toISOString();
     const treeSort = nextTreeSort(resolvedParentId, "article");
-    // 挂到父页下后不再当草稿；回到顶层则保持原草稿状态
-    const asDraft = resolvedParentId ? false : child.draft;
+    // 挂到父页下后视为公开；回到顶层则保持原可见性
+    const asDraft = resolvedParentId ? false : child.visibility === "private";
     let publishedAt = child.publishedAt;
     if (!asDraft && !publishedAt) {
       publishedAt = now;
@@ -386,8 +390,9 @@ export function deletePost(id: string): boolean {
     if (!existing) {
       return false;
     }
-    if (existing.pageKind === "about") {
-      throw new Error("PAGE_FIXED");
+    const actorId = getAuthUser()?.id;
+    if (existing.authorId && actorId && existing.authorId !== actorId) {
+      throw new Error("FORBIDDEN");
     }
 
     const collect = (pageId: string): string[] => {

@@ -1,29 +1,33 @@
 services:
-  myblog:
+  api:
     build:
       context: .
       dockerfile: Dockerfile
+      target: api
       args:
         NODE_VERSION: "20"
         PNPM_VERSION: "9.12.2"
-    image: myblog:latest
-    container_name: myblog
+        # 与 web 共用 build 阶段；保证 next rewrites 指向 compose 内网 api
+        INTERNAL_API_URL: http://api:3001
+    image: myblog-api:latest
+    container_name: myblog-api
     restart: unless-stopped
     ports:
-      - "${PORT:-3001}:3001"
+      - "${API_PORT:-3001}:3001"
     env_file:
       - .env
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
+      # 容器内进程端口固定；宿主机映射用 API_PORT，勿读 .env 的笼统 PORT
       PORT: 3001
+      API_PORT: "3001"
       REPO_ROOT: /app
       DATABASE_PATH: /app/data/blog.db
       UPLOAD_DIR: /app/data/uploads
-      # 生产同源托管，不必再开 CORS
       CORS_ORIGIN: ""
+      GATEWAY_BASE_URL: ${GATEWAY_BASE_URL_DOCKER:-http://host.docker.internal:3000}
     volumes:
-      # SQLite、本地上传、日志持久化
       - myblog-data:/app/data
     healthcheck:
       test:
@@ -37,6 +41,47 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+      args:
+        NODE_VERSION: "20"
+        PNPM_VERSION: "9.12.2"
+        # rewrites 在 next build 时固化；须为 compose 内网名，勿用 127.0.0.1
+        INTERNAL_API_URL: http://api:3001
+    image: myblog-web:latest
+    container_name: myblog-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-5173}:5173"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      # Next 容器内端口固定；宿主机映射用 WEB_PORT
+      PORT: 5173
+      WEB_PORT: "5173"
+      INTERNAL_API_URL: http://api:3001
+      NEXT_TELEMETRY_DISABLED: "1"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:5173/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
 
 volumes:
   myblog-data:

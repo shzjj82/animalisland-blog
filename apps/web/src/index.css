@@ -49,8 +49,8 @@
 }
 
 :root {
-    /* 小岛日记后台：暖纸 + 深墨，焦点用淡海青（避开紫/陶土套版） */
-    --background: oklch(0.975 0.008 85);
+    /* 与前台纸色对齐，避免 Tailwind preflight 的 body 背景盖掉暖色 */
+    --background: #fff8e8;
     --foreground: oklch(0.28 0.02 65);
     --card: oklch(0.995 0.004 90);
     --card-foreground: oklch(0.28 0.02 65);
@@ -85,7 +85,7 @@
 }
 
 .dark {
-    --background: oklch(0.22 0.015 60);
+    --background: #2a241a;
     --foreground: oklch(0.94 0.015 85);
     --card: oklch(0.26 0.016 60);
     --card-foreground: oklch(0.94 0.015 85);

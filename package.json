@@ -6,18 +6,19 @@
   "scripts": {
     "dev": "pnpm --parallel --filter @myblog/shared --filter @myblog/web --filter @myblog/server dev",
     "build": "pnpm --filter @myblog/shared build && pnpm --filter @myblog/web build && pnpm --filter @myblog/server build",
-    "start": "pnpm --filter @myblog/server start",
+    "start": "pnpm --parallel --filter @myblog/server --filter @myblog/web start",
     "migrate:docs": "pnpm --filter @myblog/server exec tsx ./scripts/migrate-sqlite-to-docs.ts",
     "check:backend": "pnpm --filter @myblog/server exec tsx ./scripts/check-content-backend.ts",
-    "docker:build": "docker build -t myblog:latest .",
+    "typecheck": "pnpm --filter @myblog/web typecheck",
+    "docker:build": "docker compose build",
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f myblog",
+    "docker:logs": "docker compose logs -f api web",
     "pm2:start": "pnpm build && pm2 start ecosystem.config.cjs",
     "pm2:reload": "pnpm build && pm2 reload ecosystem.config.cjs",
-    "pm2:stop": "pm2 stop myblog",
-    "pm2:delete": "pm2 delete myblog",
-    "pm2:logs": "pm2 logs myblog"
+    "pm2:stop": "pm2 stop myblog-api myblog-web",
+    "pm2:delete": "pm2 delete myblog-api myblog-web",
+    "pm2:logs": "pm2 logs"
   },
   "engines": {
     "node": ">=20"

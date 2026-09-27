@@ -1,14 +1,12 @@
+"use client";
+
 import type { PostListItem } from "@myblog/shared";
 import { isSiteSkillColor } from "@myblog/shared";
 import { ArrowRight } from "@icon-park/react";
 import { Card } from "animal-island-ui";
-import { Link } from "react-router-dom";
+import Link from "next/link";
 import { iconParkOutline } from "@/lib/iconPark";
 import { pageTitle } from "@/lib/pageTree";
-
-function prefetchPostPage() {
-  void import("@/pages/Post/Post");
-}
 
 /** 过短或纯符号的摘要不当正文描述 */
 function cardExcerpt(summary: string | undefined): string {
@@ -75,10 +73,9 @@ export function PostCards({ posts, empty }: { posts: PostListItem[]; empty: stri
       {posts.map((post) => (
         <Link
           key={post.id}
-          to={`/post/${post.slug}`}
+          href={`/post/${post.slug}`}
           className="blog-post-card-link"
-          onMouseEnter={prefetchPostPage}
-          onFocus={prefetchPostPage}
+          prefetch={false}
         >
           <Card
             color={isSiteSkillColor(post.categoryColor) ? post.categoryColor : "app-yellow"}

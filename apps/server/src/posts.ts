@@ -1,8 +1,11 @@
 /**
  * 内容后端门面：按 CONTENT_BACKEND 选择本地 SQLite 或远程 docs API。
  */
-import type { CategoryKind, EditorJsDocument, PageKind, Post, PostListItem } from "@myblog/shared";
+import type { CategoryKind, EditorJsDocument, PageKind, Post, PostListItem, PostVisibility } from "@myblog/shared";
 import { loadPosts } from "./content-backend.js";
+
+export type PostListScope = "public" | "feed" | "mine" | "all";
+export type PostReadAccess = "public" | "feed";
 
 export type PostWriteInput = {
   title: string;
@@ -16,7 +19,7 @@ export type PostWriteInput = {
   props?: Record<string, unknown>;
   tags?: string[];
   body: EditorJsDocument;
-  draft: boolean;
+  visibility: PostVisibility;
 };
 
 export async function listPosts(opts: {
@@ -27,23 +30,26 @@ export async function listPosts(opts: {
   limit?: number;
   page?: number;
   pageSize?: number;
-  includeDrafts: boolean;
+  scope?: PostListScope;
   treeOrder?: boolean;
 }): Promise<{ posts: PostListItem[]; total: number }> {
   return (await loadPosts()).listPosts(opts);
 }
 
-export async function listWorkspaceTree(includeDrafts: boolean): Promise<PostListItem[]> {
-  return (await loadPosts()).listWorkspaceTree(includeDrafts);
+export async function listWorkspaceTree(): Promise<PostListItem[]> {
+  return (await loadPosts()).listWorkspaceTree();
 }
 
-export async function getPostBySlug(slug: string, includeDrafts: boolean): Promise<Post | undefined> {
-  return (await loadPosts()).getPostBySlug(slug, includeDrafts);
+export async function getPostBySlug(
+  slug: string,
+  access: PostReadAccess = "public",
+): Promise<Post | undefined> {
+  return (await loadPosts()).getPostBySlug(slug, access);
 }
 
 export async function getPostPage(
   slug: string,
-  includeDrafts: boolean,
+  access: PostReadAccess = "public",
 ): Promise<
   | {
       post: Post;
@@ -53,19 +59,18 @@ export async function getPostPage(
     }
   | undefined
 > {
-  return (await loadPosts()).getPostPage(slug, includeDrafts);
+  return (await loadPosts()).getPostPage(slug, access);
 }
 
 export async function getPostById(id: string): Promise<Post | undefined> {
   return (await loadPosts()).getPostById(id);
 }
 
-export async function getPageByKind(pageKind: PageKind): Promise<Post | undefined> {
-  return (await loadPosts()).getPageByKind(pageKind);
-}
-
-export async function listAncestors(postId: string, includeDrafts: boolean): Promise<PostListItem[]> {
-  return (await loadPosts()).listAncestors(postId, includeDrafts);
+export async function listAncestors(
+  postId: string,
+  access: PostReadAccess = "public",
+): Promise<PostListItem[]> {
+  return (await loadPosts()).listAncestors(postId, access);
 }
 
 export async function createPost(input: PostWriteInput): Promise<Post> {

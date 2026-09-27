@@ -35,8 +35,11 @@ export const CATEGORY_KINDS = ["article"] as const;
 
 export type CategoryKind = (typeof CATEGORY_KINDS)[number];
 
-export const PAGE_KINDS = ["article", "about"] as const;
+export const PAGE_KINDS = ["article"] as const;
 export type PageKind = (typeof PAGE_KINDS)[number];
+
+export const VISIBILITIES = ["private", "public"] as const;
+export type PostVisibility = (typeof VISIBILITIES)[number];
 
 export const RESERVED_PATHS = ["admin", "login", "post", "api", "uploads", "notes", "about"] as const;
 
@@ -112,12 +115,14 @@ export type Post = {
   categoryKind: CategoryKind;
   summary: string;
   coverUrl: string;
-  /** about 页：avatar / skills；文章：tags = 分类 slug 列表（可多选） */
+  /** 文章：tags = 分类 slug 列表（可多选） */
   props: Record<string, unknown>;
   /** 文章所属分类（多选），存的是 category.slug */
   tags: string[];
+  /** Nest 用户 id */
+  authorId?: string | null;
   body: EditorJsDocument;
-  draft: boolean;
+  visibility: PostVisibility;
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -138,28 +143,16 @@ export type UpsertPostInput = {
   /** 发布时可带分类 slug 列表；写入 props.tags，并可用作筛选 */
   tags?: string[];
   body: EditorJsDocument;
-  draft?: boolean;
+  visibility?: PostVisibility;
 };
 
 export const SITE_NAME = "小岛日记";
 
-export const SITE_DESCRIPTION = "一座慢慢写的小岛。记录生活、编程和闲聊。";
+export const SITE_DESCRIPTION = "一座大家一起慢慢写的小岛。记录生活、编程和闲聊，欢迎一起建设。";
 
 export function siteTitle(pageTitle: string): string {
   return pageTitle === SITE_NAME ? SITE_NAME : `${pageTitle} · ${SITE_NAME}`;
 }
-
-export type SiteSkill = {
-  name: string;
-  color: SiteSkillColor;
-};
-
-export type SiteAbout = {
-  name: string;
-  body: EditorJsDocument;
-  avatar: string;
-  skills: SiteSkill[];
-};
 
 export const emptyEditorDocument = (): EditorJsDocument => ({
   time: Date.now(),
@@ -220,22 +213,6 @@ export function normalizeEditorDocument(value: unknown): EditorJsDocument {
   }
   return emptyEditorDocument();
 }
-
-export const DEFAULT_ABOUT: SiteAbout = {
-  name: "小岛日记 · 生活 / 编程 / 闲聊",
-  body: editorDocumentFromPlainText(
-    "这是我的个人博客。白天写代码，其余时间看看路、拍拍照，偶尔把卡住的问题和想清楚的事情记下来。喜欢能摸到质感的软件，也喜欢把话写明白。",
-  ),
-  avatar: "",
-  skills: [
-    { name: "React / TS", color: "app-blue" },
-    { name: "Node.js", color: "app-green" },
-    { name: "生活记录", color: "app-pink" },
-    { name: "摄影", color: "purple" },
-    { name: "咖啡", color: "brown" },
-    { name: "散步", color: "app-teal" },
-  ],
-};
 
 export const DEFAULT_CATEGORIES: Array<
   Pick<Category, "slug" | "name" | "hint" | "color" | "kind" | "nav" | "sort">
@@ -307,8 +284,33 @@ export function isPageKind(value: string): value is PageKind {
   return (PAGE_KINDS as readonly string[]).includes(value);
 }
 
+export function isVisibility(value: string): value is PostVisibility {
+  return (VISIBILITIES as readonly string[]).includes(value);
+}
+
 export function isReservedPath(slug: string): boolean {
   return (RESERVED_PATHS as readonly string[]).includes(slug);
+}
+
+/**
+ * 路由 param 可能已是百分号编码（Next 对非 ASCII path 常见），也可能是明文。
+ * 统一解成明文，避免再 encode 时变成 %25xx 双重编码。
+ */
+export function decodeSlugParam(slug: string): string {
+  const raw = String(slug ?? "");
+  if (!raw.includes("%")) {
+    return raw;
+  }
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+/** 拼进 URL path 段：先归一成明文再编码，幂等 */
+export function encodeSlugParam(slug: string): string {
+  return encodeURIComponent(decodeSlugParam(slug));
 }
 
 export function isReservedTagName(name: string): boolean {

@@ -3,7 +3,6 @@ import { SITE_DESCRIPTION, SITE_NAME, siteTitle } from "@myblog/shared";
 import { env } from "./env.js";
 import { getCategoryBySlug, listCategories } from "./categories.js";
 import { getPostBySlug, listPosts } from "./posts.js";
-import { getAbout } from "./site.js";
 
 export type PageMeta = {
   status: number;
@@ -46,7 +45,6 @@ function absoluteUrl(origin: string, value?: string): string | undefined {
 }
 
 async function websiteJsonLd(origin: string) {
-  const about = await getAbout();
   return {
     "@context": "https://schema.org",
     "@type": "WebSite",
@@ -56,7 +54,7 @@ async function websiteJsonLd(origin: string) {
     inLanguage: "zh-CN",
     author: {
       "@type": "Person",
-      name: about.name,
+      name: SITE_NAME,
     },
   };
 }
@@ -78,7 +76,7 @@ export async function metaForRequest(req: Request): Promise<PageMeta> {
 
   if (path.startsWith("/post/")) {
     const slug = decodeURIComponent(path.slice("/post/".length)).split("/")[0] ?? "";
-    const post = slug ? await getPostBySlug(slug, false) : undefined;
+    const post = slug ? await getPostBySlug(slug, "public") : undefined;
     if (!post || post.pageKind !== "article") {
       return {
         status: 404,
@@ -90,7 +88,6 @@ export async function metaForRequest(req: Request): Promise<PageMeta> {
       };
     }
     const url = `${origin}/post/${post.slug}`;
-    const about = await getAbout();
     const image = absoluteUrl(origin, post.coverUrl);
     return {
       status: 200,
@@ -109,7 +106,7 @@ export async function metaForRequest(req: Request): Promise<PageMeta> {
         dateModified: post.updatedAt,
         inLanguage: "zh-CN",
         mainEntityOfPage: url,
-        author: { "@type": "Person", name: about.name },
+        author: { "@type": "Person", name: SITE_NAME },
         publisher: { "@type": "Organization", name: SITE_NAME },
       },
     };
@@ -207,7 +204,7 @@ export function robotsTxt(origin: string): string {
 }
 
 export async function sitemapXml(origin: string): Promise<string> {
-  const { posts } = await listPosts({ includeDrafts: false, pageKind: "article" });
+  const { posts } = await listPosts({ scope: "public", pageKind: "article" });
   // 只收录顶层文章；子页由正文 pageLink 发现，避免空「无标题」子页进地图
   const topLevel = posts.filter((post) => !post.parentId);
   const categoryPages = (await listCategories())

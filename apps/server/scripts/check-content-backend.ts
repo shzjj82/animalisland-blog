@@ -6,8 +6,7 @@ import assert from "node:assert/strict";
 import { resolveContentBackend } from "../src/env.js";
 import * as categories from "../src/categories.js";
 import * as posts from "../src/posts.js";
-import * as site from "../src/site.js";
-import { loadCategories, loadPosts, loadSite } from "../src/content-backend.js";
+import { loadCategories, loadPosts } from "../src/content-backend.js";
 
 const aliasCases: Array<[string, "local" | "docs"]> = [
   ["local", "local"],
@@ -30,7 +29,6 @@ const postFns = [
   "getPostBySlug",
   "getPostPage",
   "getPostById",
-  "getPageByKind",
   "listAncestors",
   "createPost",
   "updatePost",
@@ -50,20 +48,14 @@ const categoryFns = [
   "ensureDefaultCategories",
 ] as const;
 
-const siteFns = ["getAbout", "saveAbout", "syncSiteFromAboutPage"] as const;
-
 for (const name of postFns) {
   assert.equal(typeof posts[name], "function", `posts.${name}`);
 }
 for (const name of categoryFns) {
   assert.equal(typeof categories[name], "function", `categories.${name}`);
 }
-for (const name of siteFns) {
-  assert.equal(typeof site[name], "function", `site.${name}`);
-}
 
 assert.equal(typeof loadPosts, "function");
 assert.equal(typeof loadCategories, "function");
-assert.equal(typeof loadSite, "function");
 
 console.log("check-content-backend: ok");

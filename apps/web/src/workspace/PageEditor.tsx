@@ -1,19 +1,15 @@
+"use client";
+
 import {
-  DEFAULT_ABOUT,
-  emptyEditorDocument,
   starterArticleDocument,
-  isSiteSkillColor,
   type EditorJsDocument,
   type Post,
-  type PostListItem,
-  type SiteSkill,
+  type PostVisibility,
 } from "@myblog/shared";
 import { Notes } from "@icon-park/react";
 import EditorJS from "@editorjs/editorjs";
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useOutletContext, useParams } from "react-router-dom";
-import { isAvatarUrl } from "@/components/AboutAvatar";
-import { AboutSkillsDialog } from "@/components/AboutSkillsDialog";
+import { useParams, useRouter } from "next/navigation";
 import { SoftScrollbar } from "@/components/SoftScrollbar";
 import type { PageLinkData } from "@/components/editor/PageLinkTool";
 import { EditorSpotlight, type SpotlightAction } from "@/components/EditorSpotlight";
@@ -21,31 +17,24 @@ import { SelectionAskChip } from "@/components/SelectionAskChip";
 import { PublishDialog } from "@/components/PublishDialog";
 import { Button } from "@/components/ui/button";
 import { NotionEditor, saveEditor } from "@/content";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { ensureTitleHeader, metaFromEditorDocument } from "@/lib/editorMeta";
 import { appendPageLink } from "@/lib/pageLinks";
 import { iconParkOutline } from "@/lib/iconPark";
 import { ancestorsOf, pageTitle } from "@/lib/pageTree";
-import { AboutEditorPanel } from "@/workspace/AboutEditorPanel";
 import { LooseChildPages } from "@/workspace/LooseChildPages";
 import { usePagePersist, type PageLiveSnap } from "@/workspace/usePagePersist";
-
-type WorkspaceOutlet = {
-  reloadTree: () => Promise<PostListItem[]>;
-  pages: PostListItem[];
-  previewTreeTitle: (pageId: string, title: string) => void;
-};
+import { useWorkspace } from "@/workspace/WorkspaceLayout";
 
 type Props = {
   onSaved?: (post: Post) => void;
 };
 
 export function PageEditor({ onSaved }: Props) {
-  const { id = "" } = useParams();
-  const navigate = useNavigate();
-  const { pages, previewTreeTitle } = useOutletContext<WorkspaceOutlet>();
+  const params = useParams<{ id: string }>();
+  const id = params.id ?? "";
+  const router = useRouter();
+  const { pages, previewTreeTitle } = useWorkspace();
   const editorRef = useRef<EditorJS | null>(null);
   const editorReadyRef = useRef(false);
   const draftBodyRef = useRef<EditorJsDocument | null>(null);
@@ -60,17 +49,13 @@ export function PageEditor({ onSaved }: Props) {
   const [post, setPost] = useState<Post | null>(null);
   const [title, setTitle] = useState("");
   const [slug, setSlug] = useState("");
-  const [draft, setDraft] = useState(true);
+  const [visibility, setVisibility] = useState<PostVisibility>("private");
   const [tags, setTags] = useState<string[]>([]);
   const [publishOpen, setPublishOpen] = useState(false);
   const [publishMode, setPublishMode] = useState<"publish" | "edit">("publish");
-  const [avatar, setAvatar] = useState(DEFAULT_ABOUT.avatar);
-  const [skills, setSkills] = useState<SiteSkill[]>(DEFAULT_ABOUT.skills);
-  const [skillsOpen, setSkillsOpen] = useState(false);
-  const [initial, setInitial] = useState(emptyEditorDocument());
+  const [initial, setInitial] = useState(starterArticleDocument());
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [saveHint, setSaveHint] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [pendingLinkIds, setPendingLinkIds] = useState<string[]>([]);
@@ -80,12 +65,10 @@ export function PageEditor({ onSaved }: Props) {
     post: null,
     title: "",
     slug: "",
-    draft: true,
+    visibility: "private",
     tags: [],
-    avatar: DEFAULT_ABOUT.avatar,
-    skills: DEFAULT_ABOUT.skills,
   });
-  liveRef.current = { post, title, slug, draft, tags, avatar, skills };
+  liveRef.current = { post, title, slug, visibility, tags };
 
   const { persist, scheduleAutosave, suspendAutosave, autosaveTimerRef, saveSeqRef } = usePagePersist({
     liveRef,
@@ -95,7 +78,7 @@ export function PageEditor({ onSaved }: Props) {
     previewTreeTitle,
     onSaved,
     setPost,
-    setDraft,
+    setVisibility,
     setTags,
     setSlug,
     setTitle,
@@ -132,34 +115,10 @@ export function PageEditor({ onSaved }: Props) {
         setPost(p);
         setTitle(p.title);
         setSlug(p.slug);
-        setDraft(p.draft);
+        setVisibility(p.visibility ?? "private");
         setTags(p.tags ?? []);
         previewTreeTitle(p.id, p.title);
-        if (p.pageKind === "about") {
-          const rawAvatar = typeof p.props.avatar === "string" ? p.props.avatar : DEFAULT_ABOUT.avatar;
-          setAvatar(isAvatarUrl(rawAvatar) ? rawAvatar.trim() : "");
-          const rawSkills = p.props.skills;
-          if (Array.isArray(rawSkills)) {
-            setSkills(
-              rawSkills.flatMap((item) => {
-                if (!item || typeof item !== "object") {
-                  return [];
-                }
-                const row = item as { name?: unknown; color?: unknown };
-                if (typeof row.name !== "string" || typeof row.color !== "string") {
-                  return [];
-                }
-                if (!isSiteSkillColor(row.color)) {
-                  return [];
-                }
-                return [{ name: row.name.trim(), color: row.color }];
-              }),
-            );
-          } else {
-            setSkills(DEFAULT_ABOUT.skills);
-          }
-          setInitial(p.body?.blocks?.length ? p.body : emptyEditorDocument());
-        } else if (p.pageKind === "article") {
+        if (p.pageKind === "article") {
           const named = p.title.trim() && p.title !== "无标题" && p.title !== "未命名";
           if (named) {
             setInitial(ensureTitleHeader(p.body, p.title));
@@ -169,7 +128,7 @@ export function PageEditor({ onSaved }: Props) {
             setInitial(starterArticleDocument());
           }
         } else {
-          setInitial(p.body?.blocks?.length ? p.body : emptyEditorDocument());
+          setInitial(p.body?.blocks?.length ? p.body : starterArticleDocument());
         }
         setLoaded(true);
       })
@@ -204,29 +163,11 @@ export function PageEditor({ onSaved }: Props) {
     return 0;
   };
 
-  const captureSelection = () => {
-    const sel = window.getSelection();
-    const text = sel?.toString().replace(/\u200b/g, "").trim() ?? "";
-    const editorEl = document.querySelector(".notion-editor");
-    if (
-      text.length >= 2 &&
-      text.length <= 4000 &&
-      sel &&
-      sel.rangeCount > 0 &&
-      editorEl?.contains(sel.getRangeAt(0).commonAncestorContainer)
-    ) {
-      return text;
-    }
-    return "";
-  };
-
-  /** 打开命令面板；可直接进入 AI 聊天 */
   const openSpotlight = (opts?: { actionId?: string; insertIndex?: number; selection?: string }) => {
-    const selection = opts?.selection?.trim() || captureSelection() || undefined;
     setSpotlightLaunch({
       actionId: opts?.actionId,
       insertIndex: resolveInsertIndex(opts?.insertIndex),
-      selection,
+      selection: opts?.selection,
     });
     setSpotlightOpen(true);
   };
@@ -239,15 +180,7 @@ export function PageEditor({ onSaved }: Props) {
       if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "k") {
         return;
       }
-      if (event.isComposing || event.keyCode === 229) {
-        return;
-      }
-      const target = event.target as HTMLElement | null;
-      if (target?.closest(".editor-spotlight-panel")) {
-        return;
-      }
       event.preventDefault();
-      event.stopPropagation();
       if (spotlightOpen) {
         setSpotlightOpen(false);
         setSpotlightLaunch(null);
@@ -268,7 +201,7 @@ export function PageEditor({ onSaved }: Props) {
     return (
       <div className="px-6 py-10">
         <p className="text-sm text-destructive">{error || "页面不存在"}</p>
-        <Button className="mt-4" variant="outline" onClick={() => navigate("/admin")}>
+        <Button className="mt-4" variant="outline" onClick={() => router.push("/admin")}>
           回工作区
         </Button>
       </div>
@@ -276,7 +209,7 @@ export function PageEditor({ onSaved }: Props) {
   }
 
   const kind = post.pageKind;
-  const showEditor = kind === "article" || kind === "about";
+  const showEditor = kind === "article";
   const crumbs = kind === "article" ? ancestorsOf(post.id, pages) : [];
   const childPages = pages.filter((p) => p.pageKind === "article" && p.parentId === post.id);
   const linkedChildIds = new Set([
@@ -287,21 +220,6 @@ export function PageEditor({ onSaved }: Props) {
     ...pendingLinkIds,
   ]);
   const looseChildren = childPages.filter((child) => !linkedChildIds.has(child.id));
-
-  const onPickAvatar = async (file: File) => {
-    setUploading(true);
-    setError("");
-    try {
-      const { url } = await api.upload(file);
-      setAvatar(url);
-      liveRef.current.avatar = url;
-      scheduleAutosave();
-    } catch {
-      setError("头像没传上去，再试一次。");
-    } finally {
-      setUploading(false);
-    }
-  };
 
   const createChildForLinkBlock = async (): Promise<PageLinkData> => {
     if (post.pageKind !== "article") {
@@ -317,7 +235,7 @@ export function PageEditor({ onSaved }: Props) {
       summary: "",
       coverUrl: "",
       body: starterArticleDocument(),
-      draft: false,
+      visibility: "public",
     });
     setPendingLinkIds((prev) => (prev.includes(child.id) ? prev : [...prev, child.id]));
     onSaved?.(child);
@@ -356,7 +274,7 @@ export function PageEditor({ onSaved }: Props) {
         summary: "",
         coverUrl: "",
         body: starterArticleDocument(),
-        draft: false,
+        visibility: "public",
       });
       const { post: saved } = await api.updatePost(post.id, {
         title: meta.title,
@@ -368,13 +286,13 @@ export function PageEditor({ onSaved }: Props) {
         coverUrl: meta.coverUrl,
         props: post.props,
         body: appendPageLink(body, child),
-        draft: post.parentId ? false : draft,
+        visibility: post.parentId ? "public" : visibility,
       });
       setPost(saved);
       setTitle(saved.title);
       draftBodyRef.current = saved.body;
       onSaved?.(saved);
-      navigate(`/admin/p/${child.id}`);
+      router.push(`/admin/p/${child.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "新建子页面失败");
     } finally {
@@ -399,7 +317,7 @@ export function PageEditor({ onSaved }: Props) {
                       <button
                         type="button"
                         className="workspace-crumb-link max-w-[10rem] truncate hover:text-foreground"
-                        onClick={() => navigate(`/admin/p/${crumb.id}`)}
+                        onClick={() => router.push(`/admin/p/${crumb.id}`)}
                       >
                         {pageTitle(crumb)}
                       </button>
@@ -414,23 +332,6 @@ export function PageEditor({ onSaved }: Props) {
                 </p>
               )}
             </div>
-          ) : kind === "about" ? (
-            <div className="flex max-w-xl flex-col gap-1.5">
-              <Label htmlFor="page-title" className="text-xs text-muted-foreground">
-                首页署名
-              </Label>
-              <Input
-                id="page-title"
-                value={title}
-                onChange={(e) => {
-                  const next = e.currentTarget.value;
-                  setTitle(next);
-                  liveRef.current.title = next;
-                  scheduleAutosave();
-                }}
-                className="h-9"
-              />
-            </div>
           ) : (
             <p className="text-xs text-muted-foreground">页面</p>
           )}
@@ -438,7 +339,7 @@ export function PageEditor({ onSaved }: Props) {
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {kind === "article" && !post.parentId ? (
-            draft ? (
+            visibility === "private" ? (
               <Button
                 type="button"
                 size="sm"
@@ -452,7 +353,7 @@ export function PageEditor({ onSaved }: Props) {
               </Button>
             ) : (
               <>
-                <span className="text-xs text-muted-foreground">已发布</span>
+                <span className="text-xs text-muted-foreground">公开</span>
                 <Button
                   type="button"
                   variant="outline"
@@ -471,13 +372,13 @@ export function PageEditor({ onSaved }: Props) {
                   size="sm"
                   disabled={saving}
                   onClick={() => {
-                    setDraft(true);
-                    liveRef.current.draft = true;
+                    setVisibility("private");
+                    liveRef.current.visibility = "private";
                     window.clearTimeout(autosaveTimerRef.current);
-                    void persist({ draft: true });
+                    void persist({ visibility: "private" });
                   }}
                 >
-                  撤回草稿
+                  设为私有
                 </Button>
               </>
             )
@@ -493,21 +394,6 @@ export function PageEditor({ onSaved }: Props) {
         </div>
       </div>
 
-      {kind === "about" ? (
-        <AboutEditorPanel
-          avatar={avatar}
-          skills={skills}
-          uploading={uploading}
-          onPickAvatar={(file) => void onPickAvatar(file)}
-          onClearAvatar={() => {
-            setAvatar("");
-            liveRef.current.avatar = "";
-            scheduleAutosave();
-          }}
-          onManageSkills={() => setSkillsOpen(true)}
-        />
-      ) : null}
-
       <div className="flex min-h-0 flex-1 overflow-hidden bg-background">
         {showEditor ? (
           <SoftScrollbar
@@ -517,33 +403,23 @@ export function PageEditor({ onSaved }: Props) {
             <NotionEditor
               key={`${post.id}:${editorEpoch}`}
               initial={initial}
-              pageLink={
-                kind === "article"
-                  ? {
-                      onOpen: (page) => navigate(`/admin/p/${page.pageId}`),
-                      createChild: () => createChildForLinkBlock(),
-                    }
-                  : undefined
-              }
-              aiAssist={
-                showEditor
-                  ? {
-                      onInvoke: ({ blockIndex }) => {
-                        openSpotlight({ actionId: "ai-chat", insertIndex: blockIndex });
-                      },
-                    }
-                  : undefined
-              }
+              pageLink={{
+                onOpen: (page) => router.push(`/admin/p/${page.pageId}`),
+                createChild: () => createChildForLinkBlock(),
+              }}
+              aiAssist={{
+                onInvoke: ({ blockIndex }) => {
+                  openSpotlight({ actionId: "ai-chat", insertIndex: blockIndex });
+                },
+              }}
               onChange={(document) => {
                 draftBodyRef.current = document;
-                if (kind === "article") {
-                  const meta = metaFromEditorDocument(document, {
-                    title: post.title !== "无标题" && post.title !== "未命名" ? post.title : undefined,
-                  });
-                  setTitle(meta.title);
-                  liveRef.current.title = meta.title;
-                  previewTreeTitle(post.id, meta.title);
-                }
+                const meta = metaFromEditorDocument(document, {
+                  title: post.title !== "无标题" && post.title !== "未命名" ? post.title : undefined,
+                });
+                setTitle(meta.title);
+                liveRef.current.title = meta.title;
+                previewTreeTitle(post.id, meta.title);
                 scheduleAutosave();
               }}
               onReady={(instance) => {
@@ -552,9 +428,7 @@ export function PageEditor({ onSaved }: Props) {
                 setEditorReady(true);
               }}
             />
-            {kind === "article" ? (
-              <LooseChildPages pages={looseChildren} onOpen={(pageId) => navigate(`/admin/p/${pageId}`)} />
-            ) : null}
+            <LooseChildPages pages={looseChildren} onOpen={(pageId) => router.push(`/admin/p/${pageId}`)} />
           </SoftScrollbar>
         ) : null}
         {showEditor && editorReady ? (
@@ -601,28 +475,16 @@ export function PageEditor({ onSaved }: Props) {
           open={publishOpen}
           onOpenChange={setPublishOpen}
           initialTags={tags}
+          initialVisibility={visibility}
           mode={publishMode}
           busy={saving}
-          onConfirm={async (nextTags) => {
+          onConfirm={async (nextTags, nextVisibility) => {
             setTags(nextTags);
             liveRef.current.tags = nextTags;
-            liveRef.current.draft = false;
-            setDraft(false);
+            liveRef.current.visibility = nextVisibility;
+            setVisibility(nextVisibility);
             window.clearTimeout(autosaveTimerRef.current);
-            await persist({ draft: false, tags: nextTags });
-          }}
-        />
-      ) : null}
-
-      {kind === "about" ? (
-        <AboutSkillsDialog
-          open={skillsOpen}
-          onOpenChange={setSkillsOpen}
-          skills={skills}
-          onSave={(next) => {
-            setSkills(next);
-            liveRef.current.skills = next;
-            scheduleAutosave();
+            await persist({ visibility: nextVisibility, tags: nextTags });
           }}
         />
       ) : null}

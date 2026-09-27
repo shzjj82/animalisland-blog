@@ -24,6 +24,7 @@ export type PostRow = {
   props: string;
   body: string;
   draft: number;
+  author_id: string | null;
   published_at: string | null;
   created_at: string;
   updated_at: string;
@@ -91,7 +92,9 @@ export function toPost(row: PostRow): Post {
     props,
     tags,
     body: parseBody(row.body),
-    draft: Boolean(row.draft),
+    // 本地 draft 列：1 = private，0 = public
+    visibility: row.draft ? "private" : "public",
+    authorId: row.author_id ?? null,
     publishedAt: row.published_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -117,8 +120,8 @@ export function loadAncestorIndex(): Map<string, AncestorRow> {
   return new Map(rows.map((row) => [row.id, row]));
 }
 
-/** 子页没有独立草稿：若任一祖先是草稿，前台当作不可见 */
-export function hasDraftAncestor(postId: string, index?: Map<string, AncestorRow>): boolean {
+/** 子页没有独立可见性：若任一祖先是私有，前台当作不可见 */
+export function hasPrivateAncestor(postId: string, index?: Map<string, AncestorRow>): boolean {
   const map = index ?? loadAncestorIndex();
   let current: string | null = map.get(postId)?.parent_id ?? null;
   const seen = new Set<string>();
@@ -139,8 +142,15 @@ export function hasDraftAncestor(postId: string, index?: Map<string, AncestorRow
   return false;
 }
 
+/** @deprecated 使用 hasPrivateAncestor */
+export const hasDraftAncestor = hasPrivateAncestor;
+
 /** 祖先链（根 → 父），不含自身；供前台面包屑，避免拉全站列表 */
-export function listAncestors(postId: string, includeDrafts: boolean): PostListItem[] {
+export function listAncestors(
+  postId: string,
+  access: "public" | "feed" = "public",
+): PostListItem[] {
+  const includePrivate = access === "feed";
   const index = loadAncestorIndex();
   const chainIds: string[] = [];
   let current: string | null = index.get(postId)?.parent_id ?? null;
@@ -154,7 +164,7 @@ export function listAncestors(postId: string, includeDrafts: boolean): PostListI
     if (!parent) {
       break;
     }
-    if (!includeDrafts && parent.draft) {
+    if (!includePrivate && parent.draft) {
       break;
     }
     chainIds.unshift(current);
@@ -166,7 +176,7 @@ export function listAncestors(postId: string, includeDrafts: boolean): PostListI
   const placeholders = chainIds.map(() => "?").join(",");
   const rows = db
     .prepare(
-      `SELECT id, slug, title, type, page_kind, parent_id, tree_sort, summary, cover_url, props, draft, published_at, created_at, updated_at
+      `SELECT id, slug, title, type, page_kind, parent_id, tree_sort, summary, cover_url, props, draft, author_id, published_at, created_at, updated_at
        FROM posts WHERE id IN (${placeholders})`,
     )
     .all(...chainIds) as Omit<PostRow, "body">[];

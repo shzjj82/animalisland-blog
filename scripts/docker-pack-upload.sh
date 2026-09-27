@@ -97,7 +97,9 @@ done
 
 load_deploy_env "$DEPLOY_ENV_FILE"
 
-IMAGE="${CLI_IMAGE:-${DEPLOY_IMAGE:-myblog:latest}}"
+IMAGE_API="${CLI_IMAGE_API:-${DEPLOY_IMAGE_API:-myblog-api:latest}}"
+IMAGE_WEB="${CLI_IMAGE_WEB:-${DEPLOY_IMAGE_WEB:-myblog-web:latest}}"
+# 兼容旧变量：若只设了 DEPLOY_IMAGE，仍作为 api 镜像名提示，但默认双镜像
 PLATFORM="${CLI_PLATFORM:-${DEPLOY_PLATFORM:-linux/amd64}}"
 ARCHIVE="${CLI_ARCHIVE:-${DEPLOY_ARCHIVE:-myblog-amd64.tar.gz}}"
 OUT_DIR="${CLI_OUT_DIR:-${DEPLOY_OUT_DIR:-.}}"
@@ -112,19 +114,20 @@ REMOTE_DIR="${CLI_REMOTE_DIR:-${DEPLOY_REMOTE_DIR:-/opt/myblog}}"
 mkdir -p "$OUT_DIR"
 ARCHIVE_PATH="$OUT_DIR/$ARCHIVE"
 
-echo "==> 镜像: $IMAGE"
+echo "==> 镜像: $IMAGE_API + $IMAGE_WEB"
 echo "==> 平台: $PLATFORM"
 echo "==> 产物: $ARCHIVE_PATH"
 
 if [[ "$NO_BUILD" -eq 0 ]]; then
   echo "==> 构建镜像…"
-  docker buildx build --platform "$PLATFORM" -t "$IMAGE" --load "$ROOT"
+  docker buildx build --platform "$PLATFORM" --build-arg INTERNAL_API_URL=http://api:3001 --target api -t "$IMAGE_API" --load "$ROOT"
+  docker buildx build --platform "$PLATFORM" --build-arg INTERNAL_API_URL=http://api:3001 --target web -t "$IMAGE_WEB" --load "$ROOT"
 else
   echo "==> 跳过构建（--no-build）"
 fi
 
 echo "==> 导出并压缩…"
-docker save "$IMAGE" | gzip -c >"$ARCHIVE_PATH"
+docker save "$IMAGE_API" "$IMAGE_WEB" | gzip -c >"$ARCHIVE_PATH"
 SIZE="$(du -h "$ARCHIVE_PATH" | awk '{print $1}')"
 echo "==> 完成: $ARCHIVE_PATH ($SIZE)"
 

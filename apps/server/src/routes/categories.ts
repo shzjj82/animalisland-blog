@@ -8,6 +8,11 @@ import {
   listCategories,
   updateCategory,
 } from "../categories.js";
+import {
+  invalidateCategoriesCache,
+  withCategoriesListCache,
+  withCategorySlugCache,
+} from "../categories-cache.js";
 import { DocsError } from "../docs-client.js";
 import { fail, ok } from "../http.js";
 
@@ -56,8 +61,9 @@ function failDocs(res: Parameters<typeof fail>[0], err: unknown): boolean {
 
 categoriesRouter.get("/", async (_req, res, next) => {
   try {
-    res.set("Cache-Control", "private, no-store");
-    ok(res, { categories: await listCategories() });
+    const categories = await withCategoriesListCache(() => listCategories());
+    res.set("Cache-Control", "public, max-age=60");
+    ok(res, { categories });
   } catch (err) {
     if (failDocs(res, err)) {
       return;
@@ -68,12 +74,14 @@ categoriesRouter.get("/", async (_req, res, next) => {
 
 categoriesRouter.get("/:slug", async (req, res, next) => {
   try {
-    const category = await getCategoryBySlug(req.params.slug);
+    const category = await withCategorySlugCache(req.params.slug, async () =>
+      (await getCategoryBySlug(req.params.slug)) ?? null,
+    );
     if (!category) {
       fail(res, "NOT_FOUND", 404);
       return;
     }
-    res.set("Cache-Control", "private, no-store");
+    res.set("Cache-Control", "public, max-age=60");
     ok(res, { category });
   } catch (err) {
     if (failDocs(res, err)) {
@@ -90,7 +98,9 @@ categoriesRouter.post("/", requireAuth, async (req, res, next) => {
     return;
   }
   try {
-    ok(res, { category: await createCategory(parsed) }, 201);
+    const category = await createCategory(parsed);
+    invalidateCategoriesCache();
+    ok(res, { category }, 201);
   } catch (err) {
     if (failDocs(res, err)) {
       return;
@@ -120,6 +130,7 @@ categoriesRouter.put("/:id", requireAuth, async (req, res, next) => {
       fail(res, "NOT_FOUND", 404);
       return;
     }
+    invalidateCategoriesCache();
     ok(res, { category });
   } catch (err) {
     if (failDocs(res, err)) {
@@ -144,6 +155,7 @@ categoriesRouter.delete("/:id", requireAuth, async (req, res, next) => {
       fail(res, "NOT_FOUND", 404);
       return;
     }
+    invalidateCategoriesCache();
     ok(res, null);
   } catch (err) {
     if (failDocs(res, err)) {

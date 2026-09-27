@@ -2,10 +2,12 @@
  * 前台博客只读渲染：把后台 Notion 编辑器保存的块文档，套成小岛日记的 UI。
  * 不加载 Editor.js。
  */
+"use client";
+
 import type { EditorJsBlock, EditorJsDocument } from "@myblog/shared";
 import { Card, Divider, Image } from "animal-island-ui";
-import DOMPurify from "dompurify";
-import { Link } from "react-router-dom";
+import DOMPurify from "isomorphic-dompurify";
+import Link from "next/link";
 import { PageLinkIcon } from "@/lib/iconPark";
 import { pageTitle } from "@/lib/pageTree";
 import { LazyCodeBlock } from "@/content/render/LazyCodeBlock";
@@ -138,7 +140,7 @@ function BlockView({ block }: { block: EditorJsBlock }) {
       return null;
     }
     return (
-      <Link to={`/post/${slug}`} className="block-page-link">
+      <Link href={`/post/${slug}`} className="block-page-link" prefetch={false}>
         <span className="block-page-link-icon" aria-hidden>
           <PageLinkIcon size={18} />
         </span>

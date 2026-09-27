@@ -1,29 +1,52 @@
-import type {
-  AiChatInput,
-  AiChatResult,
-  AiToEditorInput,
-  AiToEditorResult,
-  ApiResponse,
-  Category,
-  Post,
-  PostListItem,
-  SiteAbout,
-  UpsertCategoryInput,
-  UpsertPostInput,
+import {
+  encodeSlugParam,
+  type AiChatInput,
+  type AiChatResult,
+  type AiToEditorInput,
+  type AiToEditorResult,
+  type ApiResponse,
+  type Category,
+  type Post,
+  type PostListItem,
+  type UpsertCategoryInput,
+  type UpsertPostInput,
 } from "@myblog/shared";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    credentials: "include",
-    ...init,
-    headers: {
-      ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-      ...init?.headers,
-    },
-  });
-  const body = (await res.json().catch(() => null)) as ApiResponse<T> | null;
+  const method = (init?.method ?? "GET").toUpperCase();
+  const hasJsonBody = Boolean(init?.body) && !(init?.body instanceof FormData);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      credentials: "include",
+      cache: "no-store",
+      ...init,
+      headers: {
+        Accept: "application/json",
+        ...(hasJsonBody ? { "Content-Type": "application/json" } : {}),
+        ...init?.headers,
+      },
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw err;
+    }
+    const reason = err instanceof Error ? err.message : "网络错误";
+    throw new Error(reason || "Failed to fetch");
+  }
+  const text = await res.text();
+  let body: ApiResponse<T> | null = null;
+  try {
+    body = text ? (JSON.parse(text) as ApiResponse<T>) : null;
+  } catch {
+    throw new Error(
+      `HTTP_${res.status}: 响应不是 JSON（${text.slice(0, 120).replace(/\s+/g, " ") || "空"}）`,
+    );
+  }
   if (!body || typeof body !== "object" || !("success" in body)) {
-    throw new Error(`HTTP_${res.status}`);
+    throw new Error(
+      `HTTP_${method} ${url} → HTTP_${res.status}: 响应格式异常（${text.slice(0, 120).replace(/\s+/g, " ") || "空"}）`,
+    );
   }
   if (!res.ok || !body.success) {
     throw new Error(body.code || body.message || `HTTP_${res.status}`);
@@ -37,6 +60,11 @@ export const api = {
     request<{ username: string }>("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
+    }),
+  register: (username: string, password: string, nickname?: string) =>
+    request<{ username: string }>("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ username, password, nickname }),
     }),
   logout: () => request<null>("/api/auth/logout", { method: "POST" }),
   listCategories: () =>
@@ -93,16 +121,18 @@ export const api = {
       qs ? `/api/posts?${qs}` : "/api/posts",
     );
   },
-  workspaceTree: () => api.listPosts({ tree: true }),
-  workspaceSpecials: () =>
-    request<{ about: Post | null }>("/api/posts/workspace/specials"),
+  workspaceTree: (signal?: AbortSignal) =>
+    request<{ posts: PostListItem[]; total: number }>("/api/posts?tree=1", {
+      cache: "no-store",
+      signal,
+    }),
   getBySlug: (slug: string) =>
     request<{
       post: Post;
       ancestors: PostListItem[];
       siblings: PostListItem[];
       children: PostListItem[];
-    }>(`/api/posts/${slug}`, { cache: "no-store" }),
+    }>(`/api/posts/${encodeSlugParam(slug)}`, { cache: "no-store" }),
   getById: (id: string) =>
     request<{ post: Post }>(`/api/posts/id/${id}`, { cache: "no-store" }),
   createPost: (input: UpsertPostInput) =>
@@ -127,7 +157,6 @@ export const api = {
       body: JSON.stringify(input),
     }),
   deletePost: (id: string) => request<null>(`/api/posts/${id}`, { method: "DELETE" }),
-  getSite: () => request<{ about: SiteAbout }>("/api/site"),
   upload: async (file: File) => {
     const body = new FormData();
     body.append("file", file);

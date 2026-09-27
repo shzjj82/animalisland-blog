@@ -75,7 +75,7 @@ function uniqueCategorySlug(base: string, excludeId?: string): string {
   }
 }
 
-export function ensureDefaultCategories(): void {
+export async function ensureDefaultCategories(): Promise<void> {
   const count = (db.prepare("SELECT COUNT(*) AS n FROM categories").get() as { n: number }).n;
   if (count > 0) {
     return;

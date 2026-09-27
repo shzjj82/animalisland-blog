@@ -1,15 +1,17 @@
+"use client";
+
+import type { PostListItem } from "@myblog/shared";
 import { useMemo, useState } from "react";
 import { BlogShell } from "@/components/BlogShell";
 import { PostCards } from "@/components/PostCards";
 import { Seo } from "@/components/Seo";
 import { TypeChips } from "@/components/TypeChips";
 import { useCategories } from "@/lib/categories";
-import { usePublishedArticles } from "@/lib/usePublishedArticles";
 
 /** 顶层文章列表；可用分类筛选；子文从主文链接进入 */
-export function NotesPage() {
+export function NotesPage({ initialPosts }: { initialPosts: PostListItem[] }) {
   const { articleCategories } = useCategories();
-  const { posts, error } = usePublishedArticles();
+  const [posts] = useState(initialPosts);
   const [filter, setFilter] = useState<string | "all">("all");
 
   const visible = useMemo(() => {
@@ -45,8 +47,7 @@ export function NotesPage() {
             onChange={setFilter}
           />
         ) : null}
-        {error ? <p className="blog-section-sub">{error}</p> : null}
-        {!error ? <PostCards posts={visible} empty="还没有公开笔记。" /> : null}
+        <PostCards posts={visible} empty="还没有公开笔记。" />
       </section>
     </BlogShell>
   );

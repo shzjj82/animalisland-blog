@@ -8,7 +8,6 @@ export {
   getPostBySlug,
   getPostPage,
   getPostById,
-  getPageByKind,
 } from "./posts.local.read.js";
 export {
   type PostWriteInput,

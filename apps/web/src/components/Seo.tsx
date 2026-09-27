@@ -1,3 +1,5 @@
+"use client";
+
 import { SITE_NAME, siteTitle } from "@myblog/shared";
 import { useEffect } from "react";
 

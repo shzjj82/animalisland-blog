@@ -1,7 +1,10 @@
-import type { PageKind, PostListItem } from "@myblog/shared";
-import { Delete, Down, Info, Notes, Plus, Right, ToTop } from "@icon-park/react";
+"use client";
+
+import type { PostListItem } from "@myblog/shared";
+import { Delete, Down, Notes, Plus, Right, ToTop } from "@icon-park/react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
-import { NavLink } from "react-router-dom";
 import { SoftScrollbar } from "@/components/SoftScrollbar";
 import { Button } from "@/components/ui/button";
 import { iconParkOutline } from "@/lib/iconPark";
@@ -24,10 +27,6 @@ type Props = {
 };
 
 const DRAG_MIME = "application/x-myblog-page-id";
-
-function kindIcon(kind: PageKind) {
-  return kind === "about" ? Info : Notes;
-}
 
 function buildArticleForest(articles: PostListItem[]): TreeNode[] {
   const ids = new Set(articles.map((item) => item.id));
@@ -64,16 +63,16 @@ export function PageTree({
   onReparent,
   onCloseMobile,
 }: Props) {
+  const pathname = usePathname();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget>(null);
   const draggingIdRef = useRef<string | null>(null);
 
-  const { about, articleForest, articles } = useMemo(() => {
-    const about = pages.find((p) => p.pageKind === "about");
-    const articles = pages.filter((p) => p.pageKind === "article");
+  const { articleForest, articles } = useMemo(() => {
+    // about 已下线；缺 pageKind 的旧缓存数据也按文章处理
+    const articles = pages.filter((p) => !p.pageKind || p.pageKind === "article");
     return {
-      about,
       articles,
       articleForest: buildArticleForest(articles),
     };
@@ -147,7 +146,7 @@ export function PageTree({
     page: PostListItem,
     opts: { depth: number; hasChildren?: boolean; draggable?: boolean },
   ) => {
-    const Icon = kindIcon(page.pageKind);
+    const Icon = Notes;
     const canDelete = page.pageKind === "article";
     const canAddChild = page.pageKind === "article";
     const depthPad = collapsed ? 0 : Math.min(opts.depth, 6) * 12;
@@ -205,8 +204,8 @@ export function PageTree({
           <span className={cn("inline-block size-6 shrink-0", collapsed && "hidden")} aria-hidden />
         )}
 
-        <NavLink
-          to={`/admin/p/${page.id}`}
+        <Link
+          href={`/admin/p/${page.id}`}
           title={opts.draggable ? `${pageTitle(page)}（拖拽可调整层级）` : pageTitle(page)}
           onClick={onCloseMobile}
           draggable={Boolean(opts.draggable)}
@@ -218,27 +217,25 @@ export function PageTree({
             beginDrag(event, page);
           }}
           onDragEnd={clearDrag}
-          className={({ isActive }) =>
-            cn(
-              "relative z-[2] flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors",
-              opts.draggable && "cursor-grab active:cursor-grabbing",
-              collapsed && "justify-center px-0",
-              isActive || selectedId === page.id
-                ? "bg-sidebar-accent/80 font-medium text-sidebar-primary"
-                : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
-            )
-          }
+          className={cn(
+            "relative z-[2] flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors",
+            opts.draggable && "cursor-grab active:cursor-grabbing",
+            collapsed && "justify-center px-0",
+            pathname === `/admin/p/${page.id}` || selectedId === page.id
+              ? "bg-sidebar-accent/80 font-medium text-sidebar-primary"
+              : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
+          )}
         >
           <Icon {...iconParkOutline} size={16} className="shrink-0 opacity-80" />
           {!collapsed ? (
             <span className="min-w-0 truncate">
               {pageTitle(page)}
-              {!page.parentId && page.draft ? (
-                <span className="ml-1 text-[10px] font-normal text-muted-foreground">草稿</span>
+              {!page.parentId && page.visibility === "private" ? (
+                <span className="ml-1 text-[10px] font-normal text-muted-foreground">私有</span>
               ) : null}
             </span>
           ) : null}
-        </NavLink>
+        </Link>
         {!collapsed && canAddChild ? (
           <button
             type="button"
@@ -283,15 +280,6 @@ export function PageTree({
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       <SoftScrollbar className="min-h-0 flex-1" contentClassName="space-y-4 pb-4">
         <nav className="space-y-4" aria-label="页面树">
-          <div className="space-y-0.5">
-            {!collapsed ? (
-              <p className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/80">
-                站点
-              </p>
-            ) : null}
-            {about ? renderRow(about, { depth: 0 }) : null}
-          </div>
-
           <div className="space-y-1.5">
             {!collapsed ? (
               <p className="px-2.5 pb-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/80">

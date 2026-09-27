@@ -1,8 +1,10 @@
+"use client";
+
 import { Footer } from "animal-island-ui";
 import type { ReactNode } from "react";
 import { BlogHeader } from "@/components/BlogHeader";
 import { useTheme } from "@/lib/theme";
-import "@/pages/Home/Home.less";
+import "@/views/Home/Home.less";
 
 export function BlogShell({ children }: { children: ReactNode }) {
   const { dark } = useTheme();

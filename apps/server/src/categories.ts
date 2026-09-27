@@ -32,5 +32,5 @@ export async function deleteCategory(id: string): Promise<boolean> {
 }
 
 export async function ensureDefaultCategories(): Promise<void> {
-  (await loadCategories()).ensureDefaultCategories();
+  await (await loadCategories()).ensureDefaultCategories();
 }

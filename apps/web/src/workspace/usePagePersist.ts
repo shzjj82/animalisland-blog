@@ -1,9 +1,7 @@
 import {
-  DEFAULT_ABOUT,
-  emptyEditorDocument,
   type EditorJsDocument,
   type Post,
-  type SiteSkill,
+  type PostVisibility,
   type UpsertPostInput,
 } from "@myblog/shared";
 import type EditorJS from "@editorjs/editorjs";
@@ -20,13 +18,11 @@ export type PageLiveSnap = {
   post: Post | null;
   title: string;
   slug: string;
-  draft: boolean;
+  visibility: PostVisibility;
   tags: string[];
-  avatar: string;
-  skills: SiteSkill[];
 };
 
-type PersistOpts = { draft?: boolean; tags?: string[] };
+type PersistOpts = { visibility?: PostVisibility; tags?: string[] };
 
 type Args = {
   liveRef: MutableRefObject<PageLiveSnap>;
@@ -36,7 +32,7 @@ type Args = {
   previewTreeTitle: (pageId: string, title: string) => void;
   onSaved?: (post: Post) => void;
   setPost: Dispatch<SetStateAction<Post | null>>;
-  setDraft: Dispatch<SetStateAction<boolean>>;
+  setVisibility: Dispatch<SetStateAction<PostVisibility>>;
   setTags: Dispatch<SetStateAction<string[]>>;
   setSlug: Dispatch<SetStateAction<string>>;
   setTitle: Dispatch<SetStateAction<string>>;
@@ -55,7 +51,7 @@ export function usePagePersist({
   previewTreeTitle,
   onSaved,
   setPost,
-  setDraft,
+  setVisibility,
   setTags,
   setSlug,
   setTitle,
@@ -80,8 +76,8 @@ export function usePagePersist({
         return;
       }
       const kind = current.pageKind;
-      const showEditor = kind === "article" || kind === "about";
-      const asDraft = opts?.draft ?? snap.draft;
+      const showEditor = kind === "article";
+      const nextVisibility = opts?.visibility ?? snap.visibility;
       const nextTags = opts?.tags ?? snap.tags;
       const seq = ++saveSeqRef.current;
 
@@ -107,40 +103,25 @@ export function usePagePersist({
           return;
         }
 
-        let payload: UpsertPostInput;
-        if (kind === "about") {
-          payload = {
-            title: snap.title.trim() || "关于",
-            slug: snap.slug.trim() || undefined,
-            type: current.type,
-            pageKind: "about",
-            summary: "",
-            coverUrl: "",
-            props: { avatar: snap.avatar.trim() || DEFAULT_ABOUT.avatar, skills: snap.skills },
-            body: body.blocks.length ? body : emptyEditorDocument(),
-            draft: false,
-          };
-        } else {
-          const meta = metaFromEditorDocument(body, {
-            title:
-              current.title !== "无标题" && current.title !== "未命名" ? current.title : undefined,
-            summary: current.summary,
-            coverUrl: current.coverUrl,
-          });
-          payload = {
-            title: meta.title,
-            slug: snap.slug.trim() || undefined,
-            type: current.type,
-            pageKind: "article",
-            parentId: current.parentId,
-            summary: meta.summary,
-            coverUrl: meta.coverUrl,
-            props: current.props,
-            tags: current.parentId ? [] : nextTags,
-            body,
-            draft: current.parentId ? false : asDraft,
-          };
-        }
+        const meta = metaFromEditorDocument(body, {
+          title:
+            current.title !== "无标题" && current.title !== "未命名" ? current.title : undefined,
+          summary: current.summary,
+          coverUrl: current.coverUrl,
+        });
+        const payload: UpsertPostInput = {
+          title: meta.title,
+          slug: snap.slug.trim() || undefined,
+          type: current.type,
+          pageKind: "article",
+          parentId: current.parentId,
+          summary: meta.summary,
+          coverUrl: meta.coverUrl,
+          props: current.props,
+          tags: current.parentId ? [] : nextTags,
+          body,
+          visibility: current.parentId ? "public" : nextVisibility,
+        };
 
         if (seq !== saveSeqRef.current) {
           return;
@@ -170,7 +151,7 @@ export function usePagePersist({
                 coverUrl: parentPost.coverUrl,
                 props: parentPost.props,
                 body: nextBody,
-                draft: parentPost.draft,
+                visibility: parentPost.visibility,
               });
             }
           } catch {
@@ -183,7 +164,7 @@ export function usePagePersist({
         }
 
         setPost(saved);
-        setDraft(saved.draft);
+        setVisibility(saved.visibility);
         setTags(saved.tags ?? []);
         setSlug(saved.slug);
         setTitle(saved.title);
@@ -215,7 +196,7 @@ export function usePagePersist({
     editorReadyRef,
     editorRef,
     liveRef,
-    setDraft,
+    setVisibility,
     setError,
     setPendingLinkIds,
     setPost,

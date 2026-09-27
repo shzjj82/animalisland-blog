@@ -1,3 +1,5 @@
+"use client";
+
 import type { Category } from "@myblog/shared";
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api } from "@/lib/api";

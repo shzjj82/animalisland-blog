@@ -82,7 +82,8 @@ done
 
 load_deploy_env "$DEPLOY_ENV_FILE"
 
-IMAGE="${CLI_IMAGE:-${DEPLOY_IMAGE:-myblog:latest}}"
+IMAGE_API="${CLI_IMAGE_API:-${DEPLOY_IMAGE_API:-myblog-api:latest}}"
+IMAGE_WEB="${CLI_IMAGE_WEB:-${DEPLOY_IMAGE_WEB:-myblog-web:latest}}"
 ARCHIVE="${CLI_ARCHIVE:-${DEPLOY_ARCHIVE:-myblog-amd64.tar.gz}}"
 if [[ -n "$CLI_COMPOSE" ]]; then
   COMPOSE_UP="$CLI_COMPOSE"
@@ -110,7 +111,7 @@ if ! ARCHIVE_PATH="$(resolve_archive "$ARCHIVE")"; then
 fi
 
 echo "==> 加载: $ARCHIVE_PATH"
-echo "==> 期望镜像: $IMAGE"
+echo "==> 期望镜像: $IMAGE_API + $IMAGE_WEB"
 
 case "$ARCHIVE_PATH" in
   *.tar.gz|*.tgz)

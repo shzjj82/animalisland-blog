@@ -1,8 +1,10 @@
+"use client";
+
 import { SITE_DESCRIPTION, type Post as BlogPost, type PostListItem } from "@myblog/shared";
 import { ArrowLeft, ArrowRight } from "@icon-park/react";
 import { Button, Card } from "animal-island-ui";
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useRouter } from "next/navigation";
 import { BlogContent } from "@/content";
 import { BlogShell } from "@/components/BlogShell";
 import { useDeferredIslandLoading } from "@/components/IslandLoadingHost";
@@ -13,28 +15,45 @@ import { api } from "@/lib/api";
 import { useCategories } from "@/lib/categories";
 import { iconParkOutline, PageLinkIcon } from "@/lib/iconPark";
 import { pageTitle } from "@/lib/pageTree";
+import type { PostDetail } from "@/lib/server-api";
 import "./Post.less";
 
-function Post() {
-  const { slug = "" } = useParams();
-  const navigate = useNavigate();
+type PostProps = {
+  slug: string;
+  initialDetail: PostDetail | null;
+  jsonLd?: Record<string, unknown>;
+};
+
+function Post({ slug, initialDetail, jsonLd }: PostProps) {
+  const router = useRouter();
   const { categories } = useCategories();
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const [post, setPost] = useState<BlogPost | null>(null);
-  const [crumbs, setCrumbs] = useState<PostListItem[]>([]);
-  const [siblings, setSiblings] = useState<PostListItem[]>([]);
-  const [children, setChildren] = useState<PostListItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [missing, setMissing] = useState(false);
+  const [post, setPost] = useState<BlogPost | null>(initialDetail?.post ?? null);
+  const [crumbs, setCrumbs] = useState<PostListItem[]>(initialDetail?.ancestors ?? []);
+  const [siblings, setSiblings] = useState<PostListItem[]>(initialDetail?.siblings ?? []);
+  const [children, setChildren] = useState<PostListItem[]>(initialDetail?.children ?? []);
+  // 信任 SSR：有详情或明确 404(null) 时不进入 loading
+  const [loading, setLoading] = useState(false);
+  const [missing, setMissing] = useState(initialDetail === null);
 
   useDeferredIslandLoading(loading);
 
+  // 公开文用 SSR；私有文 SSR 无 cookie 会 404，登录作者再带 cookie 拉一次
   useEffect(() => {
+    if (initialDetail?.post.slug === slug) {
+      setPost(initialDetail.post);
+      setCrumbs(initialDetail.ancestors ?? []);
+      setSiblings(initialDetail.siblings ?? []);
+      setChildren(initialDetail.children ?? []);
+      setLoading(false);
+      setMissing(false);
+      return;
+    }
+
     window.scrollTo({ top: 0, behavior: "auto" });
     scrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
     setLoading(true);
     setMissing(false);
-    // 立刻清掉上一篇，避免请求期间继续展示旧正文
     setPost(null);
     setSiblings([]);
     setChildren([]);
@@ -55,7 +74,7 @@ function Post() {
         setPost(detail.post);
         setCrumbs(detail.ancestors ?? []);
         setSiblings(detail.siblings ?? []);
-        setChildren((detail.children ?? []).filter((item) => !item.draft));
+        setChildren(detail.children ?? []);
         setLoading(false);
       })
       .catch(() => {
@@ -69,7 +88,7 @@ function Post() {
     return () => {
       cancelled = true;
     };
-  }, [slug]);
+  }, [slug, initialDetail]);
 
   const currentIndex = post ? siblings.findIndex((item) => item.slug === post.slug) : -1;
   const prev = currentIndex > 0 ? siblings[currentIndex - 1] : null;
@@ -127,24 +146,13 @@ function Post() {
           path={`/post/${post.slug}`}
           image={post.coverUrl || undefined}
           type="article"
-          jsonLd={{
-            "@context": "https://schema.org",
-            "@type": "BlogPosting",
-            headline: post.title,
-            description: post.summary || SITE_DESCRIPTION,
-            image: post.coverUrl || undefined,
-            datePublished: post.publishedAt ?? post.createdAt,
-            dateModified: post.updatedAt,
-            inLanguage: "zh-CN",
-            mainEntityOfPage: `${window.location.origin}/post/${post.slug}`,
-            publisher: { "@type": "Organization", name: "小岛日记" },
-          }}
+          jsonLd={jsonLd}
         />
       ) : null}
 
       {missing || (!loading && !post) ? (
         <div className="post-page">
-          <Button onClick={() => navigate("/notes")}>
+          <Button onClick={() => router.push("/notes")}>
             <span className="blog-inline-icon">
               <ArrowLeft {...iconParkOutline} size={14} aria-hidden />
               返回笔记
@@ -159,7 +167,7 @@ function Post() {
         <article className="post-page">
           <SoftScrollbar ref={scrollRef} className="post-scroll" contentClassName="post-scroll-view">
             <div className="post-back">
-              <Button type="text" onClick={() => navigate("/notes")}>
+              <Button type="text" onClick={() => router.push("/notes")}>
                 <span className="blog-inline-icon">
                   <ArrowLeft {...iconParkOutline} size={14} aria-hidden />
                   返回笔记
@@ -180,7 +188,7 @@ function Post() {
                       <button
                         type="button"
                         className="post-crumb"
-                        onClick={() => navigate(`/post/${item.slug}`)}
+                        onClick={() => router.push(`/post/${item.slug}`)}
                       >
                         {pageTitle(item)}
                       </button>
@@ -204,7 +212,7 @@ function Post() {
                         (tag === post.type ? post.categoryName : tag);
                       return (
                         <li key={tag}>
-                          <button type="button" className="post-tag" onClick={() => navigate(`/${tag}`)}>
+                          <button type="button" className="post-tag" onClick={() => router.push(`/${tag}`)}>
                             {name}
                           </button>
                         </li>
@@ -236,7 +244,7 @@ function Post() {
                       <button
                         type="button"
                         className="block-page-link"
-                        onClick={() => navigate(`/post/${child.slug}`)}
+                        onClick={() => router.push(`/post/${child.slug}`)}
                       >
                         <span className="block-page-link-icon" aria-hidden>
                           <PageLinkIcon size={18} />
@@ -252,7 +260,7 @@ function Post() {
 
           <nav className="post-nav" aria-label="相邻页面">
             {prev ? (
-              <Button onClick={() => navigate(`/post/${prev.slug}`)}>
+              <Button onClick={() => router.push(`/post/${prev.slug}`)}>
                 <span className="blog-inline-icon">
                   <ArrowLeft {...iconParkOutline} size={14} aria-hidden />
                   {pageTitle(prev)}
@@ -262,7 +270,7 @@ function Post() {
               <span />
             )}
             {next ? (
-              <Button type="primary" onClick={() => navigate(`/post/${next.slug}`)}>
+              <Button type="primary" onClick={() => router.push(`/post/${next.slug}`)}>
                 <span className="blog-inline-icon">
                   {pageTitle(next)}
                   <ArrowRight {...iconParkOutline} size={14} aria-hidden />

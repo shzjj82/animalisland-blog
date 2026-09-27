@@ -1,18 +1,15 @@
-import fs from "node:fs";
-import path from "node:path";
 import compression from "compression";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import express from "express";
-import { ensureDataDirs, env, isDocsBackend, isLocalBackend, repoRoot } from "./env.js";
+import { ensureDataDirs, env, isDocsBackend, isLocalBackend } from "./env.js";
 import { authRouter } from "./routes/auth.js";
 import { aiRouter } from "./routes/ai.js";
 import { categoriesRouter } from "./routes/categories.js";
 import { postsRouter } from "./routes/posts.js";
-import { siteRouter } from "./routes/site.js";
 import { uploadRouter } from "./routes/upload.js";
 import { fail, ok } from "./http.js";
-import { applyHtmlMeta, metaForRequest, publicOrigin, robotsTxt, sitemapXml } from "./seo.js";
+import { publicOrigin, robotsTxt, sitemapXml } from "./seo.js";
 
 ensureDataDirs();
 
@@ -58,7 +55,6 @@ app.use("/api/auth", authRouter);
 app.use("/api/ai", aiRouter);
 app.use("/api/posts", postsRouter);
 app.use("/api/categories", categoriesRouter);
-app.use("/api/site", siteRouter);
 app.use("/api/upload", uploadRouter);
 
 app.get("/robots.txt", (req, res) => {
@@ -72,39 +68,17 @@ app.get("/sitemap.xml", async (req, res, next) => {
   }
 });
 
-const webDist = path.join(repoRoot, "apps/web/dist");
-const indexPath = path.join(webDist, "index.html");
-if (env.isProd && fs.existsSync(indexPath)) {
-  const indexHtml = fs.readFileSync(indexPath, "utf8");
-  app.use(
-    express.static(webDist, {
-      index: false,
-      setHeaders(res, filePath) {
-        if (filePath.endsWith(".html")) {
-          res.setHeader("Cache-Control", "no-cache");
-          return;
-        }
-        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-      },
-    }),
-  );
-  app.get("*", async (req, res, next) => {
-    try {
-      const origin = publicOrigin(req);
-      const meta = await metaForRequest(req);
-      res.status(meta.status);
-      res.setHeader("Cache-Control", "no-cache");
-      res.type("html").send(applyHtmlMeta(indexHtml, origin, meta));
-    } catch (err) {
-      next(err);
-    }
-  });
-}
+// 页面由 Next.js 提供；Express 只负责 API / 上传 / SEO 文件
 
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (err && typeof err === "object" && "name" in err && err.name === "DocsError") {
     const docsErr = err as { code?: string; status?: number };
     fail(res, docsErr.code || "DOCS_UNAVAILABLE", docsErr.status || 503);
+    return;
+  }
+  if (err && typeof err === "object" && "name" in err && err.name === "UcError") {
+    const ucErr = err as { code?: string; status?: number; message?: string };
+    fail(res, ucErr.code || "AUTH_ERROR", ucErr.status || 503, ucErr.message);
     return;
   }
   const message = err instanceof Error ? err.message : "SERVER_ERROR";
@@ -135,23 +109,34 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
 
 async function start() {
   if (isLocalBackend()) {
+    const { ensureLocalAdmin } = await import("./local-auth.js");
+    ensureLocalAdmin();
     const { ensureWorkspacePages } = await import("./posts.js");
     await ensureWorkspacePages();
+  }
+
+  // 默认分类在博客侧种子（Nest docs 不内置产品文案）
+  try {
+    const { ensureDefaultCategories } = await import("./categories.js");
+    await ensureDefaultCategories();
+  } catch (err) {
+    const code = err instanceof Error ? err.message : String(err);
+    console.warn(`ensureDefaultCategories skipped (${code})`);
   }
 
   if (isDocsBackend()) {
     try {
       const { docsHealth } = await import("./docs-client.js");
       const docs = await docsHealth();
-      console.log(`docs health: ${docs.status ?? "up"} (${env.docsBaseUrl})`);
+      console.log(`docs health: ${docs.status ?? "up"} (${env.gatewayBaseUrl})`);
     } catch (err) {
       const code = err instanceof Error ? err.message : String(err);
-      console.warn(`docs health check failed (${code}); continuing listen → ${env.docsBaseUrl}`);
+      console.warn(`docs health check failed (${code}); continuing listen → ${env.gatewayBaseUrl}`);
     }
   }
 
   app.listen(env.port, env.host, () => {
-    const mode = isDocsBackend() ? `docs → ${env.docsBaseUrl}` : `local sqlite → ${env.databasePath}`;
+    const mode = isDocsBackend() ? `nest → ${env.gatewayBaseUrl}` : `local sqlite → ${env.databasePath}`;
     console.log(`myblog server http://${env.host}:${env.port} (${env.nodeEnv}, ${mode})`);
   });
 }

@@ -20,7 +20,12 @@ export function usePublishedArticles(opts?: { type?: string }) {
       })
       .then((data) => {
         if (!cancelled) {
-          setPosts(data.posts.filter((item) => !item.draft));
+          setPosts(
+            data.posts.filter(
+              (item) =>
+                item.visibility === "public" && item.pageKind === "article" && !item.parentId,
+            ),
+          );
         }
       })
       .catch(() => {

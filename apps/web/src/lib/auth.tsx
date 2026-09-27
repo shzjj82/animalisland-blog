@@ -1,5 +1,7 @@
+"use client";
+
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { useLocation } from "react-router-dom";
+import { usePathname } from "next/navigation";
 import { api } from "./api";
 
 type AuthState = {
@@ -7,6 +9,7 @@ type AuthState = {
   loading: boolean;
   refresh: () => Promise<void>;
   login: (username: string, password: string) => Promise<void>;
+  register: (username: string, password: string, nickname?: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -17,10 +20,10 @@ function needsSession(pathname: string) {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const { pathname } = useLocation();
+  const pathname = usePathname();
   const sessionPage = needsSession(pathname);
   const [username, setUsername] = useState<string | null>(null);
-  const [loading, setLoading] = useState(sessionPage);
+  const [loading, setLoading] = useState(true);
 
   const refresh = async () => {
     try {
@@ -33,13 +36,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // 前台也探测一次，表头才能显示登录态；进 admin/login 再刷新
   useEffect(() => {
-    if (!sessionPage) {
-      setLoading(false);
-      return;
-    }
     void refresh();
-  }, [sessionPage]);
+  }, [sessionPage ? pathname : "public"]);
 
   const value = useMemo<AuthState>(
     () => ({
@@ -48,6 +48,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       refresh,
       login: async (user, password) => {
         await api.login(user, password);
+        await refresh();
+      },
+      register: async (user, password, nickname) => {
+        await api.register(user, password, nickname);
         await refresh();
       },
       logout: async () => {

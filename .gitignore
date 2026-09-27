@@ -9,6 +9,8 @@ dist/
 # Docker 镜像导出包（scripts/docker-pack-upload.sh）
 *.tar.gz
 *.tgz
+# 本机 Docker CLI 临时配置/缓存（勿提交）
+.docker-tmp/
 
 # 密钥（保留示例）
 .env
@@ -26,6 +28,7 @@ logs/
 # 缓存
 .cache/
 .vite/
+.next/
 .turbo/
 coverage/
 

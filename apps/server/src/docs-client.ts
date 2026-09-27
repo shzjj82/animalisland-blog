@@ -1,8 +1,16 @@
 /**
  * 只请求文档服务：分类和文档的存查。
+ * - 每次请求强制带 appCode（env.docsAppCode，默认 blog）；Nest 不再代填
+ * - 公开读：可不带凭证
+ * - 写 / 工作区：用户 Nest JWT
+ * - feed：有 JWT 则带，否则无凭证（绝不回退 service key）
+ * - auto：JWT → service key → none
  * x-docs-key 只放服务端，不要下发到浏览器。
+ * 与 auth 共用 GATEWAY_BASE_URL；文档路径用 /docs/documents（勿用已移除的 /docs/posts）。
  */
 import { env } from "./env.js";
+import { gatewayFetch, readGatewayJson, type GatewayEnvelope } from "./gateway-client.js";
+import { getAccessToken } from "./request-context.js";
 
 export class DocsError extends Error {
   constructor(
@@ -14,27 +22,7 @@ export class DocsError extends Error {
   }
 }
 
-type DocsEnvelope<T> = {
-  success?: boolean;
-  code?: number;
-  message?: string;
-  data?: T | null;
-};
-
-function queryString(query?: Record<string, unknown>): string {
-  if (!query) {
-    return "";
-  }
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) {
-    if (value === undefined || value === null || value === "") {
-      continue;
-    }
-    params.set(key, String(value));
-  }
-  const text = params.toString();
-  return text ? `?${text}` : "";
-}
+export type DocsCredential = "none" | "user" | "service" | "auto" | "prefer-user-or-none";
 
 export async function docsRequest<T>(
   method: string,
@@ -42,48 +30,84 @@ export async function docsRequest<T>(
   opts?: {
     query?: Record<string, unknown>;
     body?: unknown;
+    /**
+     * none: 无 Authorization / x-docs-key
+     * user: 必须有 JWT，否则 UNAUTHORIZED
+     * service: 仅 x-docs-key
+     * prefer-user-or-none: 有 JWT 则带，否则不带（绝不发 service key；用于 feed/public）
+     * auto（默认）: JWT → service key → none
+     */
+    credential?: DocsCredential;
+    /** @deprecated 使用 credential: 'service' */
+    serviceKeyOnly?: boolean;
   },
 ): Promise<T> {
   const query = { ...opts?.query, appCode: env.docsAppCode };
-  const url = `${env.docsBaseUrl}${path}${queryString(query)}`;
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    "x-docs-key": env.docsServiceKey,
-  };
-  const init: RequestInit = { method, headers };
+  const headers: Record<string, string> = {};
+
+  const credential: DocsCredential = opts?.serviceKeyOnly
+    ? "service"
+    : (opts?.credential ?? "auto");
+
+  if (credential === "none") {
+    /* no auth headers */
+  } else if (credential === "user") {
+    const userToken = getAccessToken();
+    if (!userToken) {
+      throw new DocsError("UNAUTHORIZED", 401);
+    }
+    headers.Authorization = `Bearer ${userToken}`;
+  } else if (credential === "service") {
+    if (env.docsServiceKey) {
+      headers["x-docs-key"] = env.docsServiceKey;
+    }
+  } else if (credential === "prefer-user-or-none") {
+    const userToken = getAccessToken();
+    if (userToken) {
+      headers.Authorization = `Bearer ${userToken}`;
+    }
+  } else {
+    // auto
+    const userToken = getAccessToken();
+    if (userToken) {
+      headers.Authorization = `Bearer ${userToken}`;
+    } else if (env.docsServiceKey) {
+      headers["x-docs-key"] = env.docsServiceKey;
+    }
+  }
+
+  let body: string | undefined;
   if (opts?.body !== undefined) {
     headers["Content-Type"] = "application/json";
-    const body =
+    const payload =
       opts.body && typeof opts.body === "object" && !Array.isArray(opts.body)
         ? { ...(opts.body as Record<string, unknown>), appCode: env.docsAppCode }
         : opts.body;
-    init.body = JSON.stringify(body);
+    body = JSON.stringify(payload);
   }
-
-  const timeoutMs = Number.isFinite(env.docsTimeoutMs) && env.docsTimeoutMs > 0 ? env.docsTimeoutMs : 15_000;
-  init.signal = AbortSignal.timeout(timeoutMs);
 
   let response: Response;
   try {
-    response = await fetch(url, init);
+    response = await gatewayFetch(path, { method, headers, query, body });
   } catch (err) {
-    const name = err instanceof Error ? err.name : "";
-    if (name === "TimeoutError" || name === "AbortError") {
+    const code = err instanceof Error && "code" in err ? String((err as { code: string }).code) : "";
+    if (code === "GATEWAY_TIMEOUT") {
       throw new DocsError("DOCS_TIMEOUT", 504);
     }
     throw new DocsError("DOCS_UNAVAILABLE", 503);
   }
 
-  const json = (await response.json().catch(() => null)) as DocsEnvelope<T> | null;
+  const json = (await readGatewayJson<T>(response)) as GatewayEnvelope<T> | null;
   if (!json || typeof json !== "object") {
     throw new DocsError("SERVER_ERROR", response.status || 502);
   }
   if (json.success === false || response.status >= 400) {
-    throw new DocsError(String(json.message || "SERVER_ERROR"), Number(json.code || response.status));
+    const status = typeof json.code === "number" ? json.code : response.status;
+    throw new DocsError(String(json.message || "SERVER_ERROR"), status >= 400 ? status : 502);
   }
   return json.data as T;
 }
 
 export async function docsHealth(): Promise<{ status: string }> {
-  return docsRequest<{ status: string }>("GET", "/docs/health");
+  return docsRequest<{ status: string }>("GET", "/docs/health", { credential: "service" });
 }

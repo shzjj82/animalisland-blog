@@ -1,4 +1,9 @@
+/**
+ * 分类走 /docs/categories。默认栏目、色板、nav 由博客显式传入；
+ * Nest 创建时不传 nav 则为 false，且不再代选 life / 内置色板。
+ */
 import type { Category, CategoryKind, UpsertCategoryInput } from "@myblog/shared";
+import { DEFAULT_CATEGORIES } from "@myblog/shared";
 import { DocsError, docsRequest } from "./docs-client.js";
 
 export async function listCategories(): Promise<Category[]> {
@@ -63,4 +68,20 @@ export async function deleteCategory(id: string): Promise<boolean> {
   }
 }
 
-export function ensureDefaultCategories(): void {}
+export async function ensureDefaultCategories(): Promise<void> {
+  const existing = await listCategories();
+  if (existing.length > 0) {
+    return;
+  }
+  for (const item of DEFAULT_CATEGORIES) {
+    await createCategory({
+      name: item.name,
+      slug: item.slug,
+      hint: item.hint,
+      color: item.color,
+      kind: item.kind,
+      nav: item.nav,
+      sort: item.sort,
+    });
+  }
+}

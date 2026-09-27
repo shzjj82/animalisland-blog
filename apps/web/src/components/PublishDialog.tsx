@@ -27,10 +27,12 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   /** 当前文章已选分类 slug */
   initialTags: string[];
+  /** 当前可见性 */
+  initialVisibility?: "private" | "public";
   mode: "publish" | "edit";
   busy?: boolean;
-  /** 回传分类 slug 列表 */
-  onConfirm: (categorySlugs: string[]) => void | Promise<void>;
+  /** 回传分类 slug 列表 + 可见性 */
+  onConfirm: (categorySlugs: string[], visibility: "private" | "public") => void | Promise<void>;
 };
 
 function pickColor(index: number): SiteSkillColor {
@@ -41,6 +43,7 @@ export function PublishDialog({
   open,
   onOpenChange,
   initialTags,
+  initialVisibility = "private",
   mode,
   busy,
   onConfirm,
@@ -48,6 +51,7 @@ export function PublishDialog({
   const { reload: reloadGlobalCategories } = useCategories();
   const [categories, setCategories] = useState<Category[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
+  const [visibility, setVisibility] = useState<"private" | "public">(initialVisibility);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -67,13 +71,14 @@ export function PublishDialog({
       return;
     }
     setSelected(normalizeTags(initialTags));
+    setVisibility(initialVisibility);
     setDraft("");
     setError("");
     setLoading(true);
     void reload()
       .catch(() => setCategories([]))
       .finally(() => setLoading(false));
-  }, [open, initialTags]);
+  }, [open, initialTags, initialVisibility]);
 
   const bySlug = useMemo(() => {
     const map = new Map<string, Category>();
@@ -149,6 +154,33 @@ export function PublishDialog({
         </DialogHeader>
 
         <div className="space-y-3">
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-foreground">可见性</p>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={visibility === "private" ? "default" : "outline"}
+                onClick={() => setVisibility("private")}
+              >
+                私有
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={visibility === "public" ? "default" : "outline"}
+                onClick={() => setVisibility("public")}
+              >
+                公开
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {visibility === "public"
+                ? "所有人都能在前台看到，登录与否都一样。"
+                : "前台不展示。只有你登录后，才能在工作区或打开链接时看到。"}
+            </p>
+          </div>
+
           <p className="text-sm text-muted-foreground">
             选择分类（可多选）。输入新名字后回车或点添加；名称需 2–16 字且含文字，会进导航。
           </p>
@@ -247,7 +279,7 @@ export function PublishDialog({
               void (async () => {
                 try {
                   setError("");
-                  await onConfirm(selected);
+                  await onConfirm(selected, visibility);
                   onOpenChange(false);
                 } catch (err) {
                   setError(err instanceof Error ? err.message : "操作失败");

@@ -15,7 +15,13 @@ const repoRoot = path.resolve(here, "../../..");
 dotenv.config({ path: path.join(repoRoot, ".env") });
 
 const dryRun = process.argv.includes("--dry-run");
-const docsBaseUrl = (process.env.DOCS_BASE_URL ?? "http://127.0.0.1:3000").replace(/\/$/, "");
+const gatewayBaseUrl = (
+  process.env.GATEWAY_BASE_URL ||
+  process.env.NEST_BASE_URL ||
+  process.env.DOCS_BASE_URL ||
+  process.env.AUTH_BASE_URL ||
+  "http://127.0.0.1:3000"
+).replace(/\/$/, "");
 const docsServiceKey = process.env.DOCS_SERVICE_KEY ?? "dev-docs-key";
 const docsAppCode = process.env.DOCS_APP_CODE ?? "blog";
 const docsTimeoutMs = Number(process.env.DOCS_TIMEOUT_MS ?? 15_000);
@@ -26,7 +32,7 @@ const databasePath = path.isAbsolute(process.env.DATABASE_PATH ?? "")
 type Envelope<T> = { success?: boolean; code?: number; message?: string; data?: T };
 
 async function request<T>(method: string, pathname: string, body?: unknown): Promise<T> {
-  const url = new URL(`${docsBaseUrl}${pathname}`);
+  const url = new URL(`${gatewayBaseUrl}${pathname}`);
   url.searchParams.set("appCode", docsAppCode);
   const payload =
     body && typeof body === "object"
@@ -94,7 +100,7 @@ function logOp(kind: string, action: "create" | "update", slug: string) {
 
 async function main() {
   console.log(`SQLite: ${databasePath}`);
-  console.log(`Docs:   ${docsBaseUrl}`);
+  console.log(`Docs:   ${gatewayBaseUrl}`);
   if (dryRun) {
     console.log("Mode:   dry-run（只打印将 create/update 的项，不发写请求）");
   }
@@ -165,69 +171,52 @@ async function main() {
     draft: number;
   }>;
 
-  const aboutExisting = (
-    await request<{ about: { id: string } | null }>("GET", "/docs/posts/workspace/specials")
-  ).about;
-
   for (const post of parentFirst(posts)) {
+    if (post.page_kind === "about") {
+      logOp("about", "skip", post.slug);
+      continue;
+    }
     const body = {
-      id: post.page_kind === "about" && aboutExisting ? aboutExisting.id : post.id,
+      id: post.id,
       slug: post.slug,
       title: post.title,
       type: post.type,
-      pageKind: post.page_kind,
+      kind: "article",
       parentId: post.parent_id,
       treeSort: post.tree_sort,
       summary: post.summary,
       coverUrl: post.cover_url,
       props: parseJson<Record<string, unknown>>(post.props, {}),
       body: parseJson(post.body, { time: Date.now(), version: "2.30.7", blocks: [] }),
-      draft: Boolean(post.draft),
+      visibility: post.draft ? "private" : "public",
     };
-
-    if (post.page_kind === "about" && aboutExisting) {
-      if (!dryRun) {
-        await request("PUT", `/docs/posts/${aboutExisting.id}`, body);
-      }
-      logOp("about", "update", post.slug);
-      continue;
-    }
 
     let exists = false;
     try {
-      await request("GET", `/docs/posts/id/${post.id}`);
+      await request("GET", `/docs/documents/id/${post.id}`);
       exists = true;
     } catch {
       exists = false;
     }
     if (exists) {
       if (!dryRun) {
-        await request("PUT", `/docs/posts/${post.id}`, body);
+        await request("PUT", `/docs/documents/${post.id}`, body);
       }
       logOp("post", "update", post.slug);
     } else {
       if (!dryRun) {
-        await request("POST", "/docs/posts", body);
+        await request("POST", "/docs/documents", body);
       }
       logOp("post", "create", post.slug);
     }
   }
 
+  // 站点品牌已不在 docs 服务；旧 SQLite site 表跳过
   const site = db
-    .prepare(`SELECT about_name, about_body, about_avatar, skills FROM site WHERE id = 1`)
-    .get() as
-    | { about_name: string; about_body: string; about_avatar: string; skills: string }
-    | undefined;
+    .prepare(`SELECT about_name FROM site WHERE id = 1`)
+    .get() as { about_name: string } | undefined;
   if (site) {
-    if (!dryRun) {
-      await request("PUT", "/docs/site", {
-        name: site.about_name,
-        avatar: site.about_avatar,
-        body: parseJson(site.about_body, { time: Date.now(), version: "2.30.7", blocks: [] }),
-        skills: parseJson(site.skills, []),
-      });
-    }
-    logOp("site", "update", "about");
+    logOp("site", "skip", site.about_name || "about");
   }
 
   db.close();

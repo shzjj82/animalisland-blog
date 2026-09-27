@@ -70,10 +70,14 @@ if (!hasColumn("posts", "tree_sort")) {
 if (!hasColumn("posts", "props")) {
   db.exec(`ALTER TABLE posts ADD COLUMN props TEXT NOT NULL DEFAULT '{}'`);
 }
+if (!hasColumn("posts", "author_id")) {
+  db.exec(`ALTER TABLE posts ADD COLUMN author_id TEXT`);
+}
 
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_posts_page_kind ON posts (page_kind, tree_sort);
   CREATE INDEX IF NOT EXISTS idx_posts_parent ON posts (parent_id, tree_sort);
+  CREATE INDEX IF NOT EXISTS idx_posts_author ON posts (author_id);
 
   CREATE TABLE IF NOT EXISTS schema_meta (
     key TEXT PRIMARY KEY,
