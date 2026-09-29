@@ -133,6 +133,8 @@ export function App() {
   const saveTimer = useRef(0);
   const pageRef = useRef<EditorPage | null>(null);
   pageRef.current = page;
+  const sessionRef = useRef<RemoteSession | null>(session);
+  sessionRef.current = session;
   const remote = session !== null;
 
   const refreshLocal = useCallback((selectId?: string | null) => {
@@ -142,15 +144,24 @@ export function App() {
     setPage(id ? (loadLocal(id) ?? null) : null);
   }, []);
 
+  /** 退出或换号后，还在路上的云端响应不能再写回界面 */
+  const stale = (nextSession: RemoteSession) => sessionRef.current !== nextSession;
+
   const refreshRemote = useCallback(async (nextSession: RemoteSession, selectId?: string | null) => {
     const list = await listRemote(nextSession);
+    if (stale(nextSession)) {
+      return;
+    }
     setNodes(list);
     const id = selectId === undefined ? (pageRef.current?.id ?? list[0]?.id) : (selectId ?? list[0]?.id);
     if (!id) {
       setPage(null);
       return;
     }
-    setPage(await loadRemote(nextSession, id));
+    const loaded = await loadRemote(nextSession, id);
+    if (!stale(nextSession)) {
+      setPage(loaded);
+    }
   }, []);
 
   const openSpotlight = useCallback((opts?: { actionId?: string; insertIndex?: number; selection?: string }) => {
@@ -582,8 +593,12 @@ export function App() {
       } else {
         const { body } = await promoteDocument(session, next.body);
         const saved = await saveRemote(session, { ...next, body });
+        const list = await listRemote(session);
+        if (stale(session)) {
+          return true;
+        }
         setPage(saved);
-        setNodes(await listRemote(session));
+        setNodes(list);
       }
       setHint(t("app.saved"));
       setError("");
@@ -891,13 +906,14 @@ export function App() {
               {t("app.logIn")}
             </Button>
           )}
-          <SettingsMenu
-            settings={syncSettings}
-            onChange={updateSyncSettings}
-            loggedIn={Boolean(session)}
-            onLogout={logout}
-            onChangePassword={() => setPasswordOpen(true)}
-          />
+          {session ? (
+            <SettingsMenu
+              settings={syncSettings}
+              onChange={updateSyncSettings}
+              onLogout={logout}
+              onChangePassword={() => setPasswordOpen(true)}
+            />
+          ) : null}
         </div>
         <div
           role="separator"

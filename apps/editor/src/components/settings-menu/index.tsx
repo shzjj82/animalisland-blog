@@ -12,12 +12,12 @@ const iconProps = { theme: "outline" as const, strokeWidth: 3, size: 16 };
 type Props = {
   settings: SyncSettings;
   onChange: (settings: SyncSettings) => void;
-  loggedIn: boolean;
   onLogout: () => void;
   onChangePassword: () => void;
 };
 
-export function SettingsMenu({ settings, onChange, loggedIn, onLogout, onChangePassword }: Props) {
+/** 只在登录后出现：同步开关、改密码、退出 */
+export function SettingsMenu({ settings, onChange, onLogout, onChangePassword }: Props) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   return (
@@ -32,33 +32,29 @@ export function SettingsMenu({ settings, onChange, loggedIn, onLogout, onChangeP
           {t("settingsMenu.allowSync")}
           <Switch checked={settings.enabled} onCheckedChange={(enabled) => onChange({ enabled })} />
         </Label>
-        {loggedIn ? <PopoverSeparator /> : null}
-        {loggedIn ? (
-          <button
-            type="button"
-            className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-muted"
-            onClick={() => {
-              setOpen(false);
-              onChangePassword();
-            }}
-          >
-            <Lock {...iconProps} size={14} />
-            {t("common.changePassword")}
-          </button>
-        ) : null}
-        {loggedIn ? (
-          <button
-            type="button"
-            className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-destructive hover:bg-muted"
-            onClick={() => {
-              setOpen(false);
-              onLogout();
-            }}
-          >
-            <Logout {...iconProps} size={14} />
-            {t("settingsMenu.logOut")}
-          </button>
-        ) : null}
+        <PopoverSeparator />
+        <button
+          type="button"
+          className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-muted"
+          onClick={() => {
+            setOpen(false);
+            onChangePassword();
+          }}
+        >
+          <Lock {...iconProps} size={14} />
+          {t("common.changePassword")}
+        </button>
+        <button
+          type="button"
+          className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-destructive hover:bg-muted"
+          onClick={() => {
+            setOpen(false);
+            onLogout();
+          }}
+        >
+          <Logout {...iconProps} size={14} />
+          {t("settingsMenu.logOut")}
+        </button>
       </PopoverContent>
     </Popover>
   );

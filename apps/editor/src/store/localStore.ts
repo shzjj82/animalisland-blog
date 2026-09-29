@@ -116,9 +116,10 @@ export function titleFromBody(body: EditorJsDocument): string {
   return t("common.untitled");
 }
 
+/** 只在第一次用时建一篇空白页；用户自己删光后保持为空，由空状态引导新建 */
 export function ensureLocalPages(): EditorPage[] {
   const existing = readPages();
-  if (existing.length > 0) {
+  if (existing.length > 0 || localStorage.getItem(LOCAL_KEY) !== null) {
     return existing;
   }
   const page: EditorPage = {
