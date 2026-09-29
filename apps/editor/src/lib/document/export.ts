@@ -53,6 +53,8 @@ function blockHtml(block: EditorJsDocument["blocks"][number]): string {
     }
     case "pageLink":
       return `<p>↗ ${escapeText(String(data.title ?? t("common.subpage")))}</p>`;
+    case "attachment":
+      return data.name ? `<p>📎 ${escapeText(String(data.name))}</p>` : "";
     default:
       return "";
   }

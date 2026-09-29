@@ -2,14 +2,16 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 import type EditorJS from "@editorjs/editorjs";
 import { useTranslation } from "react-i18next";
 import { CloudStorage, Delete, Download, Export, HardDisk, People, Plus, Search } from "@icon-park/react";
-import type { EditorJsDocument } from "@myblog/shared";
+import type { EditorJsBlock, EditorJsDocument } from "@myblog/shared";
 import { BlockEditor } from "@/components/block-editor";
 import type { PageLinkData } from "@/components/block-editor/tools/PageLinkTool";
 import { ChangePasswordDialog } from "@/components/change-password-dialog";
 import { EditorSpotlight, type SpotlightAction } from "@/components/editor-spotlight";
 import { EmptyState } from "@/components/empty-state";
+import { FileDropZone } from "@/components/file-drop";
 import { FileTypeIcon } from "@/components/file-type-icon";
-import { ImportDialog } from "@/components/import-dialog";
+import { FileViewer } from "@/components/file-viewer";
+import { ImportDialog, type ImportChoice } from "@/components/import-dialog";
 import { LanguageSwitch } from "@/components/language-switch";
 import { PageTree } from "@/components/page-tree";
 import { SettingsMenu } from "@/components/settings-menu";
@@ -58,8 +60,11 @@ import {
 import { readSyncSettings, writeSyncSettings, type SyncSettings } from "@/store/syncSettings";
 import { pageTitle, setAppLocale, type AppLocale } from "@/i18n";
 import { exportDocument, type ExportFormat } from "@/lib/document/export";
-import { importWord, mergeImported, WORD_ACCEPT, type ImportedWord, type ImportMode } from "@/lib/document/import";
+import { fileKind } from "@/lib/document/fileKinds";
+import { importSpreadsheet, importWord, mergeImported, readInsertable, WORD_ACCEPT, type ImportedWord } from "@/lib/document/import";
+import { insertEditorBlocksAt } from "@/lib/document/insertBlocks";
 import { loadSearchDocs } from "@/lib/document/search";
+import { promoteAttachment, saveAttachment, type AttachmentData } from "@/store/fileStore";
 
 const iconProps = { theme: "outline" as const, strokeWidth: 3, size: 16 };
 const SIDEBAR_WIDTH_KEY = "editor:sidebar-width";
@@ -104,6 +109,11 @@ export function App() {
   const [reveal, setReveal] = useState<{ text: string; nonce: number } | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [pendingImport, setPendingImport] = useState<ImportedWord | null>(null);
+  /** 正在导入的 Word 原文件；index 只有拖入时才有，弹窗里选「作为附件」时插到这里 */
+  const [pendingDrop, setPendingDrop] = useState<{ file: File; index: number | null } | null>(null);
+  const [queuedDrop, setQueuedDrop] = useState<File[] | null>(null);
+  const [viewing, setViewing] = useState<{ data: AttachmentData; replace: (next: AttachmentData) => void } | null>(null);
+  const [fileDeleteAsk, setFileDeleteAsk] = useState<{ name: string; resolve: (ok: boolean) => void } | null>(null);
   const [spotlightOpen, setSpotlightOpen] = useState(false);
   const [spotlightLaunch, setSpotlightLaunch] = useState<{
     actionId?: string;
@@ -379,21 +389,145 @@ export function App() {
     setError("");
     try {
       setPendingImport(await importWord(file));
+      setPendingDrop({ file, index: null });
     } catch (err) {
       setError(err instanceof Error ? err.message : t("app.importFailed"));
     }
   }
 
-  async function applyImport(mode: ImportMode) {
+  function closeImport() {
+    setPendingImport(null);
+    setPendingDrop(null);
+  }
+
+  async function applyImport(mode: ImportChoice) {
     const current = pageRef.current;
     if (!pendingImport || !current) {
+      return;
+    }
+    if (mode === "attach") {
+      const drop = pendingDrop;
+      closeImport();
+      if (drop) {
+        await insertDropped([drop.file], drop.index ?? dropIndex(null));
+      }
       return;
     }
     const body = editorRef.current ? ((await editorRef.current.save()) as EditorJsDocument) : current.body;
     onEdit(mergeImported(mode, body, pendingImport));
     setEditorEpoch((value) => value + 1);
-    setPendingImport(null);
+    closeImport();
   }
+
+  async function uploadFile(file: File): Promise<AttachmentData> {
+    const { data, localOnly } = await saveAttachment(session, file);
+    if (localOnly) {
+      setHint(t("attachment.savedLocally"));
+    }
+    return data;
+  }
+
+  function confirmDeleteFile(name: string): Promise<boolean> {
+    return new Promise((resolve) => setFileDeleteAsk({ name, resolve }));
+  }
+
+  function answerDeleteFile(ok: boolean) {
+    fileDeleteAsk?.resolve(ok);
+    setFileDeleteAsk(null);
+  }
+
+  /** 上传服务当时不可用而存在本机的附件，打开时再补传一次，成功后块数据改指向云端 */
+  async function promoteViewing(blob: Blob) {
+    const current = viewing;
+    if (!session || !current || current.data.source !== "local") {
+      return;
+    }
+    const next = await promoteAttachment(session, current.data, blob).catch(() => null);
+    if (next) {
+      current.replace(next);
+      setHint(t("attachment.promoted"));
+    }
+  }
+
+  /** 按松手位置落在哪个块的上半或下半，算出插入下标；标题块始终在最前 */
+  function dropIndex(point: { x: number; y: number } | null): number {
+    const editor = editorRef.current;
+    if (!editor) {
+      return 0;
+    }
+    const total = editor.blocks.getBlocksCount();
+    const floor = editor.blocks.getBlockByIndex(0)?.name === "header" ? 1 : 0;
+    const target = point ? document.elementFromPoint(point.x, point.y)?.closest<HTMLElement>(".ce-block") : null;
+    const blocks = Array.from(document.querySelectorAll<HTMLElement>(".notion-editor .ce-block"));
+    const at = target ? blocks.indexOf(target) : -1;
+    if (at < 0) {
+      return total;
+    }
+    const rect = target!.getBoundingClientRect();
+    return Math.max(floor, point!.y > rect.top + rect.height / 2 ? at + 1 : at);
+  }
+
+  /** 拖入：Markdown / 文本转成正文，Word、PDF、Excel、代码作为附件，其他提示不支持 */
+  async function insertDropped(files: File[], index: number) {
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
+    }
+    const blocks: EditorJsBlock[] = [];
+    const skipped: string[] = [];
+    setHint(t("attachment.processing"));
+    try {
+      for (const file of files) {
+        const content = await readInsertable(file);
+        if (content) {
+          blocks.push(...content);
+        } else if (fileKind(file.name)) {
+          blocks.push({ type: "attachment", data: await uploadFile(file) });
+        } else {
+          skipped.push(file.name);
+        }
+      }
+      await insertEditorBlocksAt(editor, blocks, index);
+      setHint("");
+      if (skipped.length > 0) {
+        setError(t("attachment.unsupported", { name: skipped.join(t("common.listSeparator")) }));
+      }
+    } catch (err) {
+      setHint("");
+      setError(err instanceof Error ? err.message : t("attachment.uploadFailed"));
+    }
+  }
+
+  async function dropFiles(files: File[], point: { x: number; y: number } | null) {
+    setError("");
+    if (!pageRef.current || !editorRef.current) {
+      setQueuedDrop(files);
+      await createPage(null);
+      return;
+    }
+    const index = dropIndex(point);
+    const [single] = files;
+    const kind = single && files.length === 1 ? fileKind(single.name) : null;
+    if (single && (kind === "word" || kind === "excel")) {
+      try {
+        setPendingImport(await (kind === "word" ? importWord(single) : importSpreadsheet(single)));
+        setPendingDrop({ file: single, index });
+        return;
+      } catch {
+        await insertDropped(files, index);
+        setHint(t("attachment.importFallback", { name: single.name }));
+        return;
+      }
+    }
+    await insertDropped(files, index);
+  }
+
+  useEffect(() => {
+    if (queuedDrop && editorReady && page) {
+      setQueuedDrop(null);
+      void dropFiles(queuedDrop, null);
+    }
+  }, [queuedDrop, editorReady, page?.id]);
 
   function onEdit(body: EditorJsDocument) {
     const current = pageRef.current;
@@ -807,7 +941,11 @@ export function App() {
             <LanguageSwitch onChange={(locale) => void switchLocale(locale)} />
           </span>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain">
+        <FileDropZone
+          hasPage={Boolean(page)}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain"
+          onDrop={(files, point) => void dropFiles(files, point)}
+        >
           {page ? (
             <BlockEditor
               key={`${remote ? "remote" : "local"}:${page.id}:${editorEpoch}:${i18n.language}`}
@@ -821,13 +959,26 @@ export function App() {
               }}
               onAi={(index) => openSpotlight({ actionId: "ai-chat", insertIndex: index })}
               onAskSelection={(text) => openSpotlight({ actionId: "ai-chat", selection: text })}
+              onUploadFile={uploadFile}
+              onOpenFile={(data, replace) => setViewing({ data, replace })}
+              onConfirmDeleteFile={confirmDeleteFile}
               reveal={reveal}
             />
           ) : (
             <EmptyState hasPages={nodes.length > 0} onCreate={() => void createPage(null)} />
           )}
-        </div>
+        </FileDropZone>
       </main>
+      {viewing ? (
+        <FileViewer
+          key={viewing.data.fileId}
+          file={viewing.data}
+          session={session}
+          onLoaded={(blob) => void promoteViewing(blob)}
+          className="file-viewer-drawer fixed top-0 right-0 bottom-0 z-40 shadow-[-12px_0_32px_rgb(0_0_0/0.08)]"
+          onClose={() => setViewing(null)}
+        />
+      ) : null}
       <EditorSpotlight
         open={spotlightOpen}
         onOpenChange={(open) => {
@@ -855,6 +1006,22 @@ export function App() {
         loadPages={() => loadSearchDocs(session, nodes)}
         onOpenPage={(id, query) => void revealPage(id, query)}
       />
+      <Dialog open={fileDeleteAsk !== null} onOpenChange={(open) => !open && answerDeleteFile(false)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("attachment.deleteTitle")}</DialogTitle>
+            <DialogDescription>{t("attachment.deleteConfirm", { name: fileDeleteAsk?.name ?? "" })}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => answerDeleteFile(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button type="button" className="bg-destructive text-white hover:bg-destructive/90" onClick={() => answerDeleteFile(true)}>
+              {t("common.delete")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={pendingDeleteId !== null} onOpenChange={(open) => !open && setPendingDeleteId(null)}>
         <DialogContent>
           <DialogHeader>
@@ -878,8 +1045,11 @@ export function App() {
       </Dialog>
       <ImportDialog
         open={pendingImport !== null}
-        fileName={pendingImport?.name ?? ""}
-        onCancel={() => setPendingImport(null)}
+        fileName={pendingDrop?.file.name ?? pendingImport?.name ?? ""}
+        fileSize={pendingDrop?.file.size}
+        allowAttach={pendingDrop?.index != null}
+        kind={pendingDrop && fileKind(pendingDrop.file.name) === "excel" ? "excel" : "word"}
+        onCancel={closeImport}
         onConfirm={(mode) => void applyImport(mode)}
       />
       <ChangePasswordDialog

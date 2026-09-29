@@ -140,3 +140,53 @@
   border-radius: 6px;
   animation: search-hit 1.8s ease-out;
 }
+
+/* 表格默认把所有列均分进正文宽度，列一多就被挤到看不见；改成每列有最小宽度，放不下时表格自身横向滚动。
+   滚动只加在 .tc-table 上，行/列操作按钮在它外面，不会被裁掉 */
+.notion-editor .tc-table {
+  grid-template-columns: minmax(100%, max-content);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.notion-editor .tc-row {
+  grid-template-columns: none;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(140px, 1fr);
+}
+
+/* 伸出行外 34px 的悬停底色，放进滚动容器会让小表格也出现横向滚动 */
+.notion-editor .tc-row::after {
+  display: none;
+}
+
+.notion-editor .tc-cell {
+  max-width: 320px;
+  overflow-wrap: anywhere;
+}
+
+/* 行和表格本身只有可视区那么宽，单元格滚出去后，画在行上的底色、分隔线就没了；全部改画到单元格上 */
+.notion-editor .tc-table,
+.notion-editor .tc-row,
+.notion-editor .tc-table--heading .tc-row:first-child {
+  border-top: none;
+  border-bottom: none;
+  background: transparent;
+}
+
+.notion-editor .tc-cell {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.notion-editor .tc-row:first-child .tc-cell {
+  border-top: 1px solid var(--color-border);
+}
+
+.notion-editor .tc-table--heading .tc-row:first-child .tc-cell {
+  border-bottom-width: 2px;
+  background: var(--color-background);
+}
+
+.notion-editor .tc-row--selected .tc-cell {
+  background: var(--color-background);
+}

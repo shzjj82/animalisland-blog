@@ -74,6 +74,11 @@
     @apply border-border outline-ring/50;
   }
 
+  [data-slot="popover-content"] button:focus-visible {
+    outline: none;
+    background: var(--muted);
+  }
+
   html,
   body,
   #root {
@@ -192,4 +197,137 @@
 .cdx-page-link.is-empty,
 .cdx-page-link.is-loading {
   color: var(--muted-foreground);
+}
+
+/* 连续的附件块并排显示，排满自动换行 */
+.ce-block:has(> .ce-block__content > .cdx-attachment) {
+  display: inline-block;
+  width: 300px;
+  max-width: 100%;
+  margin-right: 10px;
+  vertical-align: top;
+}
+
+.cdx-attachment {
+  position: relative;
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0;
+  padding: 10px 14px 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--foreground);
+  cursor: pointer;
+  user-select: none;
+}
+
+.cdx-attachment:hover {
+  background: var(--muted);
+}
+
+.cdx-attachment__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.cdx-attachment__icon svg {
+  display: block;
+}
+
+.cdx-attachment__delete {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    background-color 0.12s ease;
+}
+
+.cdx-attachment:hover .cdx-attachment__delete,
+.cdx-attachment__delete:focus-visible {
+  opacity: 1;
+}
+
+.cdx-attachment__delete:hover {
+  background: color-mix(in oklab, var(--destructive) 10%, transparent);
+  color: var(--destructive);
+}
+
+.cdx-attachment__delete:focus-visible {
+  outline: none;
+  background: var(--muted);
+}
+
+.cdx-attachment__tip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  width: max-content;
+  max-width: 420px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--popover);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.08);
+  color: var(--popover-foreground);
+  font-size: 12px;
+  line-height: 1.5;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(2px);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+  word-break: break-all;
+}
+
+.cdx-attachment.is-truncated:hover .cdx-attachment__tip {
+  opacity: 1;
+  transform: none;
+  transition-delay: 0.3s;
+}
+
+.cdx-attachment__text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cdx-attachment__name {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cdx-attachment__meta {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.cdx-attachment.is-empty,
+.cdx-attachment.is-loading {
+  border-style: dashed;
+  color: var(--muted-foreground);
+}
+
+.cdx-attachment.is-loading {
+  cursor: progress;
+}
+
+.cdx-attachment.is-error .cdx-attachment__meta {
+  color: var(--destructive);
 }

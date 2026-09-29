@@ -32,9 +32,11 @@ function loadSigningEnv() {
   }
 }
 
-/** cargo 产物目录；沙箱或 CI 可能用 CARGO_TARGET_DIR 改到别处 */
+/** 固定在 src-tauri/target，不跟随外部 CARGO_TARGET_DIR，产物始终留在项目里 */
+process.env.CARGO_TARGET_DIR = path.join(root, "src-tauri/target");
+
 function targetDir() {
-  return process.env.CARGO_TARGET_DIR ? path.resolve(process.env.CARGO_TARGET_DIR) : path.join(root, "src-tauri/target");
+  return process.env.CARGO_TARGET_DIR;
 }
 
 function copyInto(file) {
@@ -124,10 +126,9 @@ function packWindows() {
   if (process.platform === "win32") {
     run("pnpm", ["exec", "tauri", "build", "--bundles", "nsis"]);
   } else {
-    const nsis = spawnSync("makensis", ["-VERSION"], { stdio: "ignore" });
-    if (nsis.status !== 0) {
-      console.error("在 macOS 上生成 Windows 安装程序需要 NSIS：brew install nsis");
-      process.exit(1);
+    const hasNsis = spawnSync("makensis", ["-VERSION"], { stdio: "ignore" }).status === 0;
+    if (!hasNsis) {
+      console.warn("没有找到 makensis，只生成免安装压缩包；要安装程序请先装 NSIS");
     }
     run("pnpm", [
       "exec",
@@ -137,14 +138,15 @@ function packWindows() {
       "cargo-xwin",
       "--target",
       "x86_64-pc-windows-msvc",
-      "--bundles",
-      "nsis",
+      ...(hasNsis ? ["--bundles", "nsis"] : ["--no-bundle"]),
     ]);
   }
   const nsisDir = path.join(targetDir(), "x86_64-pc-windows-msvc/release/bundle/nsis");
-  for (const name of fs.readdirSync(nsisDir)) {
-    if (name.endsWith(".exe")) {
-      copyInto(path.join(nsisDir, name));
+  if (fs.existsSync(nsisDir)) {
+    for (const name of fs.readdirSync(nsisDir)) {
+      if (name.endsWith(".exe")) {
+        copyInto(path.join(nsisDir, name));
+      }
     }
   }
   assembleWindowsPortable();

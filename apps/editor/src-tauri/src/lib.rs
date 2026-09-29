@@ -98,9 +98,19 @@ fn stop_desktop_server(app: &tauri::AppHandle) {
     }
 }
 
+#[cfg(not(debug_assertions))]
+const WEBVIEW_GUARD: &str = include_str!("guard.js");
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(not(debug_assertions))]
+    let builder = builder.on_page_load(|webview, payload| {
+        if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+            let _ = webview.eval(WEBVIEW_GUARD);
+        }
+    });
+    builder
         .setup(|app| -> Result<(), Box<dyn std::error::Error>> {
             let Some(window) = app.get_webview_window("main") else {
                 return Ok(());

@@ -49,6 +49,7 @@ export function editorI18n() {
         Italic: "斜体",
         "AI Chat · ai": "智能 AI 聊天 · ai",
         "Subpage · page": "子页面 · page",
+        "File · file": "文件 · file",
       },
       tools: {
         header: {

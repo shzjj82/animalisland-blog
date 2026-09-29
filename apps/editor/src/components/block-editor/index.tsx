@@ -12,6 +12,8 @@ import { AskAiInlineTool } from "./tools/AskAiInlineTool";
 import { editorI18n } from "./editorI18n";
 import { useTranslation } from "react-i18next";
 import { PageLinkTool, type PageLinkData } from "./tools/PageLinkTool";
+import { AttachmentTool } from "./tools/AttachmentTool";
+import type { AttachmentData } from "@/store/fileStore";
 import { htmlToBlocks } from "@/lib/document/htmlToBlocks";
 import { revealText } from "./revealText";
 import "./blockEditor.css";
@@ -29,11 +31,14 @@ type Props = {
   onReady?: (editor: EditorJS | null) => void;
   onAi?: (blockIndex: number) => void;
   onAskSelection?: (text: string) => void;
+  onUploadFile?: (file: File) => Promise<AttachmentData>;
+  onOpenFile?: (data: AttachmentData, replace: (next: AttachmentData) => void) => void;
+  onConfirmDeleteFile?: (name: string) => Promise<boolean>;
   /** 打开后定位到这段文字；nonce 变化时重新定位，同一页也能再次触发 */
   reveal?: { text: string; nonce: number } | null;
 };
 
-export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, onReady, onAi, onAskSelection, reveal }: Props) {
+export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, onReady, onAi, onAskSelection, onUploadFile, onOpenFile, onConfirmDeleteFile, reveal }: Props) {
   const { t } = useTranslation();
   const holderRef = useRef<HTMLDivElement>(null);
   const readyRef = useRef(false);
@@ -51,6 +56,12 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, onReady,
   onReadyRef.current = onReady;
   onAiRef.current = onAi;
   onAskRef.current = onAskSelection;
+  const onUploadRef = useRef(onUploadFile);
+  const onOpenFileRef = useRef(onOpenFile);
+  onUploadRef.current = onUploadFile;
+  onOpenFileRef.current = onOpenFile;
+  const onConfirmDeleteRef = useRef(onConfirmDeleteFile);
+  onConfirmDeleteRef.current = onConfirmDeleteFile;
   const initialRef = useRef(doc);
 
   useEffect(() => {
@@ -112,6 +123,17 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, onReady,
               }
               return create();
             },
+          },
+        },
+        attachment: {
+          class: AttachmentTool as unknown as typeof Header,
+          config: {
+            upload: (file: File) => {
+              const upload = onUploadRef.current;
+              return upload ? upload(file) : Promise.reject(new Error(t("attachment.uploadFailed")));
+            },
+            onOpen: (data: AttachmentData, replace: (next: AttachmentData) => void) => onOpenFileRef.current?.(data, replace),
+            confirmDelete: (name: string) => onConfirmDeleteRef.current?.(name) ?? Promise.resolve(true),
           },
         },
         aiAssist: {

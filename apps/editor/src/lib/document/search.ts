@@ -49,6 +49,9 @@ export function documentText(body: EditorJsDocument): string {
       case "pageLink":
         parts.push(plain(data.title));
         break;
+      case "attachment":
+        parts.push(plain(data.name));
+        break;
     }
   }
   return parts.map((part) => part.trim()).filter(Boolean).join(" ");
