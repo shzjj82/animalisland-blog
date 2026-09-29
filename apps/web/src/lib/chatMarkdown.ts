@@ -343,3 +343,76 @@ export function renderChatMarkdown(source: string): string {
   const html = parseBlocks(raw).map(blockToHtml).join("");
   return DOMPurify.sanitize(html, { ...PURIFY });
 }
+
+function listItems(items: string[]) {
+  return items
+    .map((item) => {
+      const content = renderInline(item).trim();
+      return content ? { content, meta: {}, items: [] as [] } : null;
+    })
+    .filter((item): item is { content: string; meta: Record<string, never>; items: [] } => Boolean(item));
+}
+
+/** 单条回复原样转成正文块，不再经过模型总结 */
+export function markdownToEditorBlocks(source: string): EditorJsBlock[] {
+  const blocks: EditorJsBlock[] = [];
+  for (const block of parseBlocks(source)) {
+    if (block.kind === "heading") {
+      const text = renderInline(block.text).trim();
+      if (text) {
+        blocks.push({ type: "header", data: { text, level: block.level } });
+      }
+      continue;
+    }
+    if (block.kind === "p") {
+      const text = renderInline(block.text).replace(/\n/g, "<br>").trim();
+      if (text) {
+        blocks.push({ type: "paragraph", data: { text } });
+      }
+      continue;
+    }
+    if (block.kind === "ul" || block.kind === "ol") {
+      const items = listItems(block.items);
+      if (items.length) {
+        blocks.push({
+          type: "list",
+          data: { style: block.kind === "ol" ? "ordered" : "unordered", items },
+        });
+      }
+      continue;
+    }
+    if (block.kind === "quote") {
+      const text = renderInline(block.lines.join("\n")).trim();
+      if (text) {
+        blocks.push({ type: "paragraph", data: { text: `<b>${text}</b>` } });
+      }
+      continue;
+    }
+    if (block.kind === "code") {
+      const raw = block.code.trim();
+      if (raw) {
+        const html = raw
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\n/g, "<br>");
+        blocks.push({ type: "paragraph", data: { text: `<code>${html}</code>` } });
+      }
+      continue;
+    }
+    if (block.kind === "table") {
+      const content = [block.headers, ...block.rows].map((row) => row.map((cell) => cell.trim()));
+      if (content.length) {
+        blocks.push({ type: "table", data: { withHeadings: true, content } });
+      }
+      continue;
+    }
+    if (block.kind === "hr") {
+      blocks.push({ type: "delimiter", data: {} });
+    }
+  }
+  if (!blocks.length && source.trim()) {
+    blocks.push({ type: "paragraph", data: { text: renderInline(source.trim()) } });
+  }
+  return blocks;
+}

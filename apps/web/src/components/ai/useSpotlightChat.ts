@@ -14,7 +14,7 @@ import {
   type ChatBubble,
   type LocalAttachment,
 } from "@/lib/aiChat";
-import { blocksToPreviewMarkdown } from "@/lib/chatMarkdown";
+import { blocksToPreviewMarkdown, markdownToEditorBlocks } from "@/lib/chatMarkdown";
 
 export type DraftInsert = {
   messageId: string;
@@ -185,8 +185,37 @@ export function useSpotlightChat({ open, editor, insertIndex, onInserted }: Opti
     }
   };
 
-  const insertReply = async (message: ChatBubble) => {
-    if (!editor || message.role !== "assistant" || insertingId) {
+  const insertDirect = async (message: ChatBubble) => {
+    if (!editor || insertingId) {
+      return;
+    }
+    setInsertingId(message.id);
+    setError("");
+    try {
+      const blocks = markdownToEditorBlocks(message.content);
+      if (!blocks.length) {
+        throw new Error("没有可写入的内容");
+      }
+      const at = currentBlockIndex(editor, insertIndex);
+      const inserted = await insertEditorBlocksAt(editor, blocks, at);
+      onInserted?.();
+      const firstId = inserted.blockIds[0];
+      if (firstId) {
+        requestAnimationFrame(() => {
+          window.document
+            .querySelector(`.ce-block[data-id="${firstId}"]`)
+            ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        });
+      }
+    } catch (err) {
+      setError(aiErrorMessage(err instanceof Error ? err.message : "写入失败"));
+    } finally {
+      setInsertingId(null);
+    }
+  };
+
+  const summarize = async (messages: ChatBubble[]) => {
+    if (!editor || messages.length < 2 || insertingId) {
       return;
     }
     if (!enabled) {
@@ -194,13 +223,10 @@ export function useSpotlightChat({ open, editor, insertIndex, onInserted }: Opti
       return;
     }
 
-    setInsertingId(message.id);
+    setInsertingId("summary");
     setError("");
     const signal = nextSignal();
     try {
-      const history = bubblesRef.current;
-      const cut = history.findIndex((item) => item.id === message.id);
-      const context = cut >= 0 ? history.slice(0, cut + 1) : [...history, message];
       const editorDocument = await saveEditor(editor);
       if (signal.aborted) {
         return;
@@ -208,11 +234,11 @@ export function useSpotlightChat({ open, editor, insertIndex, onInserted }: Opti
       const result = await api.aiToEditor(
         {
           messages: [
-            ...toApiMessages(context),
+            ...toApiMessages(messages),
             {
               role: "user",
               content:
-                "请把上面助手刚刚那条回复整理成可插入正文的 Editor.js blocks；只保留适合放进文章的内容，不要聊天寒暄。",
+                "请把上面选中的多段聊天整理总结成可插入正文的 Editor.js blocks。综合这些内容，去掉寒暄和重复，只保留适合放进文章的部分。",
             },
           ],
           document: editorDocument,
@@ -225,7 +251,7 @@ export function useSpotlightChat({ open, editor, insertIndex, onInserted }: Opti
         throw new Error("AI_EMPTY_BLOCKS");
       }
       setDraft({
-        messageId: message.id,
+        messageId: "summary",
         blocks,
         note: result.note,
         markdown: blocksToPreviewMarkdown(blocks),
@@ -291,7 +317,8 @@ export function useSpotlightChat({ open, editor, insertIndex, onInserted }: Opti
     resetChat,
     addFiles,
     send,
-    insertReply,
+    insertDirect,
+    summarize,
     confirmDraft,
     canSend,
   };

@@ -25,6 +25,13 @@ logs/
 *.log
 .pm2/
 
+# Tauri
+apps/editor/src-tauri/target/
+apps/editor/src-tauri/resources/node
+apps/editor/src-tauri/resources/node.exe
+apps/editor/src-tauri/resources/desktop-server.mjs
+apps/editor/release/
+
 # 缓存
 .cache/
 .vite/

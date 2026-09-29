@@ -1,0 +1,18 @@
+{
+  "bundle": {
+    "targets": ["nsis"],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "resources": {
+      "resources/node.exe": "node.exe",
+      "resources/desktop-server.mjs": "desktop-server.mjs",
+      "../dist/": "dist/"
+    }
+  }
+}

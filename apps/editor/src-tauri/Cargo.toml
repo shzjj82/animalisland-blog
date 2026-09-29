@@ -1,0 +1,27 @@
+[package]
+name = "wiki-agent"
+version = "0.0.1"
+description = "wiki-agent"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "wiki_agent"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

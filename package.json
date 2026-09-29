@@ -5,6 +5,11 @@
   "packageManager": "pnpm@9.12.2",
   "scripts": {
     "dev": "pnpm --parallel --filter @myblog/shared --filter @myblog/web --filter @myblog/server dev",
+    "dev:editor": "pnpm --filter @myblog/shared build && pnpm --filter @myblog/editor dev",
+    "desktop": "pnpm --filter @myblog/editor desktop",
+    "pack:web": "pnpm --filter @myblog/editor pack:web",
+    "pack:macos": "pnpm --filter @myblog/editor pack:macos",
+    "pack:windows": "pnpm --filter @myblog/editor pack:windows",
     "build": "pnpm --filter @myblog/shared build && pnpm --filter @myblog/web build && pnpm --filter @myblog/server build",
     "start": "pnpm --parallel --filter @myblog/server --filter @myblog/web start",
     "migrate:docs": "pnpm --filter @myblog/server exec tsx ./scripts/migrate-sqlite-to-docs.ts",

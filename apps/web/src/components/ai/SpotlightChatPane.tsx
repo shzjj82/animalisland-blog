@@ -1,5 +1,6 @@
 import type { Dispatch, RefObject, SetStateAction } from "react";
-import { Close, Paperclip, Plus } from "@icon-park/react";
+import { useEffect, useState } from "react";
+import { Check, Close, Paperclip, Plus } from "@icon-park/react";
 import { BubbleAttachments, PendingAttachments } from "@/components/ai/ChatAttachments";
 import type { DraftInsert } from "@/components/ai/useSpotlightChat";
 import { Button } from "@/components/ui/button";
@@ -26,8 +27,10 @@ type Props = {
   canSend: boolean;
   onAddFiles: (files: File[]) => void;
   onSend: () => void;
-  onInsertReply: (message: ChatBubble) => void;
+  onInsertDirect: (message: ChatBubble) => void;
+  onSummarize: (messages: ChatBubble[]) => void;
   onConfirmDraft: () => void;
+  onPickingChange?: (picking: boolean) => void;
 };
 
 export function SpotlightChatPane({
@@ -48,27 +51,82 @@ export function SpotlightChatPane({
   canSend,
   onAddFiles,
   onSend,
-  onInsertReply,
+  onInsertDirect,
+  onSummarize,
   onConfirmDraft,
+  onPickingChange,
 }: Props) {
+  const [picking, setPicking] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  useEffect(() => {
+    onPickingChange?.(picking);
+  }, [picking, onPickingChange]);
+  useEffect(() => {
+    setPicked((prev) => prev.filter((id) => bubbles.some((item) => item.id === id)));
+  }, [bubbles]);
+  useEffect(() => {
+    if (draft) {
+      setPicking(false);
+      setPicked([]);
+    }
+  }, [draft]);
+  const stopPicking = () => {
+    setPicking(false);
+    setPicked([]);
+  };
+  useEffect(() => {
+    if (!picking) {
+      return;
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      stopPicking();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [picking]);
+  const pickedBubbles = bubbles.filter((item) => picked.includes(item.id));
+  const toggle = (id: string) => {
+    setPicked((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
+  };
+
   return (
     <>
       <div ref={listRef as RefObject<HTMLDivElement>} className="editor-spotlight-chat">
         <div className="editor-spotlight-chat-inner">
           {bubbles.length === 0 ? (
             <div className="editor-spotlight-chat-empty">
-              <p>在上方输入消息发送。满意某条回答后点「添加到页面」。</p>
+              <p>满意某条回答后点「加入到内容」。要合并多段时，再点「整理」勾选。</p>
               {quote ? <p className="editor-spotlight-chat-quote-hint">已带入划选内容</p> : null}
             </div>
           ) : (
-            bubbles.map((item) => (
+            bubbles.map((item) => {
+              const on = picked.includes(item.id);
+              return (
               <div
                 key={item.id}
                 className={cn(
                   "editor-spotlight-bubble",
                   item.role === "user" ? "is-user" : "is-assistant",
+                  picking && on && "is-selected",
                 )}
               >
+                {picking ? (
+                  <button
+                    type="button"
+                    className={cn("editor-spotlight-pick", on && "is-on")}
+                    aria-pressed={on}
+                    aria-label={on ? "取消选择这段" : "选择这段"}
+                    onClick={() => toggle(item.id)}
+                  >
+                    {on ? <Check {...iconParkOutline} size={12} /> : null}
+                  </button>
+                ) : null}
+                <div className="editor-spotlight-bubble-main">
                 {item.quote ? <blockquote className="editor-spotlight-quote">{item.quote}</blockquote> : null}
                 <ChatMarkdown
                   content={item.content}
@@ -83,15 +141,17 @@ export function SpotlightChatPane({
                       size="sm"
                       variant="outline"
                       disabled={Boolean(insertingId) || sending}
-                      onClick={() => void onInsertReply(item)}
+                      onClick={() => void onInsertDirect(item)}
                     >
                       <Plus {...iconParkOutline} size={14} />
-                      {insertingId === item.id && !draft ? "整理中…" : "整理到页面"}
+                      {insertingId === item.id ? "写入中…" : "加入到内容"}
                     </Button>
                   </div>
                 ) : null}
+                </div>
               </div>
-            ))
+              );
+            })
           )}
           {sending ? (
             <div className="editor-spotlight-typing" aria-label="正在回复">
@@ -179,10 +239,35 @@ export function SpotlightChatPane({
         >
           <Paperclip {...iconParkOutline} size={16} />
         </Button>
-        <span className="editor-spotlight-foot-hint">Enter 发送 · Esc 关闭</span>
-        <Button type="button" size="sm" disabled={!canSend} onClick={() => void onSend()}>
-          发送
-        </Button>
+        <span className="editor-spotlight-foot-hint">
+          {picking ? "勾选要整理的对话" : "Enter 发送 · Esc 关闭"}
+        </span>
+        {picking ? (
+          <>
+            <Button type="button" variant="outline" size="sm" onClick={stopPicking}>
+              取消
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={pickedBubbles.length < 2 || Boolean(insertingId) || sending || !enabled}
+              onClick={() => void onSummarize(pickedBubbles)}
+            >
+              {insertingId === "summary" && !draft ? "整理中…" : `整理 ${pickedBubbles.length} 段`}
+            </Button>
+          </>
+        ) : (
+          <>
+            {bubbles.length >= 2 ? (
+              <Button type="button" variant="outline" size="sm" disabled={sending} onClick={() => setPicking(true)}>
+                整理
+              </Button>
+            ) : null}
+            <Button type="button" size="sm" disabled={!canSend} onClick={() => void onSend()}>
+              发送
+            </Button>
+          </>
+        )}
       </div>
     </>
   );

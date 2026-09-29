@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "编辑器主窗口",
+  "windows": ["main"],
+  "permissions": ["core:default"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*", "http://localhost:*"]
+  }
+}

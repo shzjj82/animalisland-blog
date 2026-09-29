@@ -1,0 +1,5 @@
+/target/
+/gen/schemas
+/resources/node
+/resources/node.exe
+/resources/desktop-server.mjs
