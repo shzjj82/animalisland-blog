@@ -64,7 +64,13 @@ import { fileKind } from "@/lib/document/fileKinds";
 import { importSpreadsheet, importWord, mergeImported, readInsertable, WORD_ACCEPT, type ImportedWord } from "@/lib/document/import";
 import { insertEditorBlocksAt } from "@/lib/document/insertBlocks";
 import { loadSearchDocs } from "@/lib/document/search";
-import { promoteAttachment, saveAttachment, type AttachmentData } from "@/store/fileStore";
+import {
+  flushPendingAttachments,
+  promoteAttachment,
+  promoteDocument,
+  saveAttachment,
+  type AttachmentData,
+} from "@/store/fileStore";
 
 const iconProps = { theme: "outline" as const, strokeWidth: 3, size: 16 };
 const SIDEBAR_WIDTH_KEY = "editor:sidebar-width";
@@ -199,10 +205,35 @@ export function App() {
       setSyncPlan(plan);
       setSyncStep("summary");
     }
-    void refreshRemote(session, null).catch((err: unknown) => {
-      setError(err instanceof Error ? err.message : t("app.failedToLoadRemotePages"));
-    });
+    void refreshRemote(session, null)
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : t("app.failedToLoadRemotePages"));
+      })
+      .then(() => flushPendingAttachments(session))
+      .then((touched) => {
+        if (touched && touched.length > 0) {
+          setHint(t("attachment.promotedMany", { count: touched.length }));
+        }
+      })
+      .catch(() => undefined);
   }, [session, refreshLocal, refreshRemote]);
+
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+    const onOnline = () => {
+      void flushPendingAttachments(session)
+        .then((touched) => {
+          if (touched.length > 0) {
+            setHint(t("attachment.promotedMany", { count: touched.length }));
+          }
+        })
+        .catch(() => undefined);
+    };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [session]);
 
   function updateSyncSettings(next: SyncSettings) {
     writeSyncSettings(next);
@@ -549,7 +580,8 @@ export function App() {
         setPage(saved);
         setNodes(listLocal());
       } else {
-        const saved = await saveRemote(session, next);
+        const { body } = await promoteDocument(session, next.body);
+        const saved = await saveRemote(session, { ...next, body });
         setPage(saved);
         setNodes(await listRemote(session));
       }

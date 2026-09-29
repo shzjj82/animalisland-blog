@@ -112,16 +112,34 @@ function assembleWindowsPortable() {
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
   fs.copyFileSync(exe, path.join(out, "wiki-agent.exe"));
-  fs.copyFileSync(path.join(root, "src-tauri/resources/node.exe"), path.join(out, "node.exe"));
-  fs.copyFileSync(path.join(root, "src-tauri/resources/desktop-server.mjs"), path.join(out, "desktop-server.mjs"));
-  fs.cpSync(path.join(root, "dist"), path.join(out, "dist"), { recursive: true });
+  const runtime = path.join(out, "runtime");
+  fs.mkdirSync(runtime, { recursive: true });
+  fs.copyFileSync(path.join(root, "src-tauri/resources/node.exe"), path.join(runtime, "wiki-agent-service.exe"));
+  fs.copyFileSync(path.join(root, "src-tauri/resources/desktop-server.mjs"), path.join(runtime, "desktop-server.mjs"));
+  fs.cpSync(path.join(root, "dist"), path.join(runtime, "dist"), { recursive: true });
   const zipPath = path.join(releaseDir, "wiki-agent-windows.zip");
   fs.rmSync(zipPath, { force: true });
   run("zip", ["-r", "-q", zipPath, "wiki-agent-windows"], { cwd: releaseDir });
   console.log(zipPath);
 }
 
+/** Homebrew 的 llvm / lld 是 keg-only，不进 PATH；交叉编译要用里面的 llvm-rc、lld-link */
+function addHomebrewLlvmToPath() {
+  const dirs = ["/opt/homebrew/opt/llvm/bin", "/opt/homebrew/opt/lld/bin", "/usr/local/opt/llvm/bin", "/usr/local/opt/lld/bin"];
+  const found = dirs.filter((dir) => fs.existsSync(dir));
+  if (found.length > 0) {
+    process.env.PATH = [...found, process.env.PATH].join(path.delimiter);
+  }
+  if (spawnSync("llvm-rc", ["/?"], { stdio: "ignore" }).error) {
+    console.error("没有找到 llvm-rc，交叉编译 Windows 需要：brew install llvm lld");
+    process.exit(1);
+  }
+}
+
 function packWindows() {
+  if (process.platform !== "win32") {
+    addHomebrewLlvmToPath();
+  }
   run(process.execPath, ["scripts/copy-node.mjs", "win32"]);
   if (process.platform === "win32") {
     run("pnpm", ["exec", "tauri", "build", "--bundles", "nsis"]);

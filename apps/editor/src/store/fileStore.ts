@@ -1,6 +1,7 @@
+import type { EditorJsBlock, EditorJsDocument } from "@myblog/shared";
 import { t } from "@/i18n";
 import { MAX_ATTACHMENT_BYTES } from "@/lib/document/fileKinds";
-import { GATEWAY_BASE_URL, type RemoteSession } from "./remoteStore";
+import { GATEWAY_BASE_URL, listRemote, loadRemote, saveRemote, type RemoteSession } from "./remoteStore";
 
 /** 附件块里保存的数据；文件本体不进文档。远程文件的 fileId 是对象键，url 是公开地址 */
 export type AttachmentData = {
@@ -21,6 +22,40 @@ const UPLOAD_PREFIX = "editor/attachments";
 const MAX_REMOTE_BYTES = 15 * 1024 * 1024;
 /** 这些状态说明上传服务暂时不可用，退回本机保存 */
 const UNAVAILABLE = new Set([404, 502, 503, 504]);
+/** 本机 fileId → 已补传的云端数据。编辑器里的旧块数据再存一次时直接换成云端，不重复上传 */
+const PROMOTED_KEY = "editor:promoted-attachments";
+/** 登录状态下没传上去、还等着补传的本机 fileId */
+const PENDING_KEY = "editor:pending-attachments";
+
+function readJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function readPromoted(): Record<string, AttachmentData> {
+  return readJson<Record<string, AttachmentData>>(PROMOTED_KEY, {});
+}
+
+function rememberPromoted(localId: string, data: AttachmentData): void {
+  localStorage.setItem(PROMOTED_KEY, JSON.stringify({ ...readPromoted(), [localId]: data }));
+  const pending = readPendingAttachments().filter((id) => id !== localId);
+  localStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+}
+
+export function readPendingAttachments(): string[] {
+  return readJson<string[]>(PENDING_KEY, []);
+}
+
+function addPending(localId: string): void {
+  const pending = readPendingAttachments();
+  if (!pending.includes(localId)) {
+    localStorage.setItem(PENDING_KEY, JSON.stringify([...pending, localId]));
+  }
+}
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -98,16 +133,114 @@ export async function saveAttachment(session: RemoteSession | null, file: File):
       };
     }
   }
-  return { data: { ...base, fileId: await putLocal(file), source: "local" }, localOnly: Boolean(session) };
+  const fileId = await putLocal(file);
+  if (session) {
+    addPending(fileId);
+  }
+  return { data: { ...base, fileId, source: "local" }, localOnly: Boolean(session) };
 }
 
 /** 把只存在本机的附件补传到云端；上传服务仍不可用或文件过大时返回 null */
 export async function promoteAttachment(session: RemoteSession, data: AttachmentData, blob: Blob): Promise<AttachmentData | null> {
-  if (data.source !== "local" || blob.size > MAX_REMOTE_BYTES) {
+  if (data.source !== "local") {
+    return null;
+  }
+  const known = readPromoted()[data.fileId];
+  if (known) {
+    return known;
+  }
+  if (blob.size > MAX_REMOTE_BYTES) {
     return null;
   }
   const uploaded = await uploadRemote(session, new File([blob], data.name, { type: data.mime || blob.type }));
-  return uploaded ? { ...data, mime: uploaded.contentType || data.mime, fileId: uploaded.key, url: uploaded.url, source: "remote" } : null;
+  if (!uploaded) {
+    return null;
+  }
+  const next: AttachmentData = { ...data, mime: uploaded.contentType || data.mime, fileId: uploaded.key, url: uploaded.url, source: "remote" };
+  rememberPromoted(data.fileId, next);
+  return next;
+}
+
+/** 文档里是否还有指向本机的附件 */
+export function hasLocalAttachments(body: EditorJsDocument): boolean {
+  return (body.blocks ?? []).some((block) => block.type === "attachment" && block.data?.source === "local");
+}
+
+/**
+ * 同步 / 保存到云端前调用：把文档里的本机附件补传并改指向云端。
+ * 本机找不到文件（别的设备传的）或上传服务仍不可用的块原样保留，下次再试。
+ */
+export async function promoteDocument(session: RemoteSession, body: EditorJsDocument): Promise<{ body: EditorJsDocument; changed: boolean }> {
+  if (!hasLocalAttachments(body)) {
+    return { body, changed: false };
+  }
+  let changed = false;
+  const blocks: EditorJsBlock[] = [];
+  for (const block of body.blocks ?? []) {
+    const data = block.data as unknown as AttachmentData | undefined;
+    if (block.type !== "attachment" || data?.source !== "local") {
+      blocks.push(block);
+      continue;
+    }
+    let next: AttachmentData | null = readPromoted()[data.fileId] ?? null;
+    if (!next) {
+      const blob = await getLocal(data.fileId).catch(() => null);
+      next = blob ? await promoteAttachment(session, data, blob).catch(() => null) : null;
+    }
+    if (next) {
+      changed = true;
+      blocks.push({ ...block, data: { ...next } });
+    } else {
+      blocks.push(block);
+    }
+  }
+  return { body: changed ? { ...body, blocks } : body, changed };
+}
+
+let flushing: Promise<string[]> | null = null;
+
+/**
+ * 登录 / 联网时调用：本机还有没传上去的附件，就扫一遍账号里的页面补传并写回。
+ * 返回写回过的页面 id；同一时间只跑一轮。
+ */
+export function flushPendingAttachments(session: RemoteSession): Promise<string[]> {
+  flushing ??= (async () => {
+    if (readPendingAttachments().length === 0) {
+      return [];
+    }
+    const touched: string[] = [];
+    const stillUsed = new Set<string>();
+    let complete = true;
+    for (const node of await listRemote(session)) {
+      if (readPendingAttachments().length === 0) {
+        break;
+      }
+      const page = await loadRemote(session, node.id).catch(() => null);
+      if (!page) {
+        complete = false;
+        continue;
+      }
+      const { body, changed } = await promoteDocument(session, page.body);
+      for (const block of body.blocks ?? []) {
+        if (block.type === "attachment" && block.data?.source === "local") {
+          stillUsed.add(String(block.data.fileId));
+        }
+      }
+      if (changed) {
+        await saveRemote(session, { ...page, body });
+        touched.push(page.id);
+      }
+    }
+    if (complete) {
+      /** 整轮扫完都没被任何页面引用的（附件已删），不再排队 */
+      const rest = readPendingAttachments().filter((id) => stillUsed.has(id));
+      localStorage.setItem(PENDING_KEY, JSON.stringify(rest));
+    }
+    return touched;
+  })().finally(() => {
+    flushing = null;
+  });
+  return flushing;
 }
 
 export async function loadAttachment(session: RemoteSession | null, data: AttachmentData): Promise<Blob> {

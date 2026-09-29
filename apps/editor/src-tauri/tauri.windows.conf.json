@@ -10,9 +10,9 @@
       }
     },
     "resources": {
-      "resources/node.exe": "node.exe",
-      "resources/desktop-server.mjs": "desktop-server.mjs",
-      "../dist/": "dist/"
+      "resources/node.exe": "runtime/wiki-agent-service.exe",
+      "resources/desktop-server.mjs": "runtime/desktop-server.mjs",
+      "../dist/": "runtime/dist/"
     }
   }
 }

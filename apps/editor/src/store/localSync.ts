@@ -16,6 +16,7 @@ import {
   type RemoteSession,
 } from "./remoteStore";
 import { t } from "@/i18n";
+import { promoteDocument } from "./fileStore";
 
 export type SyncPlan = {
   user: string;
@@ -241,11 +242,12 @@ export async function runSyncPlan(session: RemoteSession, plan: SyncPlan): Promi
   }
   const ordered = [...writes.values()].sort((a, b) => depthOf(a, byId) - depthOf(b, byId));
   for (const page of ordered) {
+    const { body } = await promoteDocument(session, page.body);
     const toRemote = (remoteId: string): EditorPage => ({
       ...page,
       id: remoteId,
       parentId: page.parentId ? (idMap.get(page.parentId) ?? null) : null,
-      body: rewriteLinks(page.body, idMap),
+      body: rewriteLinks(body, idMap),
     });
     let remoteId = idMap.get(page.id) ?? (await createOne(page));
     try {

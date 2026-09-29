@@ -25,17 +25,23 @@ fn find_env_file(start: &Path) -> Option<PathBuf> {
 }
 
 #[cfg(target_os = "windows")]
-const NODE_NAME: &str = "node.exe";
+const NODE_NAME: &str = "wiki-agent-service.exe";
 #[cfg(not(target_os = "windows"))]
 const NODE_NAME: &str = "node";
+
+/// Windows 下 GUI 进程拉起控制台程序会弹黑框
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 fn bundled_path(app: &tauri::App, name: &str) -> Option<PathBuf> {
     let mut candidates = Vec::new();
     if let Ok(resources) = app.path().resource_dir() {
+        candidates.push(resources.join("runtime").join(name));
         candidates.push(resources.join(name));
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("runtime").join(name));
             candidates.push(dir.join(name));
             candidates.push(dir.join("resources").join(name));
         }
@@ -57,6 +63,11 @@ fn start_desktop_server(app: &tauri::App) -> Result<u16, String> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             if let Some(env_file) = find_env_file(dir) {
