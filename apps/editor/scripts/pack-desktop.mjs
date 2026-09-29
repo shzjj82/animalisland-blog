@@ -38,7 +38,7 @@ function assembleWindowsPortable() {
 
 if (mode === "macos") {
   run(process.execPath, ["scripts/copy-node.mjs", "darwin"]);
-  run("pnpm", ["exec", "tauri", "build", "--bundles", "app,dmg"]);
+  run("pnpm", ["exec", "tauri", "build", "--target", "universal-apple-darwin", "--bundles", "app,dmg"]);
 } else if (mode === "windows") {
   run(process.execPath, ["scripts/copy-node.mjs", "win32"]);
   if (process.platform === "win32") {
