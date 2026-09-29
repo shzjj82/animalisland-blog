@@ -17,6 +17,7 @@ dist/
 .env.*
 !.env.example
 !.env.deploy.example
+!.env.signing.example
 
 # 运行时数据
 data/
