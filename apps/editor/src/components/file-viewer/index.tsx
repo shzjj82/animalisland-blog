@@ -4,7 +4,7 @@ import { Close, Download } from "@icon-park/react";
 import { FileTypeIcon } from "@/components/file-type-icon";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { codeLanguage, fileExtension, fileKind, formatFileSize } from "@/lib/document/fileKinds";
+import { codeLanguage, fileExtension, fileKind, formatFileSize, videoMime } from "@/lib/document/fileKinds";
 import { loadAttachment, type AttachmentData } from "@/store/fileStore";
 import type { RemoteSession } from "@/store/remoteStore";
 import "./fileViewer.css";
@@ -165,6 +165,8 @@ function Preview({ blob, name }: { blob: Blob; name: string }) {
       return <SheetPreview blob={blob} name={name} />;
     case "code":
       return <CodePreview blob={blob} name={name} />;
+    case "video":
+      return <VideoPreview blob={blob} name={name} />;
     default:
       return <Notice>{t("attachment.noPreview")}</Notice>;
   }
@@ -175,6 +177,17 @@ function useFailure() {
   const [failed, setFailed] = useState("");
   const fail = (error: unknown) => setFailed(error instanceof Error && error.message ? error.message : t("attachment.previewFailed"));
   return [failed, fail] as const;
+}
+
+function VideoPreview({ blob, name }: { blob: Blob; name: string }) {
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    const typed = blob.type.startsWith("video/") ? blob : new Blob([blob], { type: videoMime(name) });
+    const next = URL.createObjectURL(typed);
+    setUrl(next);
+    return () => URL.revokeObjectURL(next);
+  }, [blob, name]);
+  return url ? <video src={url} controls playsInline className="absolute inset-0 h-full w-full bg-black object-contain" title={name} /> : null;
 }
 
 function PdfPreview({ blob, name }: { blob: Blob; name: string }) {

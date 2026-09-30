@@ -25,7 +25,7 @@ type Props = {
   busy?: boolean;
   /** 拖入的 Word：先选「作为附件 / 导入正文」，默认附件 */
   allowAttach?: boolean;
-  kind?: "word" | "excel";
+  kind?: "word" | "excel" | "video";
   onCancel: () => void;
   onConfirm: (mode: ImportChoice) => void;
 };
@@ -37,10 +37,10 @@ export function ImportDialog({ open, fileName, fileSize, busy, allowAttach, kind
 
   useEffect(() => {
     if (open) {
-      setAttach(Boolean(allowAttach));
+      setAttach(kind === "video" ? false : Boolean(allowAttach));
       setPlacement("append");
     }
-  }, [open, allowAttach]);
+  }, [open, allowAttach, kind]);
 
   const mode: ImportChoice = attach ? "attach" : placement;
   return (
@@ -48,12 +48,14 @@ export function ImportDialog({ open, fileName, fileSize, busy, allowAttach, kind
       <DialogContent className="gap-5 sm:max-w-[480px]">
         <DialogHeader>
           <DialogTitle>
-            {allowAttach ? t("importDialog.dropTitle", { kind: kind === "excel" ? "Excel" : "Word" }) : t("importDialog.title")}
+            {allowAttach
+              ? t("importDialog.dropTitle", { kind: kind === "excel" ? "Excel" : kind === "video" ? t("importDialog.videoKind") : "Word" })
+              : t("importDialog.title")}
           </DialogTitle>
           <DialogDescription>{t(allowAttach ? "importDialog.dropDescription" : "importDialog.description")}</DialogDescription>
         </DialogHeader>
 
-        <div className="flex items-center gap-3 rounded-lg bg-muted/60 px-3 py-2.5">
+        <div className="flex items-center gap-3 px-1 py-1">
           <FileTypeIcon type={kind} size={32} />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-medium" title={fileName}>
@@ -68,7 +70,12 @@ export function ImportDialog({ open, fileName, fileSize, busy, allowAttach, kind
             {(
               [
                 { value: true, icon: Paperclip, title: "importDialog.asAttachment", hint: "importDialog.asAttachmentHint" },
-                { value: false, icon: FileText, title: "importDialog.asContent", hint: kind === "excel" ? "importDialog.asTableHint" : "importDialog.asContentHint" },
+                {
+                  value: false,
+                  icon: FileText,
+                  title: kind === "video" ? "importDialog.asVideo" : "importDialog.asContent",
+                  hint: kind === "excel" ? "importDialog.asTableHint" : kind === "video" ? "importDialog.asVideoHint" : "importDialog.asContentHint",
+                },
               ] as const
             ).map((option) => {
               const Icon = option.icon;
@@ -79,6 +86,7 @@ export function ImportDialog({ open, fileName, fileSize, busy, allowAttach, kind
                   type="button"
                   role="radio"
                   aria-checked={selected}
+                  disabled={busy}
                   className={cn(
                     "flex flex-col items-center gap-2 rounded-xl border px-3.5 py-5 text-center transition-colors",
                     selected ? "border-foreground bg-muted/40 ring-1 ring-foreground" : "border-border hover:bg-muted/50",
@@ -107,6 +115,7 @@ export function ImportDialog({ open, fileName, fileSize, busy, allowAttach, kind
                     type="button"
                     role="radio"
                     aria-checked={selected}
+                    disabled={busy}
                     className={cn(
                       "h-8 rounded-md text-sm transition-colors",
                       selected
@@ -137,11 +146,21 @@ export function ImportDialog({ open, fileName, fileSize, busy, allowAttach, kind
           </Button>
           <Button
             type="button"
-            disabled={busy}
+            aria-busy={busy}
             className={mode === "replace" ? "bg-destructive text-white hover:bg-destructive/90" : undefined}
-            onClick={() => onConfirm(mode)}
+            onClick={() => {
+              if (!busy) {
+                onConfirm(mode);
+              }
+            }}
           >
-            {mode === "replace" ? t("importDialog.replaceAndImport") : mode === "attach" ? t("importDialog.insert") : t("common.import")}
+            {busy
+              ? t("importDialog.loading")
+              : mode === "replace"
+                ? t("importDialog.replaceAndImport")
+                : mode === "attach" || kind === "video"
+                  ? t("importDialog.insert")
+                  : t("common.import")}
           </Button>
         </DialogFooter>
       </DialogContent>

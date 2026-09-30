@@ -57,14 +57,17 @@ export function documentText(body: EditorJsDocument): string {
   return parts.map((part) => part.trim()).filter(Boolean).join(" ");
 }
 
-function toDoc(id: string, updatedAt: string, body: EditorJsDocument): SearchDoc {
-  return { id, title: titleFromBody(body), text: documentText(body), updatedAt };
+async function toDoc(session: RemoteSession | null, id: string, updatedAt: string, body: EditorJsDocument): Promise<SearchDoc> {
+  const text = documentText(body);
+  const { attachmentBodyText } = await import("./fileText");
+  const files = await attachmentBodyText(session, body);
+  return { id, title: titleFromBody(body), text: files ? `${text}\n${files}` : text, updatedAt };
 }
 
 const remoteCache = new Map<string, SearchDoc>();
 
 async function loadRemoteDocs(session: RemoteSession, nodes: PageNode[]): Promise<SearchDoc[]> {
-  const key = (id: string) => `${session.username}:${id}`;
+  const key = (id: string) => `${session.username}:${id}:files`;
   const stale = nodes.filter((node) => remoteCache.get(key(node.id))?.updatedAt !== node.updatedAt);
   let cursor = 0;
   const worker = async () => {
@@ -72,7 +75,7 @@ async function loadRemoteDocs(session: RemoteSession, nodes: PageNode[]): Promis
       const node = stale[cursor++];
       try {
         const page = await loadRemote(session, node.id);
-        remoteCache.set(key(node.id), toDoc(node.id, node.updatedAt, page.body));
+        remoteCache.set(key(node.id), await toDoc(session, node.id, node.updatedAt, page.body));
       } catch {
         remoteCache.set(key(node.id), { id: node.id, title: node.title, text: "", updatedAt: node.updatedAt });
       }
@@ -82,10 +85,10 @@ async function loadRemoteDocs(session: RemoteSession, nodes: PageNode[]): Promis
   return nodes.map((node) => remoteCache.get(key(node.id))).filter((doc): doc is SearchDoc => Boolean(doc));
 }
 
-/** 远程页面第一次检索时逐篇拉正文，之后按 updatedAt 只刷新改过的 */
+/** 远程页面第一次检索时逐篇拉正文和附件文本，之后按 updatedAt 只刷新改过的。未登录不检索远程。 */
 export function loadSearchDocs(session: RemoteSession | null, nodes: PageNode[]): Promise<SearchDoc[]> {
   if (!session) {
-    return Promise.resolve(readAllLocal().map((page) => toDoc(page.id, page.updatedAt ?? "", page.body)));
+    return Promise.all(readAllLocal().map((page) => toDoc(null, page.id, page.updatedAt ?? "", page.body)));
   }
   return loadRemoteDocs(session, nodes);
 }
@@ -164,6 +167,18 @@ function excerptAround(text: string, term: string): string {
   return `${start > 0 ? "…" : ""}${slice}${start + 1200 < text.length ? "…" : ""}`;
 }
 
+function withAttachmentText(text: string, excerpt: string): string {
+  const marker = text.indexOf("\n附件 ");
+  if (marker < 0) {
+    return excerpt;
+  }
+  const files = text.slice(marker, marker + 4000).trim();
+  if (!files || excerpt.includes(files.slice(0, 48))) {
+    return excerpt;
+  }
+  return `${excerpt}\n${files}`.slice(0, 5000);
+}
+
 export type WikiHit = { id: string; title: string; excerpt: string };
 
 /** 整句提问：按词命中打分，不要求每个词都出现 */
@@ -196,7 +211,11 @@ export function retrieveWiki(docs: SearchDoc[], query: string, limit = 6): WikiH
       continue;
     }
     scored.push({
-      hit: { id: doc.id, title: doc.title, excerpt: excerptAround(doc.text, first) },
+      hit: {
+        id: doc.id,
+        title: doc.title,
+        excerpt: withAttachmentText(doc.text, excerptAround(doc.text, first)),
+      },
       score,
     });
   }

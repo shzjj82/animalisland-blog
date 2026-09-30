@@ -1,4 +1,4 @@
-export type FileKind = "word" | "pdf" | "excel" | "code";
+export type FileKind = "word" | "pdf" | "excel" | "code" | "video";
 
 /** 扩展名 → highlight.js 语言名 */
 const CODE_LANGUAGES: Record<string, string> = {
@@ -53,6 +53,12 @@ const KIND_BY_EXTENSION: Record<string, FileKind> = {
   xls: "excel",
   xlsx: "excel",
   csv: "excel",
+  mp4: "video",
+  webm: "video",
+  ogg: "video",
+  ogv: "video",
+  mov: "video",
+  m4v: "video",
   ...Object.fromEntries(Object.keys(CODE_LANGUAGES).map((ext) => [ext, "code" as const])),
 };
 
@@ -68,6 +74,20 @@ export function fileExtension(name: string): string {
 
 export function fileKind(name: string): FileKind | null {
   return KIND_BY_EXTENSION[fileExtension(name)] ?? null;
+}
+
+export function videoMime(name: string): string {
+  switch (fileExtension(name)) {
+    case "webm":
+      return "video/webm";
+    case "ogg":
+    case "ogv":
+      return "video/ogg";
+    case "mov":
+      return "video/quicktime";
+    default:
+      return "video/mp4";
+  }
 }
 
 export function codeLanguage(name: string): string | undefined {

@@ -63,7 +63,7 @@ import { readSyncSettings, writeSyncSettings, type SyncSettings } from "@/store/
 import { pageTitle, setAppLocale, type AppLocale } from "@/i18n";
 import { exportDocument, type ExportFormat } from "@/lib/document/export";
 import { fileKind } from "@/lib/document/fileKinds";
-import { importSpreadsheet, importWord, mergeImported, readInsertable, WORD_ACCEPT, type ImportedWord } from "@/lib/document/import";
+import { importSpreadsheet, importVideo, importWord, mergeImported, readInsertable, WORD_ACCEPT } from "@/lib/document/import";
 import { insertEditorBlocksAt } from "@/lib/document/insertBlocks";
 import { loadSearchDocs } from "@/lib/document/search";
 import {
@@ -116,9 +116,10 @@ export function App() {
   const [exportOpen, setExportOpen] = useState(false);
   const [reveal, setReveal] = useState<{ text: string; nonce: number } | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
-  const [pendingImport, setPendingImport] = useState<ImportedWord | null>(null);
-  /** 正在导入的 Word 原文件；index 只有拖入时才有，弹窗里选「作为附件」时插到这里 */
+  /** 正在导入的 Word / Excel；index 只有拖入时才有，弹窗里选「作为附件」时插到这里 */
   const [pendingDrop, setPendingDrop] = useState<{ file: File; index: number | null } | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
   const [queuedDrop, setQueuedDrop] = useState<File[] | null>(null);
   const [viewing, setViewing] = useState<{ data: AttachmentData; replace: (next: AttachmentData) => void } | null>(null);
   const [fileDeleteAsk, setFileDeleteAsk] = useState<{ name: string; resolve: (ok: boolean) => void } | null>(null);
@@ -448,36 +449,48 @@ export function App() {
 
   async function readImport(file: File) {
     setError("");
-    try {
-      setPendingImport(await importWord(file));
-      setPendingDrop({ file, index: null });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("app.importFailed"));
-    }
+    setPendingDrop({ file, index: null });
+    setImportOpen(true);
   }
 
   function closeImport() {
-    setPendingImport(null);
+    if (importBusy) {
+      return;
+    }
+    setImportOpen(false);
     setPendingDrop(null);
   }
 
   async function applyImport(mode: ImportChoice) {
     const current = pageRef.current;
-    if (!pendingImport || !current) {
+    const drop = pendingDrop;
+    if (!drop || !current) {
       return;
     }
-    if (mode === "attach") {
-      const drop = pendingDrop;
-      closeImport();
-      if (drop) {
+    setImportBusy(true);
+    setError("");
+    try {
+      if (mode === "attach") {
         await insertDropped([drop.file], drop.index ?? dropIndex(null));
+      } else {
+        const kind = fileKind(drop.file.name);
+        const imported =
+          kind === "excel"
+            ? await importSpreadsheet(drop.file)
+            : kind === "video"
+              ? await importVideo(drop.file, uploadFile)
+              : await importWord(drop.file, uploadFile);
+        const body = editorRef.current ? ((await editorRef.current.save()) as EditorJsDocument) : current.body;
+        onEdit(mergeImported(mode, body, imported));
+        setEditorEpoch((value) => value + 1);
       }
-      return;
+      setImportOpen(false);
+      setPendingDrop(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("app.importFailed"));
+    } finally {
+      setImportBusy(false);
     }
-    const body = editorRef.current ? ((await editorRef.current.save()) as EditorJsDocument) : current.body;
-    onEdit(mergeImported(mode, body, pendingImport));
-    setEditorEpoch((value) => value + 1);
-    closeImport();
   }
 
   async function uploadFile(file: File): Promise<AttachmentData> {
@@ -569,16 +582,10 @@ export function App() {
     const index = dropIndex(point);
     const [single] = files;
     const kind = single && files.length === 1 ? fileKind(single.name) : null;
-    if (single && (kind === "word" || kind === "excel")) {
-      try {
-        setPendingImport(await (kind === "word" ? importWord(single) : importSpreadsheet(single)));
-        setPendingDrop({ file: single, index });
-        return;
-      } catch {
-        await insertDropped(files, index);
-        setHint(t("attachment.importFallback", { name: single.name }));
-        return;
-      }
+    if (single && (kind === "word" || kind === "excel" || kind === "video")) {
+      setPendingDrop({ file: single, index });
+      setImportOpen(true);
+      return;
     }
     await insertDropped(files, index);
   }
@@ -1136,11 +1143,12 @@ export function App() {
         </DialogContent>
       </Dialog>
       <ImportDialog
-        open={pendingImport !== null}
-        fileName={pendingDrop?.file.name ?? pendingImport?.name ?? ""}
+        open={importOpen}
+        busy={importBusy}
+        fileName={pendingDrop?.file.name ?? ""}
         fileSize={pendingDrop?.file.size}
         allowAttach={pendingDrop?.index != null}
-        kind={pendingDrop && fileKind(pendingDrop.file.name) === "excel" ? "excel" : "word"}
+        kind={pendingDrop && fileKind(pendingDrop.file.name) === "excel" ? "excel" : pendingDrop && fileKind(pendingDrop.file.name) === "video" ? "video" : "word"}
         onCancel={closeImport}
         onConfirm={(mode) => void applyImport(mode)}
       />

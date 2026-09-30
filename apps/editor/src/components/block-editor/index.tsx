@@ -13,6 +13,8 @@ import { editorI18n } from "./editorI18n";
 import { useTranslation } from "react-i18next";
 import { PageLinkTool, type PageLinkData } from "./tools/PageLinkTool";
 import { AttachmentTool } from "./tools/AttachmentTool";
+import { ImageBlockTool } from "./tools/ImageBlockTool";
+import { VideoBlockTool } from "./tools/VideoBlockTool";
 import type { AttachmentData } from "@/store/fileStore";
 import { htmlToBlocks } from "@/lib/document/htmlToBlocks";
 import { revealText } from "./revealText";
@@ -124,6 +126,12 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, onReady,
               return create();
             },
           },
+        },
+        image: {
+          class: ImageBlockTool as unknown as typeof Header,
+        },
+        video: {
+          class: VideoBlockTool as unknown as typeof Header,
         },
         attachment: {
           class: AttachmentTool as unknown as typeof Header,

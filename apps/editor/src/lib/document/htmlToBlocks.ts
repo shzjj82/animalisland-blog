@@ -81,6 +81,38 @@ function tidy(html: string): string {
     .replace(/^(\s|<br>)+|(\s|<br>)+$/g, "");
 }
 
+function pushImage(img: HTMLElement, blocks: OutputBlockData[]) {
+  const src = img.getAttribute("src")?.trim() ?? "";
+  if (!src.startsWith("import-image://") && !/^https?:\/\//i.test(src)) {
+    return;
+  }
+  blocks.push({
+    type: "image",
+    data: { file: { url: src }, caption: img.getAttribute("alt") ?? "" },
+  });
+}
+
+/** 段落里夹着的图片拆成独立图片块，前后文字仍是段落 */
+function appendInlineAndImages(el: HTMLElement, blocks: OutputBlockData[]) {
+  let bucket = document.createElement("span");
+  const flushInline = () => {
+    const text = tidy(inlineHtml(bucket));
+    if (text) {
+      blocks.push({ type: "paragraph", data: { text } });
+    }
+    bucket = document.createElement("span");
+  };
+  el.childNodes.forEach((node) => {
+    if (node instanceof HTMLElement && node.tagName === "IMG") {
+      flushInline();
+      pushImage(node, blocks);
+      return;
+    }
+    bucket.appendChild(node.cloneNode(true));
+  });
+  flushInline();
+}
+
 function hasBlockChild(el: Element): boolean {
   return Array.from(el.children).some((child) => BLOCK_TAGS.has(child.tagName) || hasBlockChild(child));
 }
@@ -149,6 +181,11 @@ function walk(container: Node, blocks: OutputBlockData[]): void {
       pending.appendChild(child.cloneNode());
       return;
     }
+    if (child instanceof HTMLElement && child.tagName === "IMG") {
+      flush();
+      pushImage(child, blocks);
+      return;
+    }
     if (!(child instanceof HTMLElement) || DROP_TAGS.has(child.tagName)) {
       return;
     }
@@ -203,10 +240,7 @@ function walk(container: Node, blocks: OutputBlockData[]): void {
       return;
     }
     if (tag === "P" && !hasBlockChild(child)) {
-      const text = tidy(inlineHtml(child));
-      if (text) {
-        blocks.push({ type: "paragraph", data: { text } });
-      }
+      appendInlineAndImages(child, blocks);
       return;
     }
     walk(child, blocks);
@@ -218,7 +252,7 @@ export function sanitizeInline(html: string): string {
   return inlineHtml(new DOMParser().parseFromString(html, "text/html").body);
 }
 
-/** 把剪贴板里的 HTML 转成编辑器块；标题只保留到三级，图片等暂不支持的内容会被丢掉 */
+/** 把剪贴板里的 HTML 转成编辑器块；标题只保留到三级。http(s) 和 import-image 图片会变成图片块 */
 export function htmlToBlocks(html: string): OutputBlockData[] {
   const doc = new DOMParser().parseFromString(html, "text/html");
   const blocks: OutputBlockData[] = [];

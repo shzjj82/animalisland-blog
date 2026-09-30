@@ -5,7 +5,7 @@ type Props = {
   size?: number;
 };
 
-const COLORS: Record<FileKind, string> = { pdf: "#E5252A", word: "#185ABD", excel: "#107C41", code: "#4B5563" };
+const COLORS: Record<FileKind, string> = { pdf: "#E5252A", word: "#185ABD", excel: "#107C41", code: "#4B5563", video: "#7C3AED" };
 
 const FONT = "ui-sans-serif,system-ui,sans-serif";
 
@@ -25,6 +25,8 @@ function badge(type: FileKind): string {
       return `<rect x="2" y="11" width="11" height="8" rx="1.5" fill="${color}"/><path d="m5 13 3 4m0-4-3 4" fill="none" ${stroke("#fff", 1.3)} stroke-linecap="round"/>`;
     case "code":
       return `<rect x="2" y="11" width="13" height="8" rx="1.5" fill="${color}"/><path d="M6.2 13 4.5 15l1.7 2m4.6-4 1.7 2-1.7 2" fill="none" ${stroke("#fff", 1.2)} stroke-linecap="round" stroke-linejoin="round"/>`;
+    case "video":
+      return `<rect x="2" y="11" width="13" height="8" rx="1.5" fill="${color}"/><path d="M7.2 13.2v3.6l3.4-1.8z" fill="#fff"/>`;
   }
 }
 

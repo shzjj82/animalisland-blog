@@ -190,3 +190,19 @@
 .notion-editor .tc-row--selected .tc-cell {
   background: var(--color-background);
 }
+
+.notion-editor .cdx-image {
+  margin: 0.75rem 0;
+}
+
+.notion-editor .cdx-image img,
+.notion-editor .cdx-video video {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+
+.notion-editor .cdx-video {
+  margin: 0.75rem 0;
+}

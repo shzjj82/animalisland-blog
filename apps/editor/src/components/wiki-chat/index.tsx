@@ -10,14 +10,13 @@ import {
   aiErrorMessage,
   parseLocalFiles,
   toApiAttachments,
-  toApiMessages,
   uid,
   type ChatBubble,
   type LocalAttachment,
 } from "@/lib/ai/chat";
-import { documentText, retrieveWiki, type SearchDoc } from "@/lib/document/search";
+import { readFileText } from "@/lib/document/fileText";
+import { retrieveWiki, type SearchDoc } from "@/lib/document/search";
 import { fileExtension } from "@/lib/document/fileKinds";
-import { importSpreadsheet, importWord } from "@/lib/document/import";
 import { iconParkOutline } from "@/lib/iconPark";
 import { t } from "@/i18n";
 import { useTranslation } from "react-i18next";
@@ -42,19 +41,19 @@ function capImages(list: AiAttachment[]): AiAttachment[] {
   });
 }
 
+const MESSAGE_LIMIT = 8000;
+
 async function readUpload(files: File[]): Promise<LocalAttachment[]> {
   const plain: File[] = [];
   const out: LocalAttachment[] = [];
   for (const file of files) {
     const ext = fileExtension(file.name);
-    if (ext === "docx") {
-      const imported = await importWord(file);
-      out.push({ id: uid(), kind: "text", name: file.name, text: documentText({ blocks: imported.blocks }) });
-      continue;
-    }
-    if (ext === "xlsx" || ext === "xls" || ext === "csv") {
-      const imported = await importSpreadsheet(file);
-      out.push({ id: uid(), kind: "text", name: file.name, text: documentText({ blocks: imported.blocks }) });
+    if (ext === "docx" || ext === "xlsx" || ext === "xls" || ext === "csv") {
+      const text = (await readFileText(file)).trim();
+      if (!text) {
+        throw new Error(t("document.emptyImport"));
+      }
+      out.push({ id: uid(), kind: "text", name: file.name, text });
       continue;
     }
     plain.push(file);
@@ -63,6 +62,21 @@ async function readUpload(files: File[]): Promise<LocalAttachment[]> {
     out.push(...(await parseLocalFiles(plain)));
   }
   return out;
+}
+
+/** 把这一轮上传的正文写进用户消息，避免只靠附件字段时被页面摘录盖住 */
+function userContent(question: string, files: LocalAttachment[] | undefined, uploadedLabel: string, questionLabel: string, fallback: string): string {
+  const ask = question.trim();
+  const uploaded = (files ?? [])
+    .flatMap((file) => (file.kind === "text" && file.text.trim() ? [`《${file.name}》\n${file.text.trim()}`] : []))
+    .join("\n\n");
+  if (!uploaded) {
+    return ask;
+  }
+  const questionPart = `${questionLabel}\n${ask || fallback}`;
+  const room = MESSAGE_LIMIT - questionPart.length - 2;
+  const filePart = `${uploadedLabel}\n${uploaded}`.slice(0, Math.max(0, room));
+  return `${filePart}\n\n${questionPart}`;
 }
 
 export function WikiChat({ open, focusToken, loggedIn, loadDocs, onClose, onLogin }: Props) {
@@ -153,27 +167,38 @@ export function WikiChat({ open, focusToken, loggedIn, loadDocs, onClose, onLogi
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const docs = await loadDocs();
+      const docs = loggedIn ? await loadDocs() : [];
       const hits = text ? retrieveWiki(docs, text) : [];
-      const wikiFiles: AiAttachment[] = hits.length
-        ? hits.map((hit) => ({
-            kind: "text" as const,
-            name: hit.title,
-            text: hit.excerpt || tr("wikiAsk.empty"),
-          }))
-        : text
-          ? [{ kind: "text" as const, name: tr("wikiAsk.title"), text: tr("wikiAsk.empty") }]
-          : [];
-      const messages: AiChatMessage[] = toApiMessages(history).filter((item) => item.content.trim());
+      const uploadedFiles = toApiAttachments(attach).filter((item) =>
+        item.kind === "image" ? Boolean(item.url) : Boolean(item.text.trim()),
+      );
+      const wikiFiles: AiAttachment[] = hits.map((hit) => ({
+        kind: "text" as const,
+        name: hit.title,
+        text: hit.excerpt || tr("wikiAsk.empty"),
+      }));
+      if (!hits.length && text && !uploadedFiles.length) {
+        wikiFiles.push({ kind: "text", name: tr("wikiAsk.title"), text: tr("wikiAsk.empty") });
+      }
+      const messages: AiChatMessage[] = history
+        .map((item) => ({
+          role: item.role,
+          content:
+            item.role === "user"
+              ? userContent(item.content, item.attachments, tr("wikiAsk.uploaded"), tr("wikiAsk.question"), tr("ai.attachmentsPrompt"))
+              : item.content,
+        }))
+        .filter((item) => item.content.trim());
       if (!messages.length || messages[messages.length - 1]?.role !== "user") {
-        messages.push({ role: "user", content: text || tr("ai.attachmentsPrompt") });
+        messages.push({
+          role: "user",
+          content: userContent(text, attach, tr("wikiAsk.uploaded"), tr("wikiAsk.question"), tr("ai.attachmentsPrompt")) || tr("ai.attachmentsPrompt"),
+        });
       }
       const result = await aiChat(
         {
           messages,
-          attachments: capImages([...wikiFiles, ...toApiAttachments(attach)]).filter((item) =>
-            item.kind === "image" ? Boolean(item.url) : Boolean(item.text?.trim() || item.name),
-          ),
+          attachments: capImages([...uploadedFiles, ...wikiFiles]),
           system: t("wikiAsk.system"),
         },
         controller.signal,
