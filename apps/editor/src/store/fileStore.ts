@@ -1,11 +1,7 @@
 import type { EditorJsBlock, EditorJsDocument } from "@myblog/shared";
 import { t } from "@/i18n";
 import { MAX_ATTACHMENT_BYTES } from "@/lib/document/fileKinds";
-<<<<<<< HEAD
-import { GATEWAY_BASE_URL, listRemote, loadRemote, saveRemote, type RemoteSession } from "./remoteStore";
-=======
-import { gatewayUrl, WIKI_APP_CODE, type RemoteSession } from "./remoteStore";
->>>>>>> 3aaec46 (Update environment configuration and enhance editor functionality)
+import { gatewayUrl, listRemote, loadRemote, saveRemote, WIKI_APP_CODE, type RemoteSession } from "./remoteStore";
 
 /** 附件块里保存的数据；文件本体不进文档。远程文件的 fileId 是对象键，url 是公开地址 */
 export type AttachmentData = {

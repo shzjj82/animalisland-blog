@@ -47,21 +47,11 @@ fn start_desktop_server(app: &tauri::App) -> Result<u16, String> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
-<<<<<<< HEAD
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            if let Some(env_file) = find_env_file(dir) {
-                cmd.env("EDITOR_ENV_FILE", env_file);
-            }
-        }
-    }
-=======
->>>>>>> 3aaec46 (Update environment configuration and enhance editor functionality)
 
     let mut child = cmd.spawn().map_err(|err| err.to_string())?;
     let stdout = child.stdout.take().ok_or("无法读取本机服务输出")?;
