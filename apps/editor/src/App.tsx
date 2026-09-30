@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type EditorJS from "@editorjs/editorjs";
 import { useTranslation } from "react-i18next";
-import { CloudStorage, Delete, Download, Export, HardDisk, People, Plus, Search } from "@icon-park/react";
+import { CloudStorage, Delete, Download, Export, HardDisk, People, Plus, Robot, Search } from "@icon-park/react";
 import type { EditorJsBlock, EditorJsDocument } from "@myblog/shared";
 import { BlockEditor } from "@/components/block-editor";
 import type { PageLinkData } from "@/components/block-editor/tools/PageLinkTool";
@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/empty-state";
 import { FileDropZone } from "@/components/file-drop";
 import { FileTypeIcon } from "@/components/file-type-icon";
 import { FileViewer } from "@/components/file-viewer";
+import { WikiChat } from "@/components/wiki-chat";
 import { ImportDialog, type ImportChoice } from "@/components/import-dialog";
 import { LanguageSwitch } from "@/components/language-switch";
 import { PageTree } from "@/components/page-tree";
@@ -122,6 +123,8 @@ export function App() {
   const [viewing, setViewing] = useState<{ data: AttachmentData; replace: (next: AttachmentData) => void } | null>(null);
   const [fileDeleteAsk, setFileDeleteAsk] = useState<{ name: string; resolve: (ok: boolean) => void } | null>(null);
   const [spotlightOpen, setSpotlightOpen] = useState(false);
+  const [wikiOpen, setWikiOpen] = useState(false);
+  const [wikiFocus, setWikiFocus] = useState(0);
   const [spotlightLaunch, setSpotlightLaunch] = useState<{
     actionId?: string;
     insertIndex: number;
@@ -181,6 +184,18 @@ export function App() {
     });
     setSpotlightOpen(true);
   }, []);
+
+  const openWiki = useCallback(() => {
+    if (!session) {
+      setAuthOpen(true);
+      return;
+    }
+    setViewing(null);
+    setSpotlightOpen(false);
+    setSpotlightLaunch(null);
+    setWikiOpen(true);
+    setWikiFocus((count) => count + 1);
+  }, [session]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -340,6 +355,7 @@ export function App() {
   function logout() {
     void logoutRemote(session);
     setSession(null);
+    setWikiOpen(false);
     setAuthOpen(false);
     resetAuthFields();
   }
@@ -989,6 +1005,9 @@ export function App() {
               <Delete {...iconProps} />
               {t("common.delete")}
             </Button>
+            <Button type="button" variant="outline" size="icon" aria-label={t("wikiAsk.title")} onClick={openWiki}>
+              <Robot {...iconProps} />
+            </Button>
             <LanguageSwitch onChange={(locale) => void switchLocale(locale)} />
           </span>
         </header>
@@ -1011,7 +1030,10 @@ export function App() {
               onAi={(index) => openSpotlight({ actionId: "ai-chat", insertIndex: index })}
               onAskSelection={(text) => openSpotlight({ actionId: "ai-chat", selection: text })}
               onUploadFile={uploadFile}
-              onOpenFile={(data, replace) => setViewing({ data, replace })}
+              onOpenFile={(data, replace) => {
+                setWikiOpen(false);
+                setViewing({ data, replace });
+              }}
               onConfirmDeleteFile={confirmDeleteFile}
               reveal={reveal}
             />
@@ -1048,6 +1070,13 @@ export function App() {
               keywords: "ai 写作 助手 聊天 chat gpt 智能 bubble",
               icon: "robot",
             },
+            {
+              id: "wiki-ask",
+              title: t("wikiAsk.title"),
+              subtitle: t("wikiAsk.subtitle"),
+              keywords: t("wikiAsk.keywords"),
+              icon: "search",
+            },
           ] satisfies SpotlightAction[]
         }
         editor={editorReady ? editorRef.current : null}
@@ -1056,6 +1085,18 @@ export function App() {
         selection={spotlightLaunch?.selection}
         loadPages={() => loadSearchDocs(session, nodes)}
         onOpenPage={(id, query) => void revealPage(id, query)}
+        onAskWiki={openWiki}
+      />
+      <WikiChat
+        open={wikiOpen}
+        focusToken={wikiFocus}
+        loggedIn={Boolean(session)}
+        loadDocs={() => loadSearchDocs(session, nodes)}
+        onClose={() => setWikiOpen(false)}
+        onLogin={() => {
+          setWikiOpen(false);
+          setAuthOpen(true);
+        }}
       />
       <Dialog open={fileDeleteAsk !== null} onOpenChange={(open) => !open && answerDeleteFile(false)}>
         <DialogContent>

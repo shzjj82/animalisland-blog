@@ -128,3 +128,78 @@ export function searchDocs(docs: SearchDoc[], query: string, limit = 8): SearchH
   scored.sort((a, b) => b.score - a.score || b.updatedAt.localeCompare(a.updatedAt));
   return scored.slice(0, limit).map((item) => item.hit);
 }
+
+const WIKI_STOP = new Set([
+  "的", "了", "是", "在", "和", "与", "或", "我", "你", "吗", "呢", "吧", "啊", "请", "什么", "怎么", "如何", "哪些",
+  "一个", "这个", "那个", "the", "a", "an", "of", "to", "and", "or", "is", "what", "how", "for",
+]);
+
+function wikiTerms(query: string): string[] {
+  const parts = query
+    .trim()
+    .toLocaleLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((part) => part.length >= 2 && !WIKI_STOP.has(part));
+  const terms: string[] = [];
+  for (const part of parts) {
+    if (/[\u4e00-\u9fff]/.test(part) && part.length > 4) {
+      for (let i = 0; i < part.length - 1 && terms.length < 24; i += 1) {
+        const gram = part.slice(i, i + 2);
+        if (!WIKI_STOP.has(gram)) {
+          terms.push(gram);
+        }
+      }
+    } else {
+      terms.push(part);
+    }
+  }
+  return [...new Set(terms)].slice(0, 24);
+}
+
+function excerptAround(text: string, term: string): string {
+  const lower = text.toLocaleLowerCase();
+  const index = term ? lower.indexOf(term) : 0;
+  const start = Math.max(0, (index < 0 ? 0 : index) - 180);
+  const slice = text.slice(start, start + 1200).trim();
+  return `${start > 0 ? "…" : ""}${slice}${start + 1200 < text.length ? "…" : ""}`;
+}
+
+export type WikiHit = { id: string; title: string; excerpt: string };
+
+/** 整句提问：按词命中打分，不要求每个词都出现 */
+export function retrieveWiki(docs: SearchDoc[], query: string, limit = 6): WikiHit[] {
+  const terms = wikiTerms(query);
+  if (terms.length === 0) {
+    return [];
+  }
+  const scored: { hit: WikiHit; score: number }[] = [];
+  for (const doc of docs) {
+    const title = doc.title.toLocaleLowerCase();
+    const text = doc.text.toLocaleLowerCase();
+    let score = 0;
+    let first = "";
+    for (const term of terms) {
+      if (title.includes(term)) {
+        score += 8;
+        if (!first) {
+          first = term;
+        }
+      }
+      if (text.includes(term)) {
+        score += 1;
+        if (!first) {
+          first = term;
+        }
+      }
+    }
+    if (score <= 0) {
+      continue;
+    }
+    scored.push({
+      hit: { id: doc.id, title: doc.title, excerpt: excerptAround(doc.text, first) },
+      score,
+    });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit).map((item) => item.hit);
+}

@@ -160,6 +160,7 @@ export async function aiChat(
     messages: AiChatMessage[];
     attachments?: AiAttachment[];
     document?: EditorJsDocument;
+    system?: string;
   },
   signal?: AbortSignal,
   handlers?: AiChatStreamHandlers,
@@ -176,6 +177,7 @@ export async function aiChat(
         sync: false,
         messages,
         attachments: input.attachments,
+        system: input.system,
       }),
       signal,
     });

@@ -36,6 +36,8 @@ type Props = {
   loadPages?: () => Promise<SearchDoc[]>;
   /** 选中页面结果时带上检索词，用来在页面里定位命中位置 */
   onOpenPage?: (id: string, query: string) => void;
+  /** 「问知识库」关掉命令面板，交给外侧栏 */
+  onAskWiki?: () => void;
 };
 
 function matchAction(action: SpotlightAction, query: string): boolean {
@@ -61,6 +63,7 @@ export function EditorSpotlight({
   onInserted,
   loadPages,
   onOpenPage,
+  onAskWiki,
 }: Props) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -117,6 +120,11 @@ export function EditorSpotlight({
       return;
     }
     const full = actions.find((actionItem) => actionItem.id === item.id);
+    if (full?.id === "wiki-ask") {
+      closeAll();
+      onAskWiki?.();
+      return;
+    }
     if (full) {
       enterAction(full);
     }
@@ -171,6 +179,11 @@ export function EditorSpotlight({
       return;
     }
     const launched = launchActionId ? actions.find((item) => item.id === launchActionId) : null;
+    if (launched?.id === "wiki-ask") {
+      onOpenChange(false);
+      onAskWiki?.();
+      return;
+    }
     if (launched) {
       enterAction(launched, selection);
     } else {
