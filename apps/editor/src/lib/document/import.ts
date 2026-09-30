@@ -4,7 +4,8 @@ import { fileExtension } from "./fileKinds";
 import { t } from "@/i18n";
 import { markdownToEditorBlocks } from "@/lib/ai/markdown";
 
-export const WORD_ACCEPT = ".docx,.doc,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword";
+export const WORD_ACCEPT =
+  ".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -38,22 +39,18 @@ function baseName(name: string): string {
 
 async function wordToHtml(file: File): Promise<string> {
   const lower = file.name.toLowerCase();
-  if (lower.endsWith(".docx")) {
-    const { default: mammoth } = await import("mammoth/mammoth.browser.js");
-    const result = await mammoth.convertToHtml(
-      { arrayBuffer: await file.arrayBuffer() },
-      { styleMap: ["p[style-name='Title'] => h1:fresh", "p[style-name='Subtitle'] => h2:fresh"] },
-    );
-    return result.value;
-  }
-  if (lower.endsWith(".doc")) {
-    const text = await file.text();
-    if (/<html[\s>]/i.test(text)) {
-      return text;
+  if (!lower.endsWith(".docx")) {
+    if (lower.endsWith(".doc")) {
+      throw new Error(t("document.legacyDoc"));
     }
-    throw new Error(t("document.legacyDoc"));
+    throw new Error(t("document.wordOnly"));
   }
-  throw new Error(t("document.wordOnly"));
+  const { default: mammoth } = await import("mammoth/mammoth.browser.js");
+  const result = await mammoth.convertToHtml(
+    { arrayBuffer: await file.arrayBuffer() },
+    { styleMap: ["p[style-name='Title'] => h1:fresh", "p[style-name='Subtitle'] => h2:fresh"] },
+  );
+  return result.value;
 }
 
 export type ImportMode = "replace" | "append" | "prepend";

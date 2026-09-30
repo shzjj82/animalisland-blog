@@ -355,7 +355,7 @@ export function App() {
       if (!body) {
         throw new Error(t("app.pageNotFound"));
       }
-      exportDocument(format, titleFromBody(body), body);
+      await exportDocument(format, titleFromBody(body), body);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("app.exportFailed"));
     }
