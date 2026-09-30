@@ -43,7 +43,9 @@ export async function docsRequest<T>(
   },
 ): Promise<T> {
   const query = { ...opts?.query, appCode: env.docsAppCode };
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = {
+    "X-Biz-Code": env.docsAppCode,
+  };
 
   const credential: DocsCredential = opts?.serviceKeyOnly
     ? "service"

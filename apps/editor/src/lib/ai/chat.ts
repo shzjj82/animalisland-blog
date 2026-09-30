@@ -57,8 +57,11 @@ export function aiErrorMessage(message: string): string {
   if (message === "UNAUTHORIZED") {
     return t("ai.sessionExpired");
   }
-  if (message === "AI_NOT_CONFIGURED") {
+  if (message === "AI_NOT_CONFIGURED" || message === "FORBIDDEN") {
     return t("ai.notConfigured");
+  }
+  if (message === "GATEWAY_UNAVAILABLE" || message === "AI_FAILED") {
+    return t("ai.gatewayUnavailable");
   }
   if (message === "AI_TIMEOUT") {
     return t("ai.timeout");
@@ -66,7 +69,7 @@ export function aiErrorMessage(message: string): string {
   if (message === "AI_EMPTY_BLOCKS" || message === "AI_BAD_JSON") {
     return t("ai.convertFailed");
   }
-  if (message === "AI_EMPTY_REPLY") {
+  if (message === "AI_EMPTY_REPLY" || message === "AI_EMPTY") {
     return t("ai.emptyReply");
   }
   if (message === "AI_EMPTY_PROMPT") {

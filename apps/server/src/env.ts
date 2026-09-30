@@ -120,13 +120,12 @@ export const env = {
    * Nest 文档隔离编码（必填；服务端不再默认 blog）。多应用共库时用 DOCS_APP_CODE 覆盖。
    */
   docsAppCode: process.env.DOCS_APP_CODE ?? "blog",
-  /** Nest 服务密钥（x-docs-key）；写操作优先用户 JWT */
+  /** Nest 服务密钥（x-docs-key）；写操作优先用户 JWT。智能体聊天勿用此密钥。 */
   docsServiceKey: resolveGatewayServiceKey(),
   docsTimeoutMs: Number(process.env.GATEWAY_TIMEOUT_MS ?? process.env.DOCS_TIMEOUT_MS ?? 15_000),
-  aiApiBase: (process.env.AI_API_BASE ?? "https://api.openai.com/v1").replace(/\/$/, ""),
-  aiApiKey: process.env.AI_API_KEY ?? "",
-  aiModel: process.env.AI_MODEL ?? "gpt-4o-mini",
-  aiTimeoutMs: Number(process.env.AI_TIMEOUT_MS ?? 90_000),
+  /** Nest 智能体业务码（X-Biz-Code）；聊天鉴权用用户 JWT，密钥只在 Nest agents */
+  agentsBizCode: process.env.AGENTS_BIZ_CODE ?? process.env.DOCS_APP_CODE ?? "blog",
+  agentsTimeoutMs: Number(process.env.AGENTS_TIMEOUT_MS ?? 90_000),
 };
 
 export function isDocsBackend(): boolean {
@@ -141,8 +140,9 @@ export function ossConfigured(): boolean {
   return Boolean(env.ossAccessKeyId && env.ossAccessKeySecret && env.ossRegion && env.ossBucket);
 }
 
+/** 智能体走 Nest 网关；未配 GATEWAY 则不可用（密钥不在 blog） */
 export function aiConfigured(): boolean {
-  return Boolean(env.aiApiKey.trim());
+  return hasGatewayConfig() && Boolean(env.gatewayBaseUrl);
 }
 
 export function ensureDataDirs(): void {

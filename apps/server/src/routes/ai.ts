@@ -5,19 +5,31 @@ import {
   type AiChatMessage,
   type EditorJsDocument,
 } from "@myblog/shared";
-import { runAiChat, runAiToEditor } from "../ai.js";
+import { AgentsError, agentsAvailable, agentsChatStatus } from "../agents-client.js";
+import { runAiChat } from "../ai.js";
 import { requireAuth } from "../auth.js";
-import { aiConfigured, env } from "../env.js";
 import { fail, ok } from "../http.js";
 
 export const aiRouter = Router();
 
-aiRouter.get("/status", requireAuth, (_req, res) => {
-  ok(res, {
-    enabled: aiConfigured(),
-    model: aiConfigured() ? env.aiModel : null,
-    base: aiConfigured() ? env.aiApiBase : null,
-  });
+aiRouter.get("/status", requireAuth, (req, res, next) => {
+  void (async () => {
+    const token = req.accessToken;
+    if (!token || !agentsAvailable()) {
+      ok(res, { enabled: false, model: null });
+      return;
+    }
+    try {
+      const status = await agentsChatStatus(token);
+      ok(res, { enabled: status.enabled, model: status.model ?? null });
+    } catch (err) {
+      if (err instanceof AgentsError && err.status === 401) {
+        fail(res, err.code, 401);
+        return;
+      }
+      ok(res, { enabled: false, model: null });
+    }
+  })().catch(next);
 });
 
 function isPrivateHost(hostname: string): boolean {
@@ -119,44 +131,40 @@ function parseDocument(value: unknown): EditorJsDocument | undefined {
   return value && typeof value === "object" ? (value as EditorJsDocument) : undefined;
 }
 
+function failAgents(res: import("express").Response, err: unknown): boolean {
+  if (!(err instanceof AgentsError)) {
+    return false;
+  }
+  fail(res, err.code, err.status);
+  return true;
+}
+
 aiRouter.post("/chat", requireAuth, (req, res, next) => {
   void (async () => {
-    if (!aiConfigured()) {
+    if (!agentsAvailable()) {
       fail(res, "AI_NOT_CONFIGURED", 503);
       return;
     }
     const messages = parseMessages(req.body?.messages);
     if (messages.length === 0) {
-      fail(res, "AI_EMPTY_PROMPT");
+      fail(res, "AI_EMPTY", 400);
       return;
     }
-    const result = await runAiChat({
-      messages,
-      attachments: parseAttachments(req.body?.attachments),
-      document: parseDocument(req.body?.document),
-    });
-    ok(res, result);
-  })().catch(next);
-});
-
-aiRouter.post("/to-editor", requireAuth, (req, res, next) => {
-  void (async () => {
-    if (!aiConfigured()) {
-      fail(res, "AI_NOT_CONFIGURED", 503);
-      return;
+    try {
+      const result = await runAiChat(
+        {
+          messages,
+          attachments: parseAttachments(req.body?.attachments),
+          document: parseDocument(req.body?.document),
+        },
+        req.accessToken,
+      );
+      ok(res, result);
+    } catch (err) {
+      if (failAgents(res, err)) {
+        return;
+      }
+      throw err;
     }
-    const messages = parseMessages(req.body?.messages);
-    if (messages.length === 0) {
-      fail(res, "AI_EMPTY_PROMPT");
-      return;
-    }
-    const apply = req.body?.apply === "append" || req.body?.apply === "replace" ? req.body.apply : undefined;
-    const result = await runAiToEditor({
-      messages,
-      attachments: parseAttachments(req.body?.attachments),
-      document: parseDocument(req.body?.document),
-      apply,
-    });
-    ok(res, result);
   })().catch(next);
 });

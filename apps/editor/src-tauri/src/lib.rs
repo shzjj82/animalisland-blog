@@ -1,5 +1,5 @@
 use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{mpsc, Mutex};
 use std::time::Duration;
@@ -7,22 +7,6 @@ use std::time::Duration;
 use tauri::Manager;
 
 struct DesktopServer(Mutex<Option<Child>>);
-
-fn find_env_file(start: &Path) -> Option<PathBuf> {
-    let mut dir = start.to_path_buf();
-    for _ in 0..14 {
-        let candidate = dir.join(".env");
-        if candidate.is_file() {
-            if let Ok(text) = std::fs::read_to_string(&candidate) {
-                if text.contains("AI_API_KEY") {
-                    return Some(candidate);
-                }
-            }
-        }
-        dir = dir.parent()?.to_path_buf();
-    }
-    None
-}
 
 #[cfg(target_os = "windows")]
 const NODE_NAME: &str = "wiki-agent-service.exe";
@@ -63,6 +47,7 @@ fn start_desktop_server(app: &tauri::App) -> Result<u16, String> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
+<<<<<<< HEAD
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
@@ -75,6 +60,8 @@ fn start_desktop_server(app: &tauri::App) -> Result<u16, String> {
             }
         }
     }
+=======
+>>>>>>> 3aaec46 (Update environment configuration and enhance editor functionality)
 
     let mut child = cmd.spawn().map_err(|err| err.to_string())?;
     let stdout = child.stdout.take().ok_or("无法读取本机服务输出")?;

@@ -1,7 +1,7 @@
 import type { EditorJsBlock } from "@myblog/shared";
 import type EditorJS from "@editorjs/editorjs";
 import { useEffect, useRef, useState } from "react";
-import { aiChat, aiStatus, aiToEditor } from "@/lib/ai/client";
+import { aiChat, aiStatus } from "@/lib/ai/client";
 import { insertEditorBlocksAt, saveEditor } from "@/lib/document/insertBlocks";
 import {
   aiErrorMessage,
@@ -16,6 +16,7 @@ import {
 } from "@/lib/ai/chat";
 import { blocksToPreviewMarkdown, markdownToEditorBlocks } from "@/lib/ai/markdown";
 import { t } from "@/i18n";
+import { loadSession } from "@/store/remoteStore";
 
 export type DraftInsert = {
   messageId: string;
@@ -69,15 +70,20 @@ export function useSpotlightChat({ open, editor, insertIndex, onInserted }: Opti
       abortInFlight();
       return;
     }
-    void aiStatus()
-      .then((data) => {
-        setEnabled(data.enabled);
-        setStatusError(data.enabled ? "" : aiErrorMessage("AI_NOT_CONFIGURED"));
-      })
-      .catch((err: unknown) => {
-        setEnabled(false);
-        setStatusError(err instanceof Error ? err.message : t("common.aiServiceUnavailable"));
-      });
+    // 先看本地登录；未登录直接关 AI，不再假装查本地写作代理
+    if (!loadSession()?.token) {
+      setEnabled(false);
+      const msg = aiErrorMessage("UNAUTHORIZED");
+      setStatusError(msg);
+      setError(msg);
+      return () => abortInFlight();
+    }
+    void aiStatus().then((data) => {
+      setEnabled(data.enabled);
+      const msg = data.enabled ? "" : aiErrorMessage(data.reason || "AI_NOT_CONFIGURED");
+      setStatusError(msg);
+      setError(msg);
+    });
     return () => abortInFlight();
   }, [open]);
 
@@ -146,8 +152,9 @@ export function useSpotlightChat({ open, editor, insertIndex, onInserted }: Opti
       quote: quote || undefined,
       attachments: attach.length ? attach : undefined,
     };
+    const assistantId = uid();
     const nextBubbles = [...bubblesRef.current, userBubble];
-    setBubbles(nextBubbles);
+    setBubbles([...nextBubbles, { id: assistantId, role: "assistant", content: "" }]);
     setPrompt("");
     setQuote("");
     setAttachments([]);
@@ -167,17 +174,26 @@ export function useSpotlightChat({ open, editor, insertIndex, onInserted }: Opti
           document: editorDocument,
         },
         signal,
+        {
+          onDelta: (delta) => {
+            setBubbles((prev) =>
+              prev.map((item) =>
+                item.id === assistantId ? { ...item, content: item.content + delta } : item,
+              ),
+            );
+          },
+        },
       );
-      setBubbles((prev) => [
-        ...prev,
-        { id: uid(), role: "assistant", content: result.reply.trim() || t("spotlight.emptyReply") },
-      ]);
+      const finalText = result.reply.trim() || t("spotlight.emptyReply");
+      setBubbles((prev) =>
+        prev.map((item) => (item.id === assistantId ? { ...item, content: finalText } : item)),
+      );
     } catch (err) {
       if (isAbort(err) || signal.aborted) {
         return;
       }
       setError(aiErrorMessage(err instanceof Error ? err.message : t("spotlight.failedToSend")));
-      setBubbles((prev) => prev.filter((item) => item.id !== userBubble.id));
+      setBubbles((prev) => prev.filter((item) => item.id !== userBubble.id && item.id !== assistantId));
       setPrompt(text);
       if (userBubble.quote) {
         setQuote(userBubble.quote);
@@ -238,7 +254,7 @@ export function useSpotlightChat({ open, editor, insertIndex, onInserted }: Opti
       if (signal.aborted) {
         return;
       }
-      const result = await aiToEditor(
+      const result = await aiChat(
         {
           messages: [
             ...toApiMessages(messages),
@@ -248,18 +264,16 @@ export function useSpotlightChat({ open, editor, insertIndex, onInserted }: Opti
             },
           ],
           document: editorDocument,
-          apply: "append",
         },
         signal,
       );
-      const blocks = result.blocks as EditorJsBlock[];
+      const blocks = markdownToEditorBlocks(result.reply) as EditorJsBlock[];
       if (!blocks.length) {
         throw new Error("AI_EMPTY_BLOCKS");
       }
       setDraft({
         messageId: "summary",
         blocks,
-        note: result.note,
         markdown: blocksToPreviewMarkdown(blocks),
       });
     } catch (err) {

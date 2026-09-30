@@ -2,8 +2,6 @@ import {
   encodeSlugParam,
   type AiChatInput,
   type AiChatResult,
-  type AiToEditorInput,
-  type AiToEditorResult,
   type ApiResponse,
   type Category,
   type Post,
@@ -163,15 +161,9 @@ export const api = {
     return request<{ url: string }>("/api/upload", { method: "POST", body });
   },
   aiStatus: () =>
-    request<{ enabled: boolean; model: string | null; base: string | null }>("/api/ai/status"),
+    request<{ enabled: boolean; model: string | null }>("/api/ai/status"),
   aiChat: (input: AiChatInput, init?: { signal?: AbortSignal }) =>
     request<AiChatResult>("/api/ai/chat", {
-      method: "POST",
-      body: JSON.stringify(input),
-      signal: init?.signal,
-    }),
-  aiToEditor: (input: AiToEditorInput, init?: { signal?: AbortSignal }) =>
-    request<AiToEditorResult>("/api/ai/to-editor", {
       method: "POST",
       body: JSON.stringify(input),
       signal: init?.signal,

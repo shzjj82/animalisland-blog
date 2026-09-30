@@ -1,7 +1,11 @@
 import type { EditorJsBlock, EditorJsDocument } from "@myblog/shared";
 import { t } from "@/i18n";
 import { MAX_ATTACHMENT_BYTES } from "@/lib/document/fileKinds";
+<<<<<<< HEAD
 import { GATEWAY_BASE_URL, listRemote, loadRemote, saveRemote, type RemoteSession } from "./remoteStore";
+=======
+import { gatewayUrl, WIKI_APP_CODE, type RemoteSession } from "./remoteStore";
+>>>>>>> 3aaec46 (Update environment configuration and enhance editor functionality)
 
 /** 附件块里保存的数据；文件本体不进文档。远程文件的 fileId 是对象键，url 是公开地址 */
 export type AttachmentData = {
@@ -17,7 +21,7 @@ type StoredFile = { id: string; name: string; mime: string; blob: Blob };
 
 const DB_NAME = "editor-files";
 const STORE = "files";
-const UPLOAD_PREFIX = "editor/attachments";
+const UPLOAD_PREFIX = "wiki/attachments";
 /** 上传服务默认上限（UPLOAD_MAX_BYTES） */
 const MAX_REMOTE_BYTES = 15 * 1024 * 1024;
 /** 这些状态说明上传服务暂时不可用，退回本机保存 */
@@ -101,9 +105,13 @@ async function uploadRemote(session: RemoteSession, file: File): Promise<Uploade
   form.append("prefix", UPLOAD_PREFIX);
   let response: Response;
   try {
-    response = await fetch(`${GATEWAY_BASE_URL}/upload`, {
+    response = await fetch(gatewayUrl("/upload"), {
       method: "POST",
-      headers: { Accept: "application/json", Authorization: `Bearer ${session.token}` },
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${session.token}`,
+        "X-Biz-Code": WIKI_APP_CODE,
+      },
       body: form,
     });
   } catch {

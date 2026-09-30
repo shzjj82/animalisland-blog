@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import http from "node:http";
+import https from "node:https";
 import path from "node:path";
-import { apiFail } from "@myblog/shared";
-import { handleAiRequest } from "./plugin.ts";
+import type { IncomingMessage, ServerResponse } from "node:http";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -23,13 +23,57 @@ const MIME: Record<string, string> = {
   ".map": "application/json; charset=utf-8",
 };
 
-function sendFile(res: http.ServerResponse, file: string): void {
+/** 打包时由 esbuild define 注入；开发桌面进程可走环境变量 */
+declare const __DESKTOP_GATEWAY_BASE__: string | undefined;
+
+const PROXY_ROOTS = ["/auth", "/docs", "/agents", "/upload"] as const;
+
+function resolveGatewayBase(): string {
+  const fromDefine =
+    typeof __DESKTOP_GATEWAY_BASE__ === "string" ? __DESKTOP_GATEWAY_BASE__.trim() : "";
+  const fromEnv = (process.env.GATEWAY_BASE_URL || process.env.NEST_BASE_URL || "").trim();
+  return (fromDefine || fromEnv || "https://api.championsea.online").replace(/\/$/, "");
+}
+
+function shouldProxy(pathname: string): boolean {
+  return PROXY_ROOTS.some((root) => pathname === root || pathname.startsWith(`${root}/`));
+}
+
+function proxyToGateway(req: IncomingMessage, res: ServerResponse, gatewayBase: string): void {
+  const incoming = new URL(req.url ?? "/", "http://127.0.0.1");
+  const target = new URL(`${incoming.pathname}${incoming.search}`, `${gatewayBase}/`);
+  const transport = target.protocol === "https:" ? https : http;
+  const headers: http.OutgoingHttpHeaders = { ...req.headers, host: target.host };
+  delete headers["origin"];
+  delete headers["referer"];
+
+  const upstream = transport.request(
+    target,
+    { method: req.method, headers },
+    (up) => {
+      res.writeHead(up.statusCode ?? 502, up.headers);
+      up.pipe(res);
+    },
+  );
+  upstream.on("error", () => {
+    if (!res.headersSent) {
+      res.statusCode = 502;
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.end(JSON.stringify({ success: false, message: "GATEWAY_UNAVAILABLE" }));
+    } else {
+      res.end();
+    }
+  });
+  req.pipe(upstream);
+}
+
+function sendFile(res: ServerResponse, file: string): void {
   res.statusCode = 200;
   res.setHeader("Content-Type", MIME[path.extname(file)] ?? "application/octet-stream");
   fs.createReadStream(file).pipe(res);
 }
 
-function serveStatic(root: string, req: http.IncomingMessage, res: http.ServerResponse): void {
+function serveStatic(root: string, req: IncomingMessage, res: ServerResponse): void {
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   let pathname = decodeURIComponent(url.pathname);
   if (pathname.endsWith("/")) {
@@ -55,22 +99,17 @@ function serveStatic(root: string, req: http.IncomingMessage, res: http.ServerRe
   res.end("Not found");
 }
 
-/** 本机页面和写作接口。只监听回环地址，密钥留在这个进程里。 */
+/** 本机静态页 + 同源代理 Nest（/auth /docs /agents /upload），避免 WebView CORS。 */
 export function startDesktopServer(distDir: string): Promise<number> {
   const root = path.resolve(distDir);
+  const gatewayBase = resolveGatewayBase();
   const server = http.createServer((req, res) => {
-    void handleAiRequest(req, res)
-      .then((done) => {
-        if (!done) {
-          serveStatic(root, req, res);
-        }
-      })
-      .catch((err: unknown) => {
-        const code = err instanceof Error ? err.message : "AI_FAILED";
-        res.statusCode = 400;
-        res.setHeader("Content-Type", "application/json; charset=utf-8");
-        res.end(JSON.stringify(apiFail(code)));
-      });
+    const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
+    if (shouldProxy(pathname)) {
+      proxyToGateway(req, res, gatewayBase);
+      return;
+    }
+    serveStatic(root, req, res);
   });
   return new Promise((resolve, reject) => {
     server.once("error", reject);

@@ -42,7 +42,9 @@ async function authRequest<T>(
     token?: string;
   },
 ): Promise<T> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = {
+    "X-Biz-Code": env.docsAppCode,
+  };
   if (opts?.token) {
     headers.Authorization = `Bearer ${opts.token}`;
   }

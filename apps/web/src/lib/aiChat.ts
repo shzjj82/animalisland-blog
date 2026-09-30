@@ -54,8 +54,11 @@ export function downloadTextAttachment(file: Extract<LocalAttachment, { kind: "t
 }
 
 export function aiErrorMessage(message: string): string {
-  if (message === "AI_NOT_CONFIGURED") {
-    return "还没配 AI。在仓库根目录 .env 里填 AI_API_KEY。";
+  if (message === "UNAUTHORIZED") {
+    return "请先登录后再用 AI。";
+  }
+  if (message === "AI_NOT_CONFIGURED" || message === "FORBIDDEN") {
+    return "AI 暂不可用（未开通或服务未配置）。";
   }
   if (message === "AI_TIMEOUT") {
     return "AI 超时了，换短一点再说。";
@@ -63,14 +66,14 @@ export function aiErrorMessage(message: string): string {
   if (message === "AI_EMPTY_BLOCKS" || message === "AI_BAD_JSON") {
     return "没能整理成可用正文，换个说法或稍后再试。";
   }
-  if (message === "AI_EMPTY_REPLY") {
+  if (message === "AI_EMPTY_REPLY" || message === "AI_EMPTY") {
     return "模型没有回复，稍后再试。";
   }
   if (message === "AI_EMPTY_PROMPT") {
     return "先写点问题再发送。";
   }
   if (message.startsWith("AI_UPSTREAM_")) {
-    return "上游 AI 接口报错，检查密钥与模型配置。";
+    return "上游 AI 接口报错，稍后再试。";
   }
   return message;
 }

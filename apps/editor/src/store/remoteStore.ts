@@ -15,12 +15,39 @@ export type RemoteSession = {
   username: string;
 };
 
-export const GATEWAY_BASE_URL = "https://api.championsea.online";
+/**
+ * 浏览器侧网关基址：默认空串＝同源（由 Vite / 桌面服务代理到 Nest，避免 CORS）。
+ * 仅当显式设置 VITE_GATEWAY_PUBLIC_BASE 时才直连。
+ */
+export const GATEWAY_BASE_URL = (
+  (import.meta.env.VITE_GATEWAY_BASE_URL as string | undefined) || ""
+).replace(/\/$/, "");
 
-/** 文档隔离码。必须和博客的 blog 分开，两边的页面不能互相读写。 */
-const EDITOR_APP_CODE = "editor";
+/**
+ * Editor（Web / 桌面）统一业务码：登录、文档、智能体都用 wiki。
+ * 与博客的 blog 隔离，两边页面不能互相读写。
+ * Nest 要求请求头 X-Biz-Code（仅 body/query 的 appCode 不够）。
+ */
+export const WIKI_APP_CODE = "wiki";
 
 const SESSION_KEY = "editor:remote-session";
+
+function wikiHeaders(extra?: Record<string, string>): Record<string, string> {
+  return {
+    Accept: "application/json",
+    "X-Biz-Code": WIKI_APP_CODE,
+    ...extra,
+  };
+}
+
+/** 拼网关路径；基址为空时走当前源（/auth、/docs…） */
+export function gatewayUrl(path: string): string {
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  if (!GATEWAY_BASE_URL) {
+    return normalized;
+  }
+  return `${GATEWAY_BASE_URL}${normalized}`;
+}
 
 export function loadSession(): RemoteSession | null {
   try {
@@ -47,18 +74,17 @@ function saveSession(session: RemoteSession): void {
 }
 
 async function request<T>(session: RemoteSession, method: string, path: string, body?: unknown): Promise<T> {
-  const url = new URL(path.replace(/^\//, ""), session.baseUrl.endsWith("/") ? session.baseUrl : `${session.baseUrl}/`);
+  const url = new URL(gatewayUrl(path), typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1");
   if (!url.searchParams.has("appCode")) {
-    url.searchParams.set("appCode", EDITOR_APP_CODE);
+    url.searchParams.set("appCode", WIKI_APP_CODE);
   }
   const response = await fetch(url, {
     method,
-    headers: {
-      Accept: "application/json",
+    headers: wikiHeaders({
       "Content-Type": "application/json",
       Authorization: `Bearer ${session.token}`,
-    },
-    body: body === undefined ? undefined : JSON.stringify({ ...(body as object), appCode: EDITOR_APP_CODE }),
+    }),
+    body: body === undefined ? undefined : JSON.stringify({ ...(body as object), appCode: WIKI_APP_CODE }),
   });
   const json = (await response.json().catch(() => null)) as Envelope<T> | null;
   if (!json?.success) {
@@ -72,10 +98,10 @@ async function authRemote(
   body: { username: string; password: string; nickname?: string },
   fallback: string,
 ): Promise<RemoteSession> {
-  const response = await fetch(`${GATEWAY_BASE_URL}${path}`, {
+  const response = await fetch(gatewayUrl(path), {
     method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ ...body, appCode: "web" }),
+    headers: wikiHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ ...body, appCode: WIKI_APP_CODE }),
   });
   const json = (await response.json().catch(() => null)) as Envelope<{
     token?: string;
@@ -104,14 +130,13 @@ export function registerRemote(username: string, password: string, nickname?: st
 
 /** 需要用户中心提供 POST /auth/change-password，body 为 { oldPassword, newPassword } */
 export async function changePasswordRemote(session: RemoteSession, oldPassword: string, newPassword: string): Promise<void> {
-  const response = await fetch(`${GATEWAY_BASE_URL}/auth/change-password`, {
+  const response = await fetch(gatewayUrl("/auth/change-password"), {
     method: "POST",
-    headers: {
-      Accept: "application/json",
+    headers: wikiHeaders({
       "Content-Type": "application/json",
       Authorization: `Bearer ${session.token}`,
-    },
-    body: JSON.stringify({ oldPassword, newPassword, appCode: "web" }),
+    }),
+    body: JSON.stringify({ oldPassword, newPassword, appCode: WIKI_APP_CODE }),
   });
   const json = (await response.json().catch(() => null)) as Envelope<unknown> | null;
   if (!json?.success) {
@@ -126,7 +151,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 function toNode(raw: unknown): PageNode | null {
   const row = asRecord(raw);
   const code = row.appCode ?? row.app_code;
-  if (typeof code === "string" && code !== EDITOR_APP_CODE) {
+  if (typeof code === "string" && code !== WIKI_APP_CODE) {
     return null;
   }
   const id = typeof row.id === "string" ? row.id : "";

@@ -97,10 +97,10 @@ docker buildx build --platform linux/amd64 --build-arg INTERNAL_API_URL=http://a
 |------|------|
 | `API_PORT` / `WEB_PORT` | 宿主机端口：Express / Next（勿再用笼统 `PORT`） |
 | `GATEWAY_BASE_URL` | Nest 单一网关（配了即走 Nest；别名 `NEST_BASE_URL`） |
-| `GATEWAY_SERVICE_KEY` | Nest `x-docs-key`（别名 `DOCS_SERVICE_KEY`） |
+| `GATEWAY_SERVICE_KEY` | Nest `x-docs-key`（别名 `DOCS_SERVICE_KEY`）；仅文档，智能体勿用 |
 | `SITE_URL` | 对外地址，sitemap / OG 用；以 `https://` 开头时登录 cookie 带 `Secure` |
 | `OSS_*` | 可选；未配或失败则落到本地 `/uploads` |
-| `AI_API_*` | 可选；OpenAI 兼容 Chat Completions |
+| （AI） | 走 Nest `POST /agents/chat`（用户 JWT + `X-Biz-Code`）；勿配 `AI_API_*`；业务后台需开通 |
 
 登录走 **Nest usercenter**（`POST /auth/login`），写作台 cookie 存 Nest access / refresh token；写 docs 时透传用户 JWT。种子账号见 nestjs 仓库 README（默认 `admin` / `admin123`）。
 

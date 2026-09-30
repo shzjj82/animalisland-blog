@@ -70,7 +70,12 @@ export function useSpotlightChat({ open, editor, insertIndex, onInserted }: Opti
     void api
       .aiStatus()
       .then((data) => setEnabled(data.enabled))
-      .catch(() => setEnabled(false));
+      .catch((err: unknown) => {
+        setEnabled(false);
+        if (err instanceof Error && err.message === "UNAUTHORIZED") {
+          setError(aiErrorMessage("UNAUTHORIZED"));
+        }
+      });
     return () => abortInFlight();
   }, [open]);
 
@@ -231,29 +236,27 @@ export function useSpotlightChat({ open, editor, insertIndex, onInserted }: Opti
       if (signal.aborted) {
         return;
       }
-      const result = await api.aiToEditor(
+      const result = await api.aiChat(
         {
           messages: [
             ...toApiMessages(messages),
             {
               role: "user",
               content:
-                "请把上面选中的多段聊天整理总结成可插入正文的 Editor.js blocks。综合这些内容，去掉寒暄和重复，只保留适合放进文章的部分。",
+                "请把上面选中的多段聊天整理总结成可插入正文的 Markdown。综合这些内容，去掉寒暄和重复，只保留适合放进文章的部分。不要输出 Editor.js JSON。",
             },
           ],
           document: editorDocument,
-          apply: "append",
         },
         { signal },
       );
-      const blocks = result.blocks as EditorJsBlock[];
+      const blocks = markdownToEditorBlocks(result.reply) as EditorJsBlock[];
       if (!blocks.length) {
         throw new Error("AI_EMPTY_BLOCKS");
       }
       setDraft({
         messageId: "summary",
         blocks,
-        note: result.note,
         markdown: blocksToPreviewMarkdown(blocks),
       });
     } catch (err) {
