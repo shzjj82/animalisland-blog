@@ -1,7 +1,7 @@
 import type { EditorJsBlock, EditorJsDocument } from "@myblog/shared";
 import { t } from "@/i18n";
 import { MAX_ATTACHMENT_BYTES } from "@/lib/document/fileKinds";
-import { gatewayUrl, listRemote, loadRemote, saveRemote, WIKI_APP_CODE, type RemoteSession } from "./remoteStore";
+import { gatewayUrl, listRemote, loadRemote, prepareSession, saveRemote, WIKI_APP_CODE, type RemoteSession } from "./remoteStore";
 
 /** 附件块里保存的数据；文件本体不进文档。远程文件的 fileId 是对象键，url 是公开地址 */
 export type AttachmentData = {
@@ -96,6 +96,10 @@ type Uploaded = { key: string; url: string; size: number; contentType: string };
 
 /** POST /upload；返回 null 表示上传服务暂不可用 */
 async function uploadRemote(session: RemoteSession, file: File): Promise<Uploaded | null> {
+  const ready = await prepareSession(session);
+  if (!ready?.token) {
+    return null;
+  }
   const form = new FormData();
   form.append("file", file);
   form.append("prefix", UPLOAD_PREFIX);
@@ -105,7 +109,7 @@ async function uploadRemote(session: RemoteSession, file: File): Promise<Uploade
       method: "POST",
       headers: {
         Accept: "application/json",
-        Authorization: `Bearer ${session.token}`,
+        Authorization: `Bearer ${ready.token}`,
         "X-Biz-Code": WIKI_APP_CODE,
       },
       body: form,

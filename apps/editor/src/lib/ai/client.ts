@@ -1,5 +1,5 @@
 import type { AiAttachment, AiChatMessage, AiChatResult, EditorJsDocument } from "@myblog/shared";
-import { gatewayUrl, loadSession, WIKI_APP_CODE } from "@/store/remoteStore";
+import { gatewayUrl, loadSession, prepareSession, WIKI_APP_CODE } from "@/store/remoteStore";
 import { t } from "@/i18n";
 
 /** Editor 智能体业务码：与登录/文档一致，用 wiki（博客用 blog） */
@@ -19,12 +19,16 @@ export type AiStatusResult = {
   reason?: string;
 };
 
-function requireToken(): string {
+async function requireToken(): Promise<string> {
   const session = loadSession();
-  if (!session?.token) {
+  if (!session) {
     throw new Error("UNAUTHORIZED");
   }
-  return session.token;
+  const ready = await prepareSession(session);
+  if (!ready?.token) {
+    throw new Error("UNAUTHORIZED");
+  }
+  return ready.token;
 }
 
 function agentsHeaders(token: string, accept: string): HeadersInit {
@@ -101,7 +105,11 @@ function throwFromEnvelope(status: number, json: Envelope<unknown> | null): neve
  */
 export async function aiStatus(): Promise<AiStatusResult> {
   const session = loadSession();
-  if (!session?.token) {
+  if (!session?.token && !session?.refreshToken) {
+    return { enabled: false, reason: "UNAUTHORIZED" };
+  }
+  const ready = session ? await prepareSession(session) : null;
+  if (!ready?.token) {
     return { enabled: false, reason: "UNAUTHORIZED" };
   }
 
@@ -109,7 +117,7 @@ export async function aiStatus(): Promise<AiStatusResult> {
   try {
     response = await fetch(gatewayUrl("/agents/chat/status"), {
       method: "GET",
-      headers: agentsHeaders(session.token, "application/json"),
+      headers: agentsHeaders(ready.token, "application/json"),
     });
   } catch {
     return { enabled: false, reason: "GATEWAY_UNAVAILABLE" };
@@ -156,7 +164,7 @@ export async function aiChat(
   signal?: AbortSignal,
   handlers?: AiChatStreamHandlers,
 ): Promise<AiChatResult> {
-  const token = requireToken();
+  const token = await requireToken();
   const messages = withDocumentContext(input.messages, input.document);
 
   let response: Response;

@@ -96,6 +96,12 @@ function serveStatic(root: string, req: IncomingMessage, res: ServerResponse): v
   res.end("Not found");
 }
 
+/**
+ * 固定端口，保证 WebView 源一直是 http://127.0.0.1:47321。
+ * 端口一变，localStorage（登录态、本地页）就对不上。被占用时才退回随机端口。
+ */
+const DESKTOP_PORT = Number(process.env.EDITOR_PORT || 47321);
+
 /** 本机静态页 + 同源代理 Nest（/auth /docs /agents /upload），避免 WebView CORS。 */
 export function startDesktopServer(distDir: string): Promise<number> {
   const root = path.resolve(distDir);
@@ -108,15 +114,28 @@ export function startDesktopServer(distDir: string): Promise<number> {
     }
     serveStatic(root, req, res);
   });
-  return new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        reject(new Error("DESKTOP_PORT"));
-        return;
-      }
-      resolve(address.port);
+
+  const listen = (port: number): Promise<number> =>
+    new Promise((resolve, reject) => {
+      const onError = (err: NodeJS.ErrnoException) => {
+        server.off("error", onError);
+        if (err.code === "EADDRINUSE" && port !== 0) {
+          resolve(listen(0));
+          return;
+        }
+        reject(err);
+      };
+      server.once("error", onError);
+      server.listen(port, "127.0.0.1", () => {
+        server.off("error", onError);
+        const address = server.address();
+        if (!address || typeof address === "string") {
+          reject(new Error("DESKTOP_PORT"));
+          return;
+        }
+        resolve(address.port);
+      });
     });
-  });
+
+  return listen(Number.isFinite(DESKTOP_PORT) && DESKTOP_PORT > 0 ? DESKTOP_PORT : 47321);
 }

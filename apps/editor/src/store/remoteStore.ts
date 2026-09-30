@@ -13,6 +13,9 @@ export type RemoteSession = {
   baseUrl: string;
   token: string;
   username: string;
+  refreshToken?: string;
+  /** access token 到期时间（毫秒时间戳） */
+  expiresAt?: number;
 };
 
 /**
@@ -31,6 +34,21 @@ export const GATEWAY_BASE_URL = (
 export const WIKI_APP_CODE = "wiki";
 
 const SESSION_KEY = "editor:remote-session";
+const EXPIRY_SKEW_MS = 60_000;
+
+type SessionListener = (session: RemoteSession | null) => void;
+const sessionListeners = new Set<SessionListener>();
+
+export function subscribeSession(listener: SessionListener): () => void {
+  sessionListeners.add(listener);
+  return () => sessionListeners.delete(listener);
+}
+
+function emitSession(session: RemoteSession | null): void {
+  for (const listener of sessionListeners) {
+    listener(session);
+  }
+}
 
 function wikiHeaders(extra?: Record<string, string>): Record<string, string> {
   return {
@@ -49,15 +67,19 @@ export function gatewayUrl(path: string): string {
   return `${GATEWAY_BASE_URL}${normalized}`;
 }
 
-export function loadSession(): RemoteSession | null {
+function readRawSession(): RemoteSession | null {
   try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
+    const raw = localStorage.getItem(SESSION_KEY) ?? sessionStorage.getItem(SESSION_KEY);
     if (!raw) {
       return null;
     }
     const parsed = JSON.parse(raw) as RemoteSession;
-    if (!parsed.token) {
+    if (!parsed.token && !parsed.refreshToken) {
       return null;
+    }
+    if (!localStorage.getItem(SESSION_KEY)) {
+      localStorage.setItem(SESSION_KEY, raw);
+      sessionStorage.removeItem(SESSION_KEY);
     }
     return { ...parsed, baseUrl: GATEWAY_BASE_URL };
   } catch {
@@ -65,15 +87,120 @@ export function loadSession(): RemoteSession | null {
   }
 }
 
+export function loadSession(): RemoteSession | null {
+  return readRawSession();
+}
+
 export function clearSession(): void {
+  localStorage.removeItem(SESSION_KEY);
   sessionStorage.removeItem(SESSION_KEY);
+  emitSession(null);
 }
 
 function saveSession(session: RemoteSession): void {
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  const stored: RemoteSession = {
+    baseUrl: GATEWAY_BASE_URL,
+    token: session.token,
+    username: session.username,
+    refreshToken: session.refreshToken,
+    expiresAt: session.expiresAt,
+  };
+  localStorage.setItem(SESSION_KEY, JSON.stringify(stored));
+  sessionStorage.removeItem(SESSION_KEY);
 }
 
-async function request<T>(session: RemoteSession, method: string, path: string, body?: unknown): Promise<T> {
+function accessStillValid(session: RemoteSession): boolean {
+  if (!session.token) {
+    return false;
+  }
+  if (!session.expiresAt) {
+    return true;
+  }
+  return session.expiresAt - EXPIRY_SKEW_MS > Date.now();
+}
+
+type AuthPayload = {
+  token?: string;
+  refreshToken?: string;
+  expiresIn?: number;
+  user?: { username?: string };
+};
+
+function sessionFromAuth(data: AuthPayload, fallbackUsername: string): RemoteSession {
+  const token = data.token?.trim() ?? "";
+  if (!token) {
+    throw new Error(t("common.loginFailed"));
+  }
+  const expiresIn = Number(data.expiresIn);
+  return {
+    baseUrl: GATEWAY_BASE_URL,
+    token,
+    username: data.user?.username || fallbackUsername,
+    refreshToken: data.refreshToken?.trim() || undefined,
+    expiresAt: Number.isFinite(expiresIn) && expiresIn > 0 ? Date.now() + expiresIn * 1000 : undefined,
+  };
+}
+
+let refreshInflight: Promise<RemoteSession | null> | null = null;
+
+/** 用 refresh_token 换新的 access token；失败则清掉登录态 */
+export function refreshSession(): Promise<RemoteSession | null> {
+  if (refreshInflight) {
+    return refreshInflight;
+  }
+  refreshInflight = (async () => {
+    const current = readRawSession();
+    if (!current?.refreshToken) {
+      return current?.token ? current : null;
+    }
+    const response = await fetch(gatewayUrl("/auth/refresh"), {
+      method: "POST",
+      headers: wikiHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ refreshToken: current.refreshToken, appCode: WIKI_APP_CODE }),
+    });
+    const json = (await response.json().catch(() => null)) as Envelope<AuthPayload> | null;
+    if (!response.ok || !json?.success || !json.data?.token) {
+      clearSession();
+      return null;
+    }
+    const next = sessionFromAuth(json.data, current.username);
+    if (!next.refreshToken) {
+      next.refreshToken = current.refreshToken;
+    }
+    saveSession(next);
+    return next;
+  })().finally(() => {
+    refreshInflight = null;
+  });
+  return refreshInflight;
+}
+
+/** 保证 session 上的 access token 还有效；过期则用 refresh_token 轮换并写回同一对象 */
+export async function prepareSession(session: RemoteSession): Promise<RemoteSession | null> {
+  if (accessStillValid(session)) {
+    return session;
+  }
+  const next = await refreshSession();
+  if (!next) {
+    return null;
+  }
+  session.token = next.token;
+  session.refreshToken = next.refreshToken;
+  session.expiresAt = next.expiresAt;
+  return session;
+}
+
+async function request<T>(
+  session: RemoteSession,
+  method: string,
+  path: string,
+  body?: unknown,
+  retried = false,
+): Promise<T> {
+  const ready = await prepareSession(session);
+  if (!ready?.token) {
+    throw new Error("UNAUTHORIZED");
+  }
   const url = new URL(gatewayUrl(path), typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1");
   if (!url.searchParams.has("appCode")) {
     url.searchParams.set("appCode", WIKI_APP_CODE);
@@ -82,10 +209,20 @@ async function request<T>(session: RemoteSession, method: string, path: string, 
     method,
     headers: wikiHeaders({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${session.token}`,
+      Authorization: `Bearer ${ready.token}`,
     }),
     body: body === undefined ? undefined : JSON.stringify({ ...(body as object), appCode: WIKI_APP_CODE }),
   });
+  if (response.status === 401 && !retried && ready.refreshToken) {
+    ready.expiresAt = 0;
+    const next = await refreshSession();
+    if (next) {
+      ready.token = next.token;
+      ready.refreshToken = next.refreshToken;
+      ready.expiresAt = next.expiresAt;
+      return request(ready, method, path, body, true);
+    }
+  }
   const json = (await response.json().catch(() => null)) as Envelope<T> | null;
   if (!json?.success) {
     throw new Error(json?.message || t("common.requestFailed", { status: response.status }));
@@ -103,21 +240,38 @@ async function authRemote(
     headers: wikiHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ ...body, appCode: WIKI_APP_CODE }),
   });
-  const json = (await response.json().catch(() => null)) as Envelope<{
-    token?: string;
-    user?: { username?: string };
-  }> | null;
-  const token = json?.data?.token;
-  if (!json?.success || !token) {
+  const json = (await response.json().catch(() => null)) as Envelope<AuthPayload> | null;
+  if (!json?.success || !json.data?.token) {
     throw new Error(json?.message || fallback);
   }
-  const session: RemoteSession = {
-    baseUrl: GATEWAY_BASE_URL,
-    token,
-    username: json.data?.user?.username || body.username,
-  };
+  const session = sessionFromAuth(json.data, body.username);
   saveSession(session);
   return session;
+}
+
+/** 退出时通知网关作废 refresh_token，本地登录态总会清掉 */
+export async function logoutRemote(session: RemoteSession | null): Promise<void> {
+  const refreshToken = session?.refreshToken;
+  const token = session?.token;
+  clearSession();
+  if (!refreshToken && !token) {
+    return;
+  }
+  try {
+    await fetch(gatewayUrl("/auth/logout"), {
+      method: "POST",
+      headers: wikiHeaders({
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      }),
+      body: JSON.stringify({
+        ...(refreshToken ? { refreshToken } : {}),
+        appCode: WIKI_APP_CODE,
+      }),
+    });
+  } catch {
+    // 本地已退出
+  }
 }
 
 export function loginRemote(username: string, password: string): Promise<RemoteSession> {
@@ -130,11 +284,15 @@ export function registerRemote(username: string, password: string, nickname?: st
 
 /** 需要用户中心提供 POST /auth/change-password，body 为 { oldPassword, newPassword } */
 export async function changePasswordRemote(session: RemoteSession, oldPassword: string, newPassword: string): Promise<void> {
+  const ready = await prepareSession(session);
+  if (!ready?.token) {
+    throw new Error("UNAUTHORIZED");
+  }
   const response = await fetch(gatewayUrl("/auth/change-password"), {
     method: "POST",
     headers: wikiHeaders({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${session.token}`,
+      Authorization: `Bearer ${ready.token}`,
     }),
     body: JSON.stringify({ oldPassword, newPassword, appCode: WIKI_APP_CODE }),
   });

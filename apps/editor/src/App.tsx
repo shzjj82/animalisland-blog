@@ -45,16 +45,17 @@ import {
 } from "@/store/localSync";
 import {
   changePasswordRemote,
-  clearSession,
   createRemote,
   listRemote,
   loadRemote,
   loadSession,
   loginRemote,
+  logoutRemote,
   registerRemote,
   removeRemote,
   reparentRemote,
   saveRemote,
+  subscribeSession,
   type RemoteSession,
 } from "@/store/remoteStore";
 import { readSyncSettings, writeSyncSettings, type SyncSettings } from "@/store/syncSettings";
@@ -136,6 +137,8 @@ export function App() {
   const sessionRef = useRef<RemoteSession | null>(session);
   sessionRef.current = session;
   const remote = session !== null;
+
+  useEffect(() => subscribeSession(setSession), []);
 
   const refreshLocal = useCallback((selectId?: string | null) => {
     const list = listLocal();
@@ -335,7 +338,7 @@ export function App() {
   }
 
   function logout() {
-    clearSession();
+    void logoutRemote(session);
     setSession(null);
     setAuthOpen(false);
     resetAuthFields();
