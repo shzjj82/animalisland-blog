@@ -23,16 +23,13 @@ const MIME: Record<string, string> = {
   ".map": "application/json; charset=utf-8",
 };
 
-/** 打包时由 esbuild define 注入；开发桌面进程可走环境变量 */
-declare const __DESKTOP_GATEWAY_BASE__: string | undefined;
-
+/** 打包时由 esbuild define 写入 process.env.DESKTOP_GATEWAY_BASE */
 const PROXY_ROOTS = ["/auth", "/docs", "/agents", "/upload"] as const;
 
 function resolveGatewayBase(): string {
-  const fromDefine =
-    typeof __DESKTOP_GATEWAY_BASE__ === "string" ? __DESKTOP_GATEWAY_BASE__.trim() : "";
+  const fromBake = (process.env.DESKTOP_GATEWAY_BASE || "").trim();
   const fromEnv = (process.env.GATEWAY_BASE_URL || process.env.NEST_BASE_URL || "").trim();
-  return (fromDefine || fromEnv || "https://api.championsea.online").replace(/\/$/, "");
+  return (fromBake || fromEnv || "https://api.championsea.online").replace(/\/$/, "");
 }
 
 function shouldProxy(pathname: string): boolean {

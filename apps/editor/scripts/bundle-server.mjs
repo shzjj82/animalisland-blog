@@ -7,7 +7,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = path.resolve(root, "../..");
 const outfile = path.join(root, "src-tauri/resources/desktop-server.mjs");
 
-function readGatewayFromEnvFile(file: string): string {
+function readGatewayFromEnvFile(file) {
   try {
     const text = fs.readFileSync(file, "utf8");
     for (const line of text.split("\n")) {
@@ -53,7 +53,7 @@ await build({
   outfile,
   logLevel: "info",
   define: {
-    __DESKTOP_GATEWAY_BASE__: JSON.stringify(gatewayBase),
+    "process.env.DESKTOP_GATEWAY_BASE": JSON.stringify(gatewayBase),
   },
 });
 
