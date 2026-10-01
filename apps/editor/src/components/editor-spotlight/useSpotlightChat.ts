@@ -208,14 +208,39 @@ export function useSpotlightChat({ open, editor, insertIndex, onInserted }: Opti
     }
   };
 
-  const insertDirect = async (message: ChatBubble) => {
+  const tidyAndInsert = async (message: ChatBubble) => {
     if (!editor || insertingId) {
       return;
     }
+    if (!enabled) {
+      setError(statusError || aiErrorMessage("AI_NOT_CONFIGURED"));
+      return;
+    }
+    const source = message.content.trim();
+    if (!source) {
+      setError(t("spotlight.nothingToInsert"));
+      return;
+    }
+
     setInsertingId(message.id);
     setError("");
+    const signal = nextSignal();
     try {
-      const blocks = markdownToEditorBlocks(message.content);
+      const editorDocument = await saveEditor(editor);
+      if (signal.aborted) {
+        return;
+      }
+      const result = await aiChat(
+        {
+          messages: [
+            ...toApiMessages([message]),
+            { role: "user", content: t("spotlight.tidyPrompt") },
+          ],
+          document: editorDocument,
+        },
+        signal,
+      );
+      const blocks = markdownToEditorBlocks(result.reply.trim());
       if (!blocks.length) {
         throw new Error(t("spotlight.nothingToInsert"));
       }
@@ -231,9 +256,14 @@ export function useSpotlightChat({ open, editor, insertIndex, onInserted }: Opti
         });
       }
     } catch (err) {
-      setError(aiErrorMessage(err instanceof Error ? err.message : t("spotlight.failedToInsert")));
+      if (isAbort(err) || signal.aborted) {
+        return;
+      }
+      setError(aiErrorMessage(err instanceof Error ? err.message : t("spotlight.failedToCombine")));
     } finally {
-      setInsertingId(null);
+      if (!signal.aborted) {
+        setInsertingId(null);
+      }
     }
   };
 
@@ -337,7 +367,7 @@ export function useSpotlightChat({ open, editor, insertIndex, onInserted }: Opti
     resetChat,
     addFiles,
     send,
-    insertDirect,
+    tidyAndInsert,
     summarize,
     confirmDraft,
     canSend,

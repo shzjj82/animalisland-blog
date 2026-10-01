@@ -1,6 +1,6 @@
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useEffect, useState } from "react";
-import { Check, Close, Paperclip, Plus } from "@icon-park/react";
+import { Check, Close, Paperclip } from "@icon-park/react";
 import { BubbleAttachments, PendingAttachments } from "./ChatAttachments";
 import type { DraftInsert } from "./useSpotlightChat";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,7 @@ type Props = {
   canSend: boolean;
   onAddFiles: (files: File[]) => void;
   onSend: () => void;
-  onInsertDirect: (message: ChatBubble) => void;
+  onTidyInsert: (message: ChatBubble) => void;
   onSummarize: (messages: ChatBubble[]) => void;
   onConfirmDraft: () => void;
   onPickingChange?: (picking: boolean) => void;
@@ -52,7 +52,7 @@ export function SpotlightChatPane({
   canSend,
   onAddFiles,
   onSend,
-  onInsertDirect,
+  onTidyInsert,
   onSummarize,
   onConfirmDraft,
   onPickingChange,
@@ -143,10 +143,9 @@ export function SpotlightChatPane({
                       size="sm"
                       variant="outline"
                       disabled={Boolean(insertingId) || sending}
-                      onClick={() => void onInsertDirect(item)}
+                      onClick={() => void onTidyInsert(item)}
                     >
-                      <Plus {...iconParkOutline} size={14} />
-                      {insertingId === item.id ? t("spotlight.inserting") : t("spotlight.addToPage")}
+                      {insertingId === item.id ? t("spotlight.combining") : t("spotlight.addToPage")}
                     </Button>
                   </div>
                 ) : null}

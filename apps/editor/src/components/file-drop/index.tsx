@@ -28,7 +28,7 @@ export function FileDropZone({ hasPage, className, children, onDrop }: Props) {
 
   return (
     <div
-      className={cn("relative", className)}
+      className={cn("relative flex min-h-0 flex-1 flex-col", className)}
       onDragEnterCapture={(event) => {
         if (!carriesFiles(event)) {
           return;
@@ -66,7 +66,7 @@ export function FileDropZone({ hasPage, className, children, onDrop }: Props) {
         }
       }}
     >
-      {children}
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain">{children}</div>
       {active ? (
         <div className="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-xl border-2 border-dashed border-foreground/30 bg-background/85">
           <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">

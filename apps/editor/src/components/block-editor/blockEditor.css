@@ -1,3 +1,24 @@
+/* 工具栏的 will-change 会在滚动容器里把加号钉在错误的合成层上 */
+.notion-editor .ce-toolbar {
+  will-change: auto;
+}
+
+.notion-editor .ce-toolbar__actions {
+  align-items: center;
+}
+
+.notion-editor .ce-toolbar__plus,
+.notion-editor .ce-toolbar__settings-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notion-editor .ce-toolbar__plus svg,
+.notion-editor .ce-toolbar__settings-btn svg {
+  display: block;
+}
+
 /* —— + 与 / 块菜单 —— */
 .notion-editor .ce-popover__container {
   --width: 268px;

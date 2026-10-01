@@ -1020,7 +1020,7 @@ export function App() {
         </header>
         <FileDropZone
           hasPage={Boolean(page)}
-          className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain"
+          className="min-h-0 flex-1"
           onDrop={(files, point) => void dropFiles(files, point)}
         >
           {page ? (

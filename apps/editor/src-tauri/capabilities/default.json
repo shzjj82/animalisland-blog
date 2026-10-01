@@ -3,7 +3,12 @@
   "identifier": "default",
   "description": "编辑器主窗口",
   "windows": ["main"],
-  "permissions": ["core:default"],
+  "permissions": [
+    "core:default",
+    "allow-pick-save-path",
+    "allow-write-export-file",
+    "allow-export-pdf"
+  ],
   "remote": {
     "urls": ["http://127.0.0.1:*", "http://localhost:*"]
   }

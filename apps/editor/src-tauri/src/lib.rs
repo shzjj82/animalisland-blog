@@ -4,6 +4,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{mpsc, Mutex};
 use std::time::Duration;
 
+mod export_cmd;
+
 use tauri::Manager;
 
 struct DesktopServer(Mutex<Option<Child>>);
@@ -99,6 +101,11 @@ pub fn run() {
         }
     });
     builder
+        .invoke_handler(tauri::generate_handler![
+            export_cmd::pick_save_path,
+            export_cmd::write_export_file,
+            export_cmd::export_pdf,
+        ])
         .setup(|app| -> Result<(), Box<dyn std::error::Error>> {
             let Some(window) = app.get_webview_window("main") else {
                 return Ok(());

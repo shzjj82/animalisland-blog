@@ -380,7 +380,7 @@ export function EditorSpotlight({
             canSend={chat.canSend}
             onAddFiles={(files) => void chat.addFiles(files)}
             onSend={() => void chat.send()}
-            onInsertDirect={(message) => void chat.insertDirect(message)}
+            onTidyInsert={(message) => void chat.tidyAndInsert(message)}
             onSummarize={(messages) => void chat.summarize(messages)}
             onConfirmDraft={() => void chat.confirmDraft()}
           />

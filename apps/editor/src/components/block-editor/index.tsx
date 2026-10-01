@@ -17,6 +17,8 @@ import { ImageBlockTool } from "./tools/ImageBlockTool";
 import { VideoBlockTool } from "./tools/VideoBlockTool";
 import type { AttachmentData } from "@/store/fileStore";
 import { htmlToBlocks } from "@/lib/document/htmlToBlocks";
+import { bindEditingGuards } from "./editingGuards";
+import { bindToolbarAnchor } from "./toolbarAnchor";
 import { revealText } from "./revealText";
 import "./blockEditor.css";
 
@@ -169,29 +171,8 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, onReady,
       },
     });
 
-    const onSelectAll = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "a") {
-        return;
-      }
-      if (event.isComposing) {
-        return;
-      }
-      const redactor = holder.querySelector<HTMLElement>(".codex-editor__redactor");
-      if (!redactor || !holder.contains(event.target as Node)) {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      const selection = window.getSelection();
-      if (!selection) {
-        return;
-      }
-      const range = document.createRange();
-      range.selectNodeContents(redactor);
-      selection.removeAllRanges();
-      selection.addRange(range);
-    };
-    holder.addEventListener("keydown", onSelectAll, true);
+    const unbindGuards = bindEditingGuards(holder, editor);
+    const unbindToolbar = bindToolbarAnchor(holder);
 
     const onPaste = (event: ClipboardEvent) => {
       const data = event.clipboardData;
@@ -235,7 +216,8 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, onReady,
 
     return () => {
       alive = false;
-      holder.removeEventListener("keydown", onSelectAll, true);
+      unbindGuards();
+      unbindToolbar();
       holder.removeEventListener("paste", onPaste, true);
       onReadyRef.current?.(null);
       destroy();
@@ -251,5 +233,5 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, onReady,
     return () => window.clearTimeout(timer);
   }, [reveal?.nonce, reveal?.text]);
 
-  return <div className="notion-editor mx-auto max-w-3xl px-6 pt-6 pb-20" ref={holderRef} />;
+  return <div className="notion-editor mx-auto max-w-3xl pt-6 pr-6 pb-20 pl-20" ref={holderRef} />;
 }

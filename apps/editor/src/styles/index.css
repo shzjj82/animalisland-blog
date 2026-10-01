@@ -128,9 +128,32 @@
   color: var(--foreground);
 }
 
+.ce-paragraph,
+.ce-header {
+  position: relative;
+}
+
+.ce-paragraph {
+  min-height: 1.7em;
+}
+
+.ce-header {
+  min-height: 1.2em;
+}
+
 .ce-paragraph[data-placeholder]:empty::before,
-.ce-header[data-placeholder]:empty::before {
+.ce-header[data-placeholder]:empty::before,
+.codex-editor [data-placeholder]:empty::before,
+.codex-editor [data-placeholder][data-empty="true"]::before {
+  position: absolute;
+  left: 0;
+  right: 0;
   color: #b4b4b4;
+  pointer-events: none;
+}
+
+.codex-editor__redactor [contenteditable="true"]:empty::after {
+  content: none;
 }
 
 .cdx-quote {
