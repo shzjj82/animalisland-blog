@@ -125,7 +125,13 @@ function assembleWindowsPortable() {
 
 /** Homebrew 的 llvm / lld 是 keg-only，不进 PATH；交叉编译要用里面的 llvm-rc、lld-link */
 function addHomebrewLlvmToPath() {
-  const dirs = ["/opt/homebrew/opt/llvm/bin", "/opt/homebrew/opt/lld/bin", "/usr/local/opt/llvm/bin", "/usr/local/opt/lld/bin"];
+  const dirs = [
+    "/opt/homebrew/opt/llvm/bin",
+    "/opt/homebrew/opt/lld/bin",
+    "/usr/local/opt/llvm/bin",
+    "/usr/local/opt/lld/bin",
+    path.join(process.env.HOME || "", ".cache/wiki-agent-tools/bin"),
+  ];
   const found = dirs.filter((dir) => fs.existsSync(dir));
   if (found.length > 0) {
     process.env.PATH = [...found, process.env.PATH].join(path.delimiter);
