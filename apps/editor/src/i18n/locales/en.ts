@@ -43,7 +43,7 @@ export const en: Messages = {
     syncFailed: "Sync failed",
     syncedItems: "Synced {{count}} items",
     failedToLoadRemotePages: "Failed to load remote pages",
-    title: "Editor",
+    title: "wiki-agent",
   },
   common: {
     language: "Language",

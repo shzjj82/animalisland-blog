@@ -41,7 +41,7 @@ export const zh = {
     syncFailed: "同步失败",
     syncedItems: "已同步 {{count}} 项",
     failedToLoadRemotePages: "无法读取远程文档",
-    title: "编辑器",
+    title: "wiki-agent",
   },
   common: {
     language: "语言",
