@@ -44,6 +44,7 @@ async function authRequest<T>(
 ): Promise<T> {
   const headers: Record<string, string> = {
     "X-Biz-Code": env.docsAppCode,
+    "X-App-Code": env.authAppCode,
   };
   if (opts?.token) {
     headers.Authorization = `Bearer ${opts.token}`;
@@ -80,7 +81,7 @@ async function authRequest<T>(
 
 export async function ucLogin(username: string, password: string): Promise<UcAuthResult> {
   return authRequest<UcAuthResult>("POST", "/auth/login", {
-    body: { username, password, appCode: env.authAppCode },
+    body: { username, password },
   });
 }
 
@@ -94,7 +95,6 @@ export async function ucRegister(input: {
       username: input.username,
       password: input.password,
       nickname: input.nickname,
-      appCode: env.authAppCode,
     },
   });
 }

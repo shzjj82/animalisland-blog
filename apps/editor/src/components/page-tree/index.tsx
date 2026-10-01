@@ -22,6 +22,7 @@ type Props = {
   onDelete: (id: string) => void;
   onReparent: (id: string, parentId: string | null) => void;
   onExport: (id: string, format: ExportFormat) => void;
+  teamNames?: Record<string, string>;
 };
 
 function buildTree(nodes: PageNode[]): TreeNode[] {
@@ -72,7 +73,7 @@ function filterTree(items: TreeNode[], query: string): TreeNode[] {
   return walk(items);
 }
 
-export function PageTree({ nodes, query = "", selectedId, onOpen, onCreateChild, onDelete, onReparent, onExport }: Props) {
+export function PageTree({ nodes, query = "", selectedId, onOpen, onCreateChild, onDelete, onReparent, onExport, teamNames = {} }: Props) {
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -218,15 +219,18 @@ export function PageTree({ nodes, query = "", selectedId, onOpen, onCreateChild,
               title={t("pageTree.dragToMove")}
               className={
                 selectedId === node.id
-                  ? "h-8 min-w-0 flex-1 cursor-grab justify-start bg-sidebar-accent px-2 font-medium active:cursor-grabbing"
-                  : "h-8 min-w-0 flex-1 cursor-grab justify-start px-2 font-medium active:cursor-grabbing"
+                  ? "h-8 min-w-0 flex-1 cursor-grab justify-start! text-left bg-sidebar-accent px-2 font-medium active:cursor-grabbing"
+                  : "h-8 min-w-0 flex-1 cursor-grab justify-start! text-left px-2 font-medium active:cursor-grabbing"
               }
               onClick={() => onOpen(node.id)}
               onDragStart={(event) => beginDrag(event, node.id)}
               onDragEnd={clearDrag}
             >
               <Notes {...iconProps} />
-              <span className="truncate">{pageTitle(node.title)}</span>
+              <span className="min-w-0 flex-1 truncate text-left">{pageTitle(node.title)}</span>
+              {node.teamId && teamNames[node.teamId] ? (
+                <span className="max-w-16 shrink-0 truncate text-[10px] text-muted-foreground">{teamNames[node.teamId]}</span>
+              ) : null}
             </Button>
             {selectedId === node.id ? (
               <Popover open={menuId === node.id} onOpenChange={(open) => setMenuId(open ? node.id : null)}>
@@ -303,7 +307,7 @@ export function PageTree({ nodes, query = "", selectedId, onOpen, onCreateChild,
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-1">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-1">
       {dragging?.parentId ? (
         <div
           className={

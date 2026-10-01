@@ -33,11 +33,6 @@ type Envelope<T> = { success?: boolean; code?: number; message?: string; data?: 
 
 async function request<T>(method: string, pathname: string, body?: unknown): Promise<T> {
   const url = new URL(`${gatewayBaseUrl}${pathname}`);
-  url.searchParams.set("appCode", docsAppCode);
-  const payload =
-    body && typeof body === "object"
-      ? { ...(body as Record<string, unknown>), appCode: docsAppCode }
-      : body;
   const timeoutMs = Number.isFinite(docsTimeoutMs) && docsTimeoutMs > 0 ? docsTimeoutMs : 15_000;
   let res: Response;
   try {
@@ -47,8 +42,10 @@ async function request<T>(method: string, pathname: string, body?: unknown): Pro
         Accept: "application/json",
         "Content-Type": "application/json",
         "x-docs-key": docsServiceKey,
+        "X-Biz-Code": docsAppCode,
+        "X-App-Code": docsAppCode,
       },
-      body: payload === undefined ? undefined : JSON.stringify(payload),
+      body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {

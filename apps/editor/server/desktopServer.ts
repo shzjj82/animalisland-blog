@@ -24,7 +24,7 @@ const MIME: Record<string, string> = {
 };
 
 /** 打包时由 esbuild define 写入 process.env.DESKTOP_GATEWAY_BASE */
-const PROXY_ROOTS = ["/auth", "/docs", "/agents", "/upload"] as const;
+const PROXY_ROOTS = ["/auth", "/docs", "/agents", "/upload", "/teams"] as const;
 
 function resolveGatewayBase(): string {
   const fromBake = (process.env.DESKTOP_GATEWAY_BASE || "").trim();
@@ -102,7 +102,7 @@ function serveStatic(root: string, req: IncomingMessage, res: ServerResponse): v
  */
 const DESKTOP_PORT = Number(process.env.EDITOR_PORT || 47321);
 
-/** 本机静态页 + 同源代理 Nest（/auth /docs /agents /upload），避免 WebView CORS。 */
+/** 本机静态页 + 同源代理 Nest（/auth /docs /agents /upload /teams），避免 WebView CORS。 */
 export function startDesktopServer(distDir: string): Promise<number> {
   const root = path.resolve(distDir);
   const gatewayBase = resolveGatewayBase();

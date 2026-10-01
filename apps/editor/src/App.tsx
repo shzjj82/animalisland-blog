@@ -16,6 +16,7 @@ import { ImportDialog, type ImportChoice } from "@/components/import-dialog";
 import { LanguageSwitch } from "@/components/language-switch";
 import { PageTree } from "@/components/page-tree";
 import { SettingsMenu } from "@/components/settings-menu";
+import { TeamDialog } from "@/components/team-dialog";
 import { SyncChecklistDialog, SyncSummaryDialog } from "@/components/sync-dialogs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -60,6 +61,15 @@ import {
   type RemoteSession,
 } from "@/store/remoteStore";
 import { readSyncSettings, writeSyncSettings, type SyncSettings } from "@/store/syncSettings";
+import {
+  canManageTeam,
+  canWriteTeam,
+  listTeams,
+  readActiveTeamId,
+  writeActiveTeamId,
+  type TeamInfo,
+} from "@/store/teamStore";
+import { TeamManageSidebar } from "@/components/team-manage-sidebar";
 import { pageTitle, setAppLocale, type AppLocale } from "@/i18n";
 import { exportDocument, type ExportFormat } from "@/lib/document/export";
 import { fileKind } from "@/lib/document/fileKinds";
@@ -78,6 +88,24 @@ const iconProps = { theme: "outline" as const, strokeWidth: 3, size: 16 };
 const SIDEBAR_WIDTH_KEY = "editor:sidebar-width";
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 480;
+const TEAM_COLORS = [
+  { fill: "#f6c6c0", line: "#e07a72" },
+  { fill: "#f7d98a", line: "#d7a322" },
+  { fill: "#bfe8d4", line: "#3eae86" },
+  { fill: "#c9d7fb", line: "#6d8eeb" },
+  { fill: "#e4c8f5", line: "#b57ad6" },
+  { fill: "#f6d0e4", line: "#d56aa3" },
+  { fill: "#c8ebe6", line: "#3aafa3" },
+  { fill: "#f3d2b8", line: "#d48955" },
+];
+
+function teamColor(id: string): { fill: string; line: string } {
+  let hash = 0;
+  for (const char of id) {
+    hash = (hash + char.charCodeAt(0)) % TEAM_COLORS.length;
+  }
+  return TEAM_COLORS[hash];
+}
 
 function readSidebarWidth(): number {
   const raw = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
@@ -113,6 +141,12 @@ export function App() {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [syncSettings, setSyncSettings] = useState<SyncSettings>(readSyncSettings);
   const [passwordOpen, setPasswordOpen] = useState(false);
+  const [teams, setTeams] = useState<TeamInfo[]>([]);
+  const [teamsReady, setTeamsReady] = useState(false);
+  const [teamOpen, setTeamOpen] = useState(false);
+  const [teamManageOpen, setTeamManageOpen] = useState(false);
+  const [teamPanel, setTeamPanel] = useState<"create" | "join">("create");
+  const [activeTeamId, setActiveTeamId] = useState<string | null>(readActiveTeamId);
   const [exportOpen, setExportOpen] = useState(false);
   const [reveal, setReveal] = useState<{ text: string; nonce: number } | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -138,6 +172,11 @@ export function App() {
   const saveTimer = useRef(0);
   const pageRef = useRef<EditorPage | null>(null);
   pageRef.current = page;
+  const pageReadOnly = Boolean(
+    teamsReady && page?.teamId && !canWriteTeam(teams.find((team) => team.id === page.teamId)?.role),
+  );
+  const readOnlyRef = useRef(pageReadOnly);
+  readOnlyRef.current = pageReadOnly;
   const sessionRef = useRef<RemoteSession | null>(session);
   sessionRef.current = session;
   const remote = session !== null;
@@ -225,6 +264,8 @@ export function App() {
     setSyncError("");
     setDontAskAgain(false);
     if (!session) {
+      setTeams([]);
+      setTeamsReady(false);
       ensureLocalPages();
       refreshLocal(null);
       return;
@@ -246,6 +287,24 @@ export function App() {
         }
       })
       .catch(() => undefined);
+    void listTeams(session)
+      .then((list) => {
+        if (sessionRef.current !== session) {
+          return;
+        }
+        setTeams(list);
+        setActiveTeamId((current) => {
+          const next = current && list.some((team) => team.id === current) ? current : null;
+          writeActiveTeamId(next);
+          return next;
+        });
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (sessionRef.current === session) {
+          setTeamsReady(true);
+        }
+      });
   }, [session, refreshLocal, refreshRemote]);
 
   useEffect(() => {
@@ -433,7 +492,9 @@ export function App() {
   async function createPage(parentId: string | null) {
     setError("");
     try {
-      const created = session ? await createRemote(session, parentId) : createLocal(parentId);
+      const inherited = parentId ? (nodes.find((node) => node.id === parentId)?.teamId ?? null) : null;
+      const writingTeam = !parentId && activeTeamId && canWriteTeam(teams.find((team) => team.id === activeTeamId)?.role) ? activeTeamId : null;
+      const created = session ? await createRemote(session, parentId, inherited || writingTeam) : createLocal(parentId);
       if (parentId) {
         await appendChildLink(parentId, { pageId: created.id, slug: created.id, title: created.title });
       }
@@ -599,7 +660,7 @@ export function App() {
 
   function onEdit(body: EditorJsDocument) {
     const current = pageRef.current;
-    if (!current) {
+    if (!current || readOnlyRef.current) {
       return;
     }
     const next = { ...current, body, title: titleFromBody(body) };
@@ -914,7 +975,7 @@ export function App() {
           </Button>
         </div>
         <PageTree
-          nodes={nodes}
+          nodes={session && activeTeamId ? nodes.filter((node) => node.teamId === activeTeamId) : nodes}
           query={query}
           selectedId={page?.id}
           onOpen={(id) => void openPage(id)}
@@ -924,7 +985,33 @@ export function App() {
           onExport={(id, format) => void exportPage(id, format)}
         />
         <div className="mt-3 flex items-center justify-between gap-2 border-t border-sidebar-border px-1 pt-3 text-xs text-muted-foreground">
-          {session ? (
+          {session && activeTeamId ? (
+            <div className="group/teams flex min-w-0 flex-1 items-center overflow-x-auto">
+              {[...teams.filter((team) => team.id === activeTeamId), ...teams.filter((team) => team.id !== activeTeamId)].map((team, index) => (
+                <button
+                  key={team.id}
+                  type="button"
+                  title={team.name}
+                  aria-label={team.name}
+                  aria-pressed={activeTeamId === team.id}
+                  className={`relative flex size-8 shrink-0 items-center justify-center rounded-full border-2 text-[11px] font-semibold text-sidebar-foreground transition-[margin,border-color] duration-200 ${
+                    activeTeamId === team.id ? "z-30" : "z-0 border-sidebar hover:border-[var(--team-line)]"
+                  } ${index > 0 ? "-ml-4 group-hover/teams:ml-1" : ""}`}
+                  style={{
+                    background: teamColor(team.id).fill,
+                    ["--team-line" as string]: teamColor(team.id).line,
+                    borderColor: activeTeamId === team.id ? teamColor(team.id).line : undefined,
+                  }}
+                  onClick={() => {
+                    writeActiveTeamId(team.id);
+                    setActiveTeamId(team.id);
+                  }}
+                >
+                  {team.name.slice(0, 1)}
+                </button>
+              ))}
+            </div>
+          ) : session ? (
             <span className="min-w-0 flex-1 truncate px-2">{session.username}</span>
           ) : (
             <Button type="button" variant="ghost" size="sm" className="min-w-0 flex-1 justify-start" onClick={() => setAuthOpen(true)}>
@@ -938,6 +1025,31 @@ export function App() {
               onChange={updateSyncSettings}
               onLogout={logout}
               onChangePassword={() => setPasswordOpen(true)}
+              onCreateTeam={() => {
+                setTeamPanel("create");
+                setTeamOpen(true);
+              }}
+              onJoinTeam={() => {
+                setTeamPanel("join");
+                setTeamOpen(true);
+              }}
+              teamMode={activeTeamId !== null}
+              canSwitchTeam={teams.length > 0}
+              canManageTeam={canManageTeam(teams.find((team) => team.id === activeTeamId)?.role)}
+              onManageTeam={() => setTeamManageOpen(true)}
+              onToggleTeamMode={() => {
+                if (teams.length === 0) {
+                  return;
+                }
+                if (activeTeamId) {
+                  writeActiveTeamId(null);
+                  setActiveTeamId(null);
+                  return;
+                }
+                const next = teams[0];
+                writeActiveTeamId(next.id);
+                setActiveTeamId(next.id);
+              }}
             />
           ) : null}
         </div>
@@ -1008,7 +1120,7 @@ export function App() {
                 ))}
               </PopoverContent>
             </Popover>
-            <Button type="button" variant="outline" size="sm" disabled={!page} onClick={() => page && void removePage(page.id)}>
+            <Button type="button" variant="outline" size="sm" disabled={!page || pageReadOnly} onClick={() => page && void removePage(page.id)}>
               <Delete {...iconProps} />
               {t("common.delete")}
             </Button>
@@ -1025,8 +1137,9 @@ export function App() {
         >
           {page ? (
             <BlockEditor
-              key={`${remote ? "remote" : "local"}:${page.id}:${editorEpoch}:${i18n.language}`}
+              key={`${remote ? "remote" : "local"}:${page.id}:${editorEpoch}:${i18n.language}:${pageReadOnly ? "ro" : "rw"}`}
               doc={page.body}
+              readOnly={pageReadOnly}
               onChange={onEdit}
               onOpenPage={(id) => void openPage(id)}
               onCreateChild={createChildLink}
@@ -1152,6 +1265,52 @@ export function App() {
         onCancel={closeImport}
         onConfirm={(mode) => void applyImport(mode)}
       />
+      {session && teamManageOpen && teams.find((team) => team.id === activeTeamId && canManageTeam(team.role)) ? (
+        <TeamManageSidebar
+          session={session}
+          team={teams.find((team) => team.id === activeTeamId)!}
+          onClose={() => setTeamManageOpen(false)}
+          onChanged={() => {
+            void listTeams(session).then((list) => {
+              if (sessionRef.current === session) setTeams(list);
+            });
+          }}
+        />
+      ) : null}
+      {session ? (
+        <TeamDialog
+          open={teamOpen}
+          session={session}
+          teams={teams}
+          activeTeamId={activeTeamId}
+          pageTeamId={page?.teamId}
+          onActiveTeam={(id) => {
+            writeActiveTeamId(id);
+            setActiveTeamId(id);
+          }}
+          onAssignPage={
+            page
+              ? (teamId) => {
+                  const current = pageRef.current;
+                  if (!current) {
+                    return;
+                  }
+                  void persist({ ...current, teamId });
+                }
+              : undefined
+          }
+          onChange={() =>
+            listTeams(session).then((list) => {
+              setTeams(list);
+              if (session) {
+                void refreshRemote(session, pageRef.current?.id ?? null);
+              }
+            })
+          }
+          onClose={() => setTeamOpen(false)}
+          panel={teamPanel}
+        />
+      ) : null}
       <ChangePasswordDialog
         open={passwordOpen}
         onOpenChange={setPasswordOpen}

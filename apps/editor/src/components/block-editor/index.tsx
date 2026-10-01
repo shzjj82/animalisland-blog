@@ -40,9 +40,10 @@ type Props = {
   onConfirmDeleteFile?: (name: string) => Promise<boolean>;
   /** 打开后定位到这段文字；nonce 变化时重新定位，同一页也能再次触发 */
   reveal?: { text: string; nonce: number } | null;
+  readOnly?: boolean;
 };
 
-export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, onReady, onAi, onAskSelection, onUploadFile, onOpenFile, onConfirmDeleteFile, reveal }: Props) {
+export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, onReady, onAi, onAskSelection, onUploadFile, onOpenFile, onConfirmDeleteFile, reveal, readOnly = false }: Props) {
   const { t } = useTranslation();
   const holderRef = useRef<HTMLDivElement>(null);
   const readyRef = useRef(false);
@@ -77,7 +78,8 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, onReady,
     const editor = new EditorJS({
       holder,
       data: initialRef.current,
-      autofocus: true,
+      readOnly,
+      autofocus: !readOnly,
       placeholder: t("blockEditor.placeholder"),
       i18n: editorI18n(),
       tools: {

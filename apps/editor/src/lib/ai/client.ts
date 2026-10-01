@@ -35,6 +35,7 @@ function agentsHeaders(token: string, accept: string): HeadersInit {
   return {
     Authorization: `Bearer ${token}`,
     "X-Biz-Code": AGENTS_BIZ_CODE,
+    "X-App-Code": AGENTS_BIZ_CODE,
     Accept: accept,
     "Content-Type": "application/json",
   };

@@ -1,5 +1,5 @@
 /**
- * Nest 智能体：用户 JWT + X-Biz-Code，不走 x-docs-key / AI_API_KEY。
+ * Nest 智能体：用户 JWT + X-Biz-Code / X-App-Code，不走 x-docs-key / AI_API_KEY。
  */
 import { env, hasGatewayConfig } from "./env.js";
 import { gatewayFetch, readGatewayJson, type GatewayEnvelope } from "./gateway-client.js";
@@ -31,6 +31,7 @@ function agentsHeaders(token: string): Record<string, string> {
   return {
     Authorization: `Bearer ${token}`,
     "X-Biz-Code": env.agentsBizCode,
+    "X-App-Code": env.agentsBizCode,
     Accept: "application/json",
     "Content-Type": "application/json",
   };

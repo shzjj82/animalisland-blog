@@ -14,10 +14,12 @@ export type EditorPage = {
   parentId: string | null;
   body: EditorJsDocument;
   updatedAt: string;
+  /** 挂在团队上的云端文章；本地页没有这个字段 */
+  teamId?: string | null;
   remote?: RemoteLink;
 };
 
-export type PageNode = Pick<EditorPage, "id" | "title" | "parentId" | "updatedAt">;
+export type PageNode = Pick<EditorPage, "id" | "title" | "parentId" | "updatedAt" | "teamId">;
 
 export type LocalTombstone = {
   localId: string;

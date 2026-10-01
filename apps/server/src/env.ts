@@ -116,8 +116,7 @@ export const env = {
    */
   authAppCode: process.env.AUTH_APP_CODE ?? "web",
   /**
-   * Nest 文档应用隔离码（doc_documents.app_code），本站固定 blog。
-   * Nest 文档隔离编码（必填；服务端不再默认 blog）。多应用共库时用 DOCS_APP_CODE 覆盖。
+   * Nest 文档隔离编码，经请求头 X-Biz-Code / X-App-Code 传递（默认 blog）。多应用共库时用 DOCS_APP_CODE 覆盖。
    */
   docsAppCode: process.env.DOCS_APP_CODE ?? "blog",
   /** Nest 服务密钥（x-docs-key）；写操作优先用户 JWT。智能体聊天勿用此密钥。 */

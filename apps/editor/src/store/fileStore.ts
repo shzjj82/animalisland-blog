@@ -111,6 +111,7 @@ async function uploadRemote(session: RemoteSession, file: File): Promise<Uploade
         Accept: "application/json",
         Authorization: `Bearer ${ready.token}`,
         "X-Biz-Code": WIKI_APP_CODE,
+        "X-App-Code": WIKI_APP_CODE,
       },
       body: form,
     });

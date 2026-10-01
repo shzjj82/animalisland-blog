@@ -14,10 +14,29 @@ type Props = {
   onChange: (settings: SyncSettings) => void;
   onLogout: () => void;
   onChangePassword: () => void;
+  onCreateTeam: () => void;
+  onJoinTeam: () => void;
+  onToggleTeamMode: () => void;
+  teamMode: boolean;
+  canSwitchTeam: boolean;
+  canManageTeam: boolean;
+  onManageTeam: () => void;
 };
 
-/** 只在登录后出现：同步开关、改密码、退出 */
-export function SettingsMenu({ settings, onChange, onLogout, onChangePassword }: Props) {
+/** 只在登录后出现：创建/加入团队、切换团队模式、同步、改密码、退出 */
+export function SettingsMenu({
+  settings,
+  onChange,
+  onLogout,
+  onChangePassword,
+  onCreateTeam,
+  onJoinTeam,
+  onToggleTeamMode,
+  teamMode,
+  canSwitchTeam,
+  canManageTeam,
+  onManageTeam,
+}: Props) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   return (
@@ -32,6 +51,51 @@ export function SettingsMenu({ settings, onChange, onLogout, onChangePassword }:
           {t("settingsMenu.allowSync")}
           <Switch checked={settings.enabled} onCheckedChange={(enabled) => onChange({ enabled })} />
         </Label>
+        <PopoverSeparator />
+        <button
+          type="button"
+          className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-muted"
+          onClick={() => {
+            setOpen(false);
+            onCreateTeam();
+          }}
+        >
+          {t("team.createTeam")}
+        </button>
+        <button
+          type="button"
+          className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-muted"
+          onClick={() => {
+            setOpen(false);
+            onJoinTeam();
+          }}
+        >
+          {t("team.joinTeam")}
+        </button>
+        <button
+          type="button"
+          className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={!canSwitchTeam}
+          title={canSwitchTeam ? undefined : t("team.switchDisabled")}
+          onClick={() => {
+            setOpen(false);
+            onToggleTeamMode();
+          }}
+        >
+          {teamMode ? t("team.personalMode") : t("team.switchMode")}
+        </button>
+        {canManageTeam ? (
+          <button
+            type="button"
+            className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-muted"
+            onClick={() => {
+              setOpen(false);
+              onManageTeam();
+            }}
+          >
+            {t("team.manageTeam")}
+          </button>
+        ) : null}
         <PopoverSeparator />
         <button
           type="button"

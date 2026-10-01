@@ -27,9 +27,8 @@ export const GATEWAY_BASE_URL = (
 ).replace(/\/$/, "");
 
 /**
- * Editor（Web / 桌面）统一业务码：登录、文档、智能体都用 wiki。
- * 与博客的 blog 隔离，两边页面不能互相读写。
- * Nest 要求请求头 X-Biz-Code（仅 body/query 的 appCode 不够）。
+ * Editor（Web / 桌面）统一用 wiki：业务码走 X-Biz-Code，应用码走 X-App-Code。
+ * 与博客的 blog 隔离。网关会丢弃查询参数和 body 里的 appCode。
  */
 export const WIKI_APP_CODE = "wiki";
 
@@ -54,6 +53,7 @@ function wikiHeaders(extra?: Record<string, string>): Record<string, string> {
   return {
     Accept: "application/json",
     "X-Biz-Code": WIKI_APP_CODE,
+    "X-App-Code": WIKI_APP_CODE,
     ...extra,
   };
 }
@@ -156,7 +156,7 @@ export function refreshSession(): Promise<RemoteSession | null> {
     const response = await fetch(gatewayUrl("/auth/refresh"), {
       method: "POST",
       headers: wikiHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ refreshToken: current.refreshToken, appCode: WIKI_APP_CODE }),
+      body: JSON.stringify({ refreshToken: current.refreshToken }),
     });
     const json = (await response.json().catch(() => null)) as Envelope<AuthPayload> | null;
     if (!response.ok || !json?.success || !json.data?.token) {
@@ -190,7 +190,7 @@ export async function prepareSession(session: RemoteSession): Promise<RemoteSess
   return session;
 }
 
-async function request<T>(
+export async function request<T>(
   session: RemoteSession,
   method: string,
   path: string,
@@ -202,16 +202,13 @@ async function request<T>(
     throw new Error("UNAUTHORIZED");
   }
   const url = new URL(gatewayUrl(path), typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1");
-  if (!url.searchParams.has("appCode")) {
-    url.searchParams.set("appCode", WIKI_APP_CODE);
-  }
   const response = await fetch(url, {
     method,
     headers: wikiHeaders({
       "Content-Type": "application/json",
       Authorization: `Bearer ${ready.token}`,
     }),
-    body: body === undefined ? undefined : JSON.stringify({ ...(body as object), appCode: WIKI_APP_CODE }),
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (response.status === 401 && !retried && ready.refreshToken) {
     ready.expiresAt = 0;
@@ -238,7 +235,7 @@ async function authRemote(
   const response = await fetch(gatewayUrl(path), {
     method: "POST",
     headers: wikiHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ ...body, appCode: WIKI_APP_CODE }),
+    body: JSON.stringify(body),
   });
   const json = (await response.json().catch(() => null)) as Envelope<AuthPayload> | null;
   if (!json?.success || !json.data?.token) {
@@ -266,7 +263,6 @@ export async function logoutRemote(session: RemoteSession | null): Promise<void>
       }),
       body: JSON.stringify({
         ...(refreshToken ? { refreshToken } : {}),
-        appCode: WIKI_APP_CODE,
       }),
     });
   } catch {
@@ -294,7 +290,7 @@ export async function changePasswordRemote(session: RemoteSession, oldPassword: 
       "Content-Type": "application/json",
       Authorization: `Bearer ${ready.token}`,
     }),
-    body: JSON.stringify({ oldPassword, newPassword, appCode: WIKI_APP_CODE }),
+    body: JSON.stringify({ oldPassword, newPassword }),
   });
   const json = (await response.json().catch(() => null)) as Envelope<unknown> | null;
   if (!json?.success) {
@@ -317,11 +313,13 @@ function toNode(raw: unknown): PageNode | null {
     return null;
   }
   const parent = row.parentId;
+  const rawTeam = row.teamId ?? row.team_id;
   return {
     id,
     title: typeof row.title === "string" && row.title.trim() ? row.title : t("common.untitled"),
     parentId: typeof parent === "string" ? parent : null,
     updatedAt: typeof row.updatedAt === "string" ? row.updatedAt : "",
+    teamId: typeof rawTeam === "string" && rawTeam ? rawTeam : null,
   };
 }
 
@@ -398,7 +396,11 @@ export async function loadRemote(session: RemoteSession, id: string): Promise<Ed
   return page;
 }
 
-export async function createRemote(session: RemoteSession, parentId: string | null): Promise<EditorPage> {
+export async function createRemote(
+  session: RemoteSession,
+  parentId: string | null,
+  teamId?: string | null,
+): Promise<EditorPage> {
   const body = starterArticleDocument();
   const data = await request<{ post?: unknown; document?: unknown }>(session, "POST", "/docs/documents", {
     title: t("common.untitled"),
@@ -410,6 +412,7 @@ export async function createRemote(session: RemoteSession, parentId: string | nu
     props: {},
     body,
     visibility: "private",
+    ...(teamId ? { teamId } : {}),
   });
   const page = toPage(data.post ?? data.document);
   if (!page) {
@@ -434,6 +437,7 @@ export async function saveRemote(
     props,
     body: page.body,
     visibility: "private",
+    ...(page.teamId !== undefined ? { teamId: page.teamId } : {}),
   });
   const saved = toPage(data.post ?? data.document);
   return saved ?? { ...page, title, updatedAt: new Date().toISOString() };

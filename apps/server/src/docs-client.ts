@@ -1,6 +1,6 @@
 /**
  * 只请求文档服务：分类和文档的存查。
- * - 每次请求强制带 appCode（env.docsAppCode，默认 blog）；Nest 不再代填
+ * - 业务码 X-Biz-Code、应用码 X-App-Code 都用 docsAppCode（默认 blog）；不要再放进 query / body
  * - 公开读：可不带凭证
  * - 写 / 工作区：用户 Nest JWT
  * - feed：有 JWT 则带，否则无凭证（绝不回退 service key）
@@ -42,9 +42,10 @@ export async function docsRequest<T>(
     serviceKeyOnly?: boolean;
   },
 ): Promise<T> {
-  const query = { ...opts?.query, appCode: env.docsAppCode };
+  const query = opts?.query;
   const headers: Record<string, string> = {
     "X-Biz-Code": env.docsAppCode,
+    "X-App-Code": env.docsAppCode,
   };
 
   const credential: DocsCredential = opts?.serviceKeyOnly
@@ -81,11 +82,7 @@ export async function docsRequest<T>(
   let body: string | undefined;
   if (opts?.body !== undefined) {
     headers["Content-Type"] = "application/json";
-    const payload =
-      opts.body && typeof opts.body === "object" && !Array.isArray(opts.body)
-        ? { ...(opts.body as Record<string, unknown>), appCode: env.docsAppCode }
-        : opts.body;
-    body = JSON.stringify(payload);
+    body = JSON.stringify(opts.body);
   }
 
   let response: Response;
