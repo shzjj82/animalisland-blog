@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { NotionEditor, saveEditor } from "@/content";
 import { api } from "@/lib/api";
 import { ensureTitleHeader, metaFromEditorDocument } from "@/lib/editorMeta";
-import { appendPageLink } from "@/lib/pageLinks";
+import { appendPageLink, withLivePageLinkTitles } from "@/lib/pageLinks";
 import { iconParkOutline } from "@/lib/iconPark";
 import { ancestorsOf, pageTitle } from "@/lib/pageTree";
 import { LooseChildPages } from "@/workspace/LooseChildPages";
@@ -35,6 +35,10 @@ export function PageEditor({ onSaved }: Props) {
   const id = params.id ?? "";
   const router = useRouter();
   const { pages, previewTreeTitle } = useWorkspace();
+  const pagesRef = useRef(pages);
+  pagesRef.current = pages;
+  const leaveSaveRef = useRef(Promise.resolve());
+  const acceptEditRef = useRef(true);
   const editorRef = useRef<EditorJS | null>(null);
   const editorReadyRef = useRef(false);
   const draftBodyRef = useRef<EditorJsDocument | null>(null);
@@ -70,7 +74,7 @@ export function PageEditor({ onSaved }: Props) {
   });
   liveRef.current = { post, title, slug, visibility, tags };
 
-  const { persist, scheduleAutosave, suspendAutosave, autosaveTimerRef, saveSeqRef } = usePagePersist({
+  const { persist, scheduleAutosave, suspendAutosave, autosaveTimerRef } = usePagePersist({
     liveRef,
     editorRef,
     editorReadyRef,
@@ -94,24 +98,32 @@ export function PageEditor({ onSaved }: Props) {
     }
     let alive = true;
     window.clearTimeout(autosaveTimerRef.current);
-    saveSeqRef.current += 1;
-    setLoaded(false);
-    setEditorReady(false);
-    setError("");
-    setSaveHint("idle");
-    setPendingLinkIds([]);
-    setEditorEpoch(0);
-    setSpotlightLaunch(null);
-    setSpotlightOpen(false);
-    editorReadyRef.current = false;
-    draftBodyRef.current = null;
-    void api
-      .getById(id)
-      .then((data) => {
+    void (async () => {
+      await leaveSaveRef.current;
+      if (!alive) {
+        return;
+      }
+      window.clearTimeout(autosaveTimerRef.current);
+      setLoaded(false);
+      setEditorReady(false);
+      setError("");
+      setSaveHint("idle");
+      setPendingLinkIds([]);
+      setEditorEpoch(0);
+      setSpotlightLaunch(null);
+      setSpotlightOpen(false);
+      editorReadyRef.current = false;
+      draftBodyRef.current = null;
+      try {
+        const data = await api.getById(id);
         if (!alive) {
           return;
         }
-        const p = data.post;
+        acceptEditRef.current = true;
+        const loaded = data.post;
+        const body =
+          loaded.pageKind === "article" ? withLivePageLinkTitles(loaded.body, pagesRef.current) : loaded.body;
+        const p = body === loaded.body ? loaded : { ...loaded, body };
         setPost(p);
         setTitle(p.title);
         setSlug(p.slug);
@@ -131,20 +143,38 @@ export function PageEditor({ onSaved }: Props) {
           setInitial(p.body?.blocks?.length ? p.body : starterArticleDocument());
         }
         setLoaded(true);
-      })
-      .catch((err) => {
+        if (body !== loaded.body) {
+          window.setTimeout(() => {
+            if (liveRef.current.post?.id === p.id) {
+              void persist();
+            }
+          }, 0);
+        }
+      } catch (err) {
         if (!alive) {
           return;
         }
         setError(err instanceof Error ? err.message : "加载失败");
         setLoaded(true);
-      });
+      }
+    })();
     return () => {
       alive = false;
-      editorReadyRef.current = false;
+      acceptEditRef.current = false;
       window.clearTimeout(autosaveTimerRef.current);
+      const editor = editorRef.current;
+      leaveSaveRef.current = (async () => {
+        if (editor && editorReadyRef.current) {
+          try {
+            draftBodyRef.current = (await editor.save()) as EditorJsDocument;
+          } catch {
+            /* 用已有草稿 */
+          }
+        }
+        await persist();
+      })();
     };
-  }, [id, autosaveTimerRef, previewTreeTitle, saveSeqRef]);
+  }, [id, autosaveTimerRef, previewTreeTitle, persist]);
 
   const resolveInsertIndex = (fallback?: number) => {
     if (typeof fallback === "number" && fallback >= 0) {
@@ -406,6 +436,7 @@ export function PageEditor({ onSaved }: Props) {
               pageLink={{
                 onOpen: (page) => router.push(`/admin/p/${page.pageId}`),
                 createChild: () => createChildForLinkBlock(),
+                resolveTitle: (pageId) => pagesRef.current.find((item) => item.id === pageId)?.title,
               }}
               aiAssist={{
                 onInvoke: ({ blockIndex }) => {
@@ -413,6 +444,9 @@ export function PageEditor({ onSaved }: Props) {
                 },
               }}
               onChange={(document) => {
+                if (!acceptEditRef.current) {
+                  return;
+                }
                 draftBodyRef.current = document;
                 const meta = metaFromEditorDocument(document, {
                   title: post.title !== "无标题" && post.title !== "未命名" ? post.title : undefined,

@@ -152,6 +152,7 @@ export function NotionEditor({ initial, onReady, onChange, pageLink, aiAssist }:
       const pageLinkConfig: PageLinkToolConfig | undefined = pageLink
         ? {
             onOpen: (page) => pageLinkRef.current?.onOpen?.(page),
+            resolveTitle: (pageId: string) => pageLinkRef.current?.resolveTitle?.(pageId),
             createChild: pageLink?.createChild
               ? () => {
                   const create = pageLinkRef.current?.createChild;
