@@ -32,6 +32,28 @@ export function appendPageLink(
   };
 }
 
+/** 用侧栏里的页面标题替换正文子页面块上的旧名称；对不上的块保持原样 */
+export function withLivePageLinkTitles(
+  body: EditorJsDocument,
+  pages: Iterable<{ id: string; title: string }>,
+): EditorJsDocument {
+  const titles = new Map(Array.from(pages, (page) => [page.id, page.title.trim() || "无标题"]));
+  let changed = false;
+  const blocks = (body.blocks ?? []).map((block) => {
+    if (block.type !== "pageLink") {
+      return block;
+    }
+    const pageId = String((block.data as { pageId?: string }).pageId ?? "");
+    const live = titles.get(pageId);
+    if (!live || String((block.data as { title?: string }).title ?? "") === live) {
+      return block;
+    }
+    changed = true;
+    return { ...block, data: { ...block.data, title: live } };
+  });
+  return changed ? { ...body, time: Date.now(), blocks } : body;
+}
+
 export function syncPageLinkTitle(
   body: EditorJsDocument,
   pageId: string,

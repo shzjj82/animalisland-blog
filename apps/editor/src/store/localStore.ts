@@ -161,6 +161,41 @@ export function createLocal(parentId: string | null): EditorPage {
   return page;
 }
 
+/** 把父页面正文里的子页面块标题改成侧栏正在用的标题；没有对应块时不新增 */
+export function retitlePageLink(body: EditorJsDocument, pageId: string, title: string): EditorJsDocument | null {
+  const nextTitle = title.trim() || t("common.untitled");
+  let changed = false;
+  const blocks = (body.blocks ?? []).map((block) => {
+    if (block.type !== "pageLink" || String(block.data.pageId ?? "") !== pageId) {
+      return block;
+    }
+    if (String(block.data.title ?? "") === nextTitle) {
+      return block;
+    }
+    changed = true;
+    return { ...block, data: { ...block.data, title: nextTitle } };
+  });
+  return changed ? { ...body, blocks } : null;
+}
+
+/** 打开父页面时，用侧栏标题覆盖正文里过期的子页面名称 */
+export function withLivePageLinks<T extends { body: EditorJsDocument }>(page: T, titles: Iterable<{ id: string; title: string }>): T {
+  const byId = new Map(Array.from(titles, (item) => [item.id, item.title]));
+  let changed = false;
+  const blocks = (page.body.blocks ?? []).map((block) => {
+    if (block.type !== "pageLink") {
+      return block;
+    }
+    const live = byId.get(String(block.data.pageId ?? ""))?.trim();
+    if (!live || String(block.data.title ?? "") === live) {
+      return block;
+    }
+    changed = true;
+    return { ...block, data: { ...block.data, title: live } };
+  });
+  return changed ? { ...page, body: { ...page.body, blocks } } : page;
+}
+
 export function saveLocal(page: EditorPage): EditorPage {
   const pages = ensureLocalPages();
   const next: EditorPage = {
@@ -169,15 +204,26 @@ export function saveLocal(page: EditorPage): EditorPage {
     updatedAt: new Date().toISOString(),
   };
   const index = pages.findIndex((item) => item.id === page.id);
+  const copy = pages.slice();
   if (index === -1) {
-    writePages([next, ...pages]);
+    copy.unshift(next);
   } else {
-    const copy = pages.slice();
     copy[index] = { ...next, remote: pages[index].remote };
-    writePages(copy);
   }
-  markDirty([page.id]);
-  return next;
+  const saved = index === -1 ? copy[0] : copy[index];
+  const dirty = [page.id];
+  if (saved.parentId) {
+    const parentIndex = copy.findIndex((item) => item.id === saved.parentId);
+    const parent = parentIndex === -1 ? undefined : copy[parentIndex];
+    const patched = parent ? retitlePageLink(parent.body, saved.id, saved.title) : null;
+    if (parent && patched) {
+      copy[parentIndex] = { ...parent, body: patched, updatedAt: saved.updatedAt };
+      dirty.push(saved.parentId);
+    }
+  }
+  writePages(copy);
+  markDirty(dirty);
+  return saved;
 }
 
 function descendantIds(pages: EditorPage[], rootId: string): Set<string> {
@@ -205,13 +251,19 @@ function withoutPageLink(body: EditorJsDocument, pageId: string): EditorJsDocume
 }
 
 function withPageLink(body: EditorJsDocument, pageId: string, title: string): EditorJsDocument {
-  const blocks = body.blocks ?? [];
-  if (blocks.some((block) => block.type === "pageLink" && String(block.data.pageId ?? "") === pageId)) {
-    return body;
+  const nextTitle = title.trim() || t("common.untitled");
+  const blocks = [...(body.blocks ?? [])];
+  const index = blocks.findIndex((block) => block.type === "pageLink" && String(block.data.pageId ?? "") === pageId);
+  if (index !== -1) {
+    if (String(blocks[index].data.title ?? "") === nextTitle) {
+      return body;
+    }
+    blocks[index] = { ...blocks[index], data: { ...blocks[index].data, title: nextTitle } };
+    return { ...body, blocks };
   }
   return {
     ...body,
-    blocks: [...blocks, { type: "pageLink", data: { pageId, slug: pageId, title: title.trim() || t("common.untitled") } }],
+    blocks: [...blocks, { type: "pageLink", data: { pageId, slug: pageId, title: nextTitle } }],
   };
 }
 

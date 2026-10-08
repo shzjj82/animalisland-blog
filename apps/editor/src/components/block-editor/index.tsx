@@ -32,6 +32,7 @@ type Props = {
   onChange: (document: EditorJsDocument) => void;
   onOpenPage?: (pageId: string) => void;
   onCreateChild?: () => Promise<PageLinkData>;
+  resolvePageTitle?: (pageId: string) => string | undefined;
   onReady?: (editor: EditorJS | null) => void;
   onAi?: (blockIndex: number) => void;
   onAskSelection?: (text: string) => void;
@@ -43,7 +44,7 @@ type Props = {
   readOnly?: boolean;
 };
 
-export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, onReady, onAi, onAskSelection, onUploadFile, onOpenFile, onConfirmDeleteFile, reveal, readOnly = false }: Props) {
+export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolvePageTitle, onReady, onAi, onAskSelection, onUploadFile, onOpenFile, onConfirmDeleteFile, reveal, readOnly = false }: Props) {
   const { t } = useTranslation();
   const holderRef = useRef<HTMLDivElement>(null);
   const readyRef = useRef(false);
@@ -52,12 +53,14 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, onReady,
   const onChangeRef = useRef(onChange);
   const onOpenRef = useRef(onOpenPage);
   const onCreateRef = useRef(onCreateChild);
+  const resolveTitleRef = useRef(resolvePageTitle);
   const onReadyRef = useRef(onReady);
   const onAiRef = useRef(onAi);
   const onAskRef = useRef(onAskSelection);
   onChangeRef.current = onChange;
   onOpenRef.current = onOpenPage;
   onCreateRef.current = onCreateChild;
+  resolveTitleRef.current = resolvePageTitle;
   onReadyRef.current = onReady;
   onAiRef.current = onAi;
   onAskRef.current = onAskSelection;
@@ -122,6 +125,7 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, onReady,
           class: PageLinkTool as unknown as typeof Header,
           config: {
             onOpen: (page: PageLinkData) => onOpenRef.current?.(page.pageId),
+            resolveTitle: (pageId: string) => resolveTitleRef.current?.(pageId),
             createChild: () => {
               const create = onCreateRef.current;
               if (!create) {
@@ -169,6 +173,9 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, onReady,
           return;
         }
         const saved = (await api.saver.save()) as EditorJsDocument;
+        if (!alive) {
+          return;
+        }
         onChangeRef.current(saved);
       },
     });

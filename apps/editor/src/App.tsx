@@ -31,8 +31,10 @@ import {
   loadLocal,
   removeLocal,
   reparentLocal,
+  retitlePageLink,
   saveLocal,
   titleFromBody,
+  withLivePageLinks,
   type EditorPage,
   type PageNode,
 } from "@/store/localStore";
@@ -167,6 +169,8 @@ export function App() {
   } | null>(null);
   const [editorReady, setEditorReady] = useState(false);
   const editorRef = useRef<EditorJS | null>(null);
+  const nodesRef = useRef<PageNode[]>([]);
+  nodesRef.current = nodes;
   const sidebarWidthRef = useRef(sidebarWidth);
   sidebarWidthRef.current = sidebarWidth;
   const saveTimer = useRef(0);
@@ -187,7 +191,17 @@ export function App() {
     const list = listLocal();
     setNodes(list);
     const id = selectId === undefined ? (pageRef.current?.id ?? list[0]?.id) : (selectId ?? list[0]?.id);
-    setPage(id ? (loadLocal(id) ?? null) : null);
+    const loaded = id ? loadLocal(id) : undefined;
+    if (!loaded) {
+      setPage(null);
+      return;
+    }
+    const healed = withLivePageLinks(loaded, list);
+    setPage(healed);
+    if (healed !== loaded) {
+      saveLocal(healed);
+      setNodes(listLocal());
+    }
   }, []);
 
   /** 退出或换号后，还在路上的云端响应不能再写回界面 */
@@ -205,8 +219,13 @@ export function App() {
       return;
     }
     const loaded = await loadRemote(nextSession, id);
-    if (!stale(nextSession)) {
-      setPage(loaded);
+    if (stale(nextSession)) {
+      return;
+    }
+    const healed = withLivePageLinks(loaded, list);
+    setPage(healed);
+    if (healed !== loaded) {
+      void saveRemote(nextSession, healed).catch(() => undefined);
     }
   }, []);
 
@@ -447,14 +466,54 @@ export function App() {
     setReveal({ text: query, nonce: Date.now() });
   }
 
+  /** 切页前先落盘，避免子页面标题还在防抖里、父页面读到旧名称 */
+  async function flushEditing() {
+    const current = pageRef.current;
+    const editor = editorRef.current;
+    if (!current || !editor) {
+      return;
+    }
+    window.clearTimeout(saveTimer.current);
+    const body = (await editor.save()) as EditorJsDocument;
+    window.clearTimeout(saveTimer.current);
+    await persist({ ...current, body, title: titleFromBody(body) });
+    window.clearTimeout(saveTimer.current);
+  }
+
   async function openPage(id: string) {
     setError("");
     setReveal(null);
+    if (pageRef.current?.id !== id) {
+      await flushEditing();
+    }
     if (!session) {
-      setPage(loadLocal(id) ?? null);
+      const loaded = loadLocal(id);
+      if (!loaded) {
+        setPage(null);
+        return;
+      }
+      const healed = withLivePageLinks(loaded, listLocal());
+      setPage(healed);
+      if (healed !== loaded) {
+        saveLocal(healed);
+        setNodes(listLocal());
+      }
       return;
     }
-    setPage(await loadRemote(session, id));
+    const list = await listRemote(session);
+    if (stale(session)) {
+      return;
+    }
+    const loaded = await loadRemote(session, id);
+    if (stale(session)) {
+      return;
+    }
+    const healed = withLivePageLinks(loaded, list);
+    setNodes(list);
+    setPage(healed);
+    if (healed !== loaded) {
+      void saveRemote(session, healed).catch(() => undefined);
+    }
   }
 
   async function createChildLink(): Promise<PageLinkData> {
@@ -671,20 +730,40 @@ export function App() {
     saveTimer.current = window.setTimeout(() => void persist(next), 700);
   }
 
+  async function mirrorParentLink(active: RemoteSession, child: EditorPage) {
+    if (!child.parentId || pageRef.current?.id === child.parentId) {
+      return;
+    }
+    const parent = await loadRemote(active, child.parentId);
+    const body = retitlePageLink(parent.body, child.id, child.title);
+    if (!body) {
+      return;
+    }
+    await saveRemote(active, { ...parent, body });
+  }
+
   async function persist(next: EditorPage): Promise<boolean> {
+    const viewingId = pageRef.current?.id;
     try {
       if (!session) {
         const saved = saveLocal(next);
-        setPage(saved);
+        if (pageRef.current?.id === viewingId && viewingId === next.id) {
+          setPage(saved);
+        }
         setNodes(listLocal());
       } else {
         const { body } = await promoteDocument(session, next.body);
         const saved = await saveRemote(session, { ...next, body });
+        if (saved.parentId && pageRef.current?.id !== saved.parentId) {
+          await mirrorParentLink(session, saved).catch(() => undefined);
+        }
         const list = await listRemote(session);
         if (stale(session)) {
           return true;
         }
-        setPage(saved);
+        if (pageRef.current?.id === next.id) {
+          setPage(saved);
+        }
         setNodes(list);
       }
       setHint(t("app.saved"));
@@ -1143,6 +1222,7 @@ export function App() {
               onChange={onEdit}
               onOpenPage={(id) => void openPage(id)}
               onCreateChild={createChildLink}
+              resolvePageTitle={(pageId) => nodesRef.current.find((node) => node.id === pageId)?.title}
               onReady={(editor) => {
                 editorRef.current = editor;
                 setEditorReady(Boolean(editor));

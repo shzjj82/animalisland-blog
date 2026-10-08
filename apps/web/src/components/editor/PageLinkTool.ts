@@ -1,5 +1,6 @@
 import type { BlockTool, BlockToolConstructorOptions } from "@editorjs/editorjs";
 import { NOTES_ICON_SVG, PAGE_LINK_TOOLBOX_SVG } from "@/lib/iconPark";
+import { pageTitle } from "@/lib/pageTree";
 
 export type PageLinkData = {
   pageId: string;
@@ -12,6 +13,8 @@ export type PageLinkToolConfig = {
   onOpen?: (page: PageLinkData) => void;
   /** 工作区：从 / 插入「子页面」时自动建子页 */
   createChild?: () => Promise<PageLinkData>;
+  /** 与侧栏同一份标题 */
+  resolveTitle?: (pageId: string) => string | undefined;
 };
 
 /** 正文里的子页面块（Notes 图标）；可点开，不另设「插入链接」按钮 */
@@ -51,7 +54,15 @@ export class PageLinkTool implements BlockTool {
     return this.wrapper;
   }
 
+  private pullTitle() {
+    const live = this.data.pageId ? this.config.resolveTitle?.(this.data.pageId)?.trim() : "";
+    if (live && live !== this.data.title) {
+      this.data = { ...this.data, title: live };
+    }
+  }
+
   private paint() {
+    this.pullTitle();
     this.wrapper.removeEventListener("click", this.handleOpen);
     this.wrapper.className = "cdx-page-link";
     this.wrapper.contentEditable = "false";
@@ -75,7 +86,7 @@ export class PageLinkTool implements BlockTool {
         ? "创建子页面…"
         : "用侧栏 + 或工具栏「子页面」新建";
     } else {
-      title.textContent = this.data.title || "无标题";
+      title.textContent = pageTitle({ title: this.data.title || "无标题" });
       if (this.config.onOpen) {
         this.wrapper.classList.add("is-clickable");
         this.wrapper.title = "打开子页面";
@@ -119,6 +130,7 @@ export class PageLinkTool implements BlockTool {
   }
 
   save() {
+    this.pullTitle();
     return { ...this.data };
   }
 

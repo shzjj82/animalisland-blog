@@ -10,6 +10,8 @@ export type PageLinkData = {
 export type PageLinkToolConfig = {
   onOpen?: (page: PageLinkData) => void;
   createChild?: () => Promise<PageLinkData>;
+  /** 与侧栏同一份标题；有则覆盖块里存的旧名称 */
+  resolveTitle?: (pageId: string) => string | undefined;
 };
 
 const NOTES_ICON_SVG = `<svg width="1em" height="1em" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M8 6C8 4.89543 8.89543 4 10 4H30L40 14V42C40 43.1046 39.1046 44 38 44H10C8.89543 44 8 43.1046 8 42V6Z" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><path d="M16 20H32" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 28H32" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
@@ -51,7 +53,16 @@ export class PageLinkTool implements BlockTool {
     return this.wrapper;
   }
 
+  /** 侧栏标题优先，这样父页面里的子页面名称和侧栏一致 */
+  private pullTitle() {
+    const live = this.data.pageId ? this.config.resolveTitle?.(this.data.pageId)?.trim() : "";
+    if (live && live !== this.data.title) {
+      this.data = { ...this.data, title: live };
+    }
+  }
+
   private paint() {
+    this.pullTitle();
     this.wrapper.removeEventListener("click", this.handleOpen);
     this.wrapper.className = "cdx-page-link";
     this.wrapper.contentEditable = "false";
@@ -117,6 +128,7 @@ export class PageLinkTool implements BlockTool {
   }
 
   save() {
+    this.pullTitle();
     return { ...this.data };
   }
 
