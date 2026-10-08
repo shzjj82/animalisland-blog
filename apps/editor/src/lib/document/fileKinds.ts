@@ -66,6 +66,15 @@ export const ATTACHMENT_ACCEPT = Object.keys(KIND_BY_EXTENSION)
   .map((ext) => `.${ext}`)
   .join(",");
 
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
+
+/** 文件选择框接受的图片。和 Word 导入里能嵌进来的格式一致 */
+export const IMAGE_ACCEPT = "image/png,image/jpeg,image/gif,image/webp,image/bmp,image/svg+xml,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg";
+
+export function isImageFile(file: { name: string; type: string }): boolean {
+  return /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/.test(file.type) || IMAGE_EXTENSIONS.has(fileExtension(file.name));
+}
+
 export const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 
 export function fileExtension(name: string): string {

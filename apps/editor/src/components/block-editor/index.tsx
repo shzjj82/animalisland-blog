@@ -13,16 +13,60 @@ import { editorI18n } from "./editorI18n";
 import { useTranslation } from "react-i18next";
 import { PageLinkTool, type PageLinkData } from "./tools/PageLinkTool";
 import { AttachmentTool } from "./tools/AttachmentTool";
-import { ImageBlockTool } from "./tools/ImageBlockTool";
+import { ImageBlockTool, imageBlockData } from "./tools/ImageBlockTool";
 import { VideoBlockTool } from "./tools/VideoBlockTool";
 import type { AttachmentData } from "@/store/fileStore";
 import { htmlToBlocks } from "@/lib/document/htmlToBlocks";
+import { isImageFile } from "@/lib/document/fileKinds";
 import { bindEditingGuards } from "./editingGuards";
 import { bindToolbarAnchor } from "./toolbarAnchor";
 import { revealText } from "./revealText";
 import "./blockEditor.css";
 
 const inlineTools = ["link", "bold", "italic", "askAi"];
+
+function imageFilesFromClipboard(data: DataTransfer): File[] {
+  const files = Array.from(data.files).filter(isImageFile);
+  if (files.length > 0) {
+    return files;
+  }
+  const fromItems: File[] = [];
+  for (const item of Array.from(data.items)) {
+    if (item.kind !== "file") {
+      continue;
+    }
+    const file = item.getAsFile();
+    if (file && isImageFile(file)) {
+      fromItems.push(file);
+    }
+  }
+  return fromItems;
+}
+
+async function insertPastedImages(
+  editor: EditorJS,
+  files: File[],
+  upload: (file: File) => Promise<AttachmentData>,
+  isAlive: () => boolean,
+) {
+  const current = editor.blocks.getCurrentBlockIndex();
+  const block = current >= 0 ? editor.blocks.getBlockByIndex(current) : undefined;
+  const replace = Boolean(block?.isEmpty) && block?.name !== "header" && block?.name !== "table";
+  let index = current < 0 ? editor.blocks.getBlocksCount() : replace ? current : current + 1;
+  let replaceNext = replace;
+  for (const file of files) {
+    if (!isAlive()) {
+      return;
+    }
+    const uploaded = await upload(file);
+    if (!isAlive()) {
+      return;
+    }
+    editor.blocks.insert("image", imageBlockData(uploaded), {}, index, false, replaceNext);
+    replaceNext = false;
+    index += 1;
+  }
+}
 
 const headingIcon = (label: string) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><text x="12" y="16.5" text-anchor="middle" font-size="${label === "H1" ? 13 : label === "H2" ? 12 : 11}" font-weight="800" font-family="ui-sans-serif,system-ui,sans-serif" fill="currentColor">${label}</text></svg>`;
@@ -37,6 +81,7 @@ type Props = {
   onAi?: (blockIndex: number) => void;
   onAskSelection?: (text: string) => void;
   onUploadFile?: (file: File) => Promise<AttachmentData>;
+  onUploadError?: (message: string) => void;
   onOpenFile?: (data: AttachmentData, replace: (next: AttachmentData) => void) => void;
   onConfirmDeleteFile?: (name: string) => Promise<boolean>;
   /** 打开后定位到这段文字；nonce 变化时重新定位，同一页也能再次触发 */
@@ -44,7 +89,7 @@ type Props = {
   readOnly?: boolean;
 };
 
-export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolvePageTitle, onReady, onAi, onAskSelection, onUploadFile, onOpenFile, onConfirmDeleteFile, reveal, readOnly = false }: Props) {
+export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolvePageTitle, onReady, onAi, onAskSelection, onUploadFile, onUploadError, onOpenFile, onConfirmDeleteFile, reveal, readOnly = false }: Props) {
   const { t } = useTranslation();
   const holderRef = useRef<HTMLDivElement>(null);
   const readyRef = useRef(false);
@@ -65,11 +110,15 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
   onAiRef.current = onAi;
   onAskRef.current = onAskSelection;
   const onUploadRef = useRef(onUploadFile);
+  const onUploadErrorRef = useRef(onUploadError);
   const onOpenFileRef = useRef(onOpenFile);
   onUploadRef.current = onUploadFile;
+  onUploadErrorRef.current = onUploadError;
   onOpenFileRef.current = onOpenFile;
   const onConfirmDeleteRef = useRef(onConfirmDeleteFile);
   onConfirmDeleteRef.current = onConfirmDeleteFile;
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
   const initialRef = useRef(doc);
 
   useEffect(() => {
@@ -137,6 +186,12 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
         },
         image: {
           class: ImageBlockTool as unknown as typeof Header,
+          config: {
+            upload: (file: File) => {
+              const upload = onUploadRef.current;
+              return upload ? upload(file) : Promise.reject(new Error(t("attachment.uploadFailed")));
+            },
+          },
         },
         video: {
           class: VideoBlockTool as unknown as typeof Header,
@@ -186,7 +241,26 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
     const onPaste = (event: ClipboardEvent) => {
       const data = event.clipboardData;
       const target = event.target instanceof Element ? event.target : null;
-      if (!data || data.types.includes("application/x-editor-js") || data.files.length > 0) {
+      if (!data || data.types.includes("application/x-editor-js")) {
+        return;
+      }
+      const images = imageFilesFromClipboard(data);
+      if (images.length > 0) {
+        if (readOnlyRef.current || target?.closest(".tc-table, input, textarea")) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        const upload = onUploadRef.current;
+        if (!upload) {
+          return;
+        }
+        void insertPastedImages(editor, images, upload, () => alive).catch((error: unknown) => {
+          onUploadErrorRef.current?.(error instanceof Error ? error.message : t("attachment.uploadFailed"));
+        });
+        return;
+      }
+      if (data.files.length > 0) {
         return;
       }
       if (!target?.closest(".ce-block") || target.closest(".tc-table, .cdx-quote__caption, input, textarea")) {

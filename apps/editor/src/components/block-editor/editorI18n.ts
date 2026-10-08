@@ -50,6 +50,7 @@ export function editorI18n() {
         "AI Chat · ai": "智能 AI 聊天 · ai",
         "Subpage · page": "子页面 · page",
         "File · file": "文件 · file",
+        "Image · image": "图片 · image",
       },
       tools: {
         header: {

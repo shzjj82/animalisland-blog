@@ -100,6 +100,13 @@ export const en: Messages = {
     sheetTruncated: "Showing the first {{rows}} rows and {{cols}} columns",
     codeTruncated: "Large file: showing the first 1,000,000 characters",
   },
+  image: {
+    pick: "Choose an image to insert",
+    supported: "PNG, JPEG, GIF, WebP, BMP and SVG",
+    uploading: "Uploading \"{{name}}\"…",
+    unsupported: "Unsupported image: {{name}}",
+    delete: "Delete image",
+  },
   blockEditor: {
     caption: "Caption",
     quote: "Quote",

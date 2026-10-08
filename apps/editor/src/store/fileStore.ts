@@ -170,9 +170,38 @@ export async function promoteAttachment(session: RemoteSession, data: Attachment
   return next;
 }
 
-/** 文档里是否还有指向本机的附件 */
+const STORED_MEDIA = new Set(["attachment", "image", "video"]);
+
+function localMediaId(block: EditorJsBlock): string | null {
+  if (!STORED_MEDIA.has(block.type)) {
+    return null;
+  }
+  const data = block.data as { source?: string; fileId?: string };
+  return data.source === "local" && data.fileId ? data.fileId : null;
+}
+
+function withPromotedFile(block: EditorJsBlock, next: AttachmentData): EditorJsBlock {
+  if (block.type === "attachment") {
+    return { ...block, data: { ...next } };
+  }
+  const prev = block.data as { file?: { url?: string } };
+  return {
+    ...block,
+    data: {
+      ...prev,
+      name: next.name,
+      fileId: next.fileId,
+      size: next.size,
+      mime: next.mime,
+      source: next.source,
+      file: { url: next.url ?? prev.file?.url ?? "" },
+    },
+  };
+}
+
+/** 文档里是否还有只存在本机的附件、图片或视频 */
 export function hasLocalAttachments(body: EditorJsDocument): boolean {
-  return (body.blocks ?? []).some((block) => block.type === "attachment" && block.data?.source === "local");
+  return (body.blocks ?? []).some((block) => localMediaId(block) !== null);
 }
 
 /**
@@ -186,19 +215,20 @@ export async function promoteDocument(session: RemoteSession, body: EditorJsDocu
   let changed = false;
   const blocks: EditorJsBlock[] = [];
   for (const block of body.blocks ?? []) {
-    const data = block.data as unknown as AttachmentData | undefined;
-    if (block.type !== "attachment" || data?.source !== "local") {
+    const fileId = localMediaId(block);
+    if (!fileId) {
       blocks.push(block);
       continue;
     }
-    let next: AttachmentData | null = readPromoted()[data.fileId] ?? null;
+    const data = block.data as unknown as AttachmentData;
+    let next: AttachmentData | null = readPromoted()[fileId] ?? null;
     if (!next) {
-      const blob = await getLocal(data.fileId).catch(() => null);
+      const blob = await getLocal(fileId).catch(() => null);
       next = blob ? await promoteAttachment(session, data, blob).catch(() => null) : null;
     }
     if (next) {
       changed = true;
-      blocks.push({ ...block, data: { ...next } });
+      blocks.push(withPromotedFile(block, next));
     } else {
       blocks.push(block);
     }
@@ -231,8 +261,9 @@ export function flushPendingAttachments(session: RemoteSession): Promise<string[
       }
       const { body, changed } = await promoteDocument(session, page.body);
       for (const block of body.blocks ?? []) {
-        if (block.type === "attachment" && block.data?.source === "local") {
-          stillUsed.add(String(block.data.fileId));
+        const fileId = localMediaId(block);
+        if (fileId) {
+          stillUsed.add(fileId);
         }
       }
       if (changed) {

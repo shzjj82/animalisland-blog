@@ -74,8 +74,9 @@ import {
 import { TeamManageSidebar } from "@/components/team-manage-sidebar";
 import { pageTitle, setAppLocale, type AppLocale } from "@/i18n";
 import { exportDocument, type ExportFormat } from "@/lib/document/export";
-import { fileKind } from "@/lib/document/fileKinds";
+import { fileKind, isImageFile } from "@/lib/document/fileKinds";
 import { importSpreadsheet, importVideo, importWord, mergeImported, readInsertable, WORD_ACCEPT } from "@/lib/document/import";
+import { imageBlockData } from "@/components/block-editor/tools/ImageBlockTool";
 import { insertEditorBlocksAt } from "@/lib/document/insertBlocks";
 import { loadSearchDocs } from "@/lib/document/search";
 import {
@@ -661,7 +662,7 @@ export function App() {
     return Math.max(floor, point!.y > rect.top + rect.height / 2 ? at + 1 : at);
   }
 
-  /** 拖入：Markdown / 文本转成正文，Word、PDF、Excel、代码作为附件，其他提示不支持 */
+  /** 拖入：Markdown / 文本转成正文，图片插入为图片，Word、PDF、Excel、视频、代码作为附件，其他提示不支持 */
   async function insertDropped(files: File[], index: number) {
     const editor = editorRef.current;
     if (!editor) {
@@ -673,7 +674,9 @@ export function App() {
     try {
       for (const file of files) {
         const content = await readInsertable(file);
-        if (content) {
+        if (isImageFile(file)) {
+          blocks.push({ type: "image", data: imageBlockData(await uploadFile(file)) });
+        } else if (content) {
           blocks.push(...content);
         } else if (fileKind(file.name)) {
           blocks.push({ type: "attachment", data: await uploadFile(file) });
@@ -1230,6 +1233,7 @@ export function App() {
               onAi={(index) => openSpotlight({ actionId: "ai-chat", insertIndex: index })}
               onAskSelection={(text) => openSpotlight({ actionId: "ai-chat", selection: text })}
               onUploadFile={uploadFile}
+              onUploadError={setError}
               onOpenFile={(data, replace) => {
                 setWikiOpen(false);
                 setViewing({ data, replace });

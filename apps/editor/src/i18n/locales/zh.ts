@@ -98,6 +98,13 @@ export const zh = {
     sheetTruncated: "只显示前 {{rows}} 行、{{cols}} 列",
     codeTruncated: "文件较大，只显示前 1,000,000 个字符",
   },
+  image: {
+    pick: "选择要插入的图片",
+    supported: "支持 PNG、JPEG、GIF、WebP、BMP、SVG",
+    uploading: "正在上传「{{name}}」…",
+    unsupported: "暂不支持这张图片：{{name}}",
+    delete: "删除图片",
+  },
   blockEditor: {
     caption: "出处",
     quote: "引用",
