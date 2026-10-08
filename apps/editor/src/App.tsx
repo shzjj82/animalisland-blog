@@ -1361,24 +1361,10 @@ export function App() {
         <TeamDialog
           open={teamOpen}
           session={session}
-          teams={teams}
-          activeTeamId={activeTeamId}
-          pageTeamId={page?.teamId}
           onActiveTeam={(id) => {
             writeActiveTeamId(id);
             setActiveTeamId(id);
           }}
-          onAssignPage={
-            page
-              ? (teamId) => {
-                  const current = pageRef.current;
-                  if (!current) {
-                    return;
-                  }
-                  void persist({ ...current, teamId });
-                }
-              : undefined
-          }
           onChange={() =>
             listTeams(session).then((list) => {
               setTeams(list);

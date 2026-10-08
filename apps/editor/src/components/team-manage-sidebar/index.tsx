@@ -5,7 +5,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { loadTeam, setTeamRole, teamCodeOf, type TeamInfo, type TeamMember, type TeamRole } from "@/store/teamStore";
+import { loadTeam, setTeamRole, type TeamInfo, type TeamMember, type TeamRole } from "@/store/teamStore";
 import type { RemoteSession } from "@/store/remoteStore";
 
 type Props = {
@@ -47,7 +47,7 @@ export function TeamManageSidebar({ session, team, onClose, onChanged }: Props) 
   const [shown, setShown] = useState(team);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const code = teamCodeOf(shown);
+  const code = shown.code;
 
   useEffect(() => {
     setShown(team);
@@ -70,11 +70,10 @@ export function TeamManageSidebar({ session, team, onClose, onChanged }: Props) 
     () => [
       { field: t("team.name"), value: shown.name },
       { field: t("team.code"), value: code ?? "—" },
-      { field: t("team.id"), value: shown.id },
       { field: t("team.registeredAt"), value: formatTime(shown.createdAt) },
       { field: t("team.updatedAt"), value: formatTime(shown.updatedAt) },
     ],
-    [code, shown.createdAt, shown.id, shown.name, shown.updatedAt, t],
+    [code, shown.createdAt, shown.name, shown.updatedAt, t],
   );
 
   const detailColumns = useMemo<ColumnDef<DetailRow, unknown>[]>(
@@ -84,21 +83,19 @@ export function TeamManageSidebar({ session, team, onClose, onChanged }: Props) 
         accessorKey: "value",
         header: t("team.value"),
         cell: ({ row }) =>
-          row.original.field === t("team.id") ? (
+          row.original.field === t("team.code") && code ? (
             <span className="flex min-w-0 items-center gap-2">
-              <span className="truncate font-mono text-xs">{row.original.value}</span>
-              <Button type="button" size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(shown.id)}>
-                {t("team.copyId")}
+              <span className="font-mono tracking-[0.2em]">{code}</span>
+              <Button type="button" size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(code)}>
+                {t("team.copyCode")}
               </Button>
             </span>
           ) : (
-            <span className={row.original.field === t("team.code") ? "font-mono tracking-[0.2em]" : undefined}>
-              {row.original.value}
-            </span>
+            <span>{row.original.value}</span>
           ),
       },
     ],
-    [t, shown.id],
+    [code, t],
   );
 
   const memberColumns = useMemo<ColumnDef<TeamMember, unknown>[]>(

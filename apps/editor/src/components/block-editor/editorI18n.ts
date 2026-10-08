@@ -70,6 +70,19 @@ export function editorI18n() {
         stub: {
           "The block can not be displayed correctly.": "该内容块无法正确显示。",
         },
+        table: {
+          "Add column to left": "在左侧添加列",
+          "Add column to right": "在右侧添加列",
+          "Delete column": "删除列",
+          "Add row above": "在上方添加行",
+          "Add row below": "在下方添加行",
+          "Delete row": "删除行",
+          Heading: "表头",
+          "With headings": "带表头",
+          "Without headings": "不带表头",
+          Collapse: "取消撑满",
+          Stretch: "撑满宽度",
+        },
       },
       blockTunes: {
         delete: {

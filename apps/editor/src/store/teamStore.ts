@@ -6,6 +6,8 @@ export type TeamRole = "owner" | "developer" | "user";
 export type TeamInfo = {
   id: string;
   name: string;
+  /** 接口返回的团队码，用来邀请别人加入 */
+  code: string | null;
   description: string | null;
   role: TeamRole;
   createdAt: string;
@@ -21,19 +23,11 @@ export type TeamMember = {
 };
 
 const CODE_RE = /^[A-Z0-9]{6}$/;
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const ACTIVE_KEY = "editor:active-team";
 
-/** 6 位团队码，避开 0/O、1/I */
-export function randomTeamCode(): string {
-  const bytes = new Uint8Array(6);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((byte) => ALPHABET[byte % ALPHABET.length]).join("");
-}
-
-export function teamCodeOf(team: Pick<TeamInfo, "description">): string | null {
-  const text = team.description?.trim().toUpperCase() ?? "";
+/** 旧数据把团队码写在 description 里；新数据以接口的 code 为准 */
+function legacyCode(description: string | null): string | null {
+  const text = description?.trim().toUpperCase() ?? "";
   return CODE_RE.test(text) ? text : null;
 }
 
@@ -76,10 +70,14 @@ function toTeam(raw: unknown): TeamInfo | null {
   if (!id || !isRole(row.role)) {
     return null;
   }
+  const description = typeof row.description === "string" ? row.description : null;
+  const rawCode = row.code ?? row.teamCode ?? row.inviteCode;
+  const code = typeof rawCode === "string" && rawCode.trim() ? rawCode.trim() : legacyCode(description);
   return {
     id,
     name: typeof row.name === "string" && row.name.trim() ? row.name : t("team.untitled"),
-    description: typeof row.description === "string" ? row.description : null,
+    code,
+    description,
     role: row.role,
     createdAt: typeof row.createdAt === "string" ? row.createdAt : "",
     updatedAt: typeof row.updatedAt === "string" ? row.updatedAt : "",
@@ -108,34 +106,29 @@ export async function listTeams(session: RemoteSession): Promise<TeamInfo[]> {
   return (Array.isArray(rows) ? rows : []).map(toTeam).filter((item): item is TeamInfo => item !== null);
 }
 
+function readTeam(data: unknown): TeamInfo | null {
+  return toTeam(data) ?? toTeam(asRecord(data).team);
+}
+
 export async function createTeam(session: RemoteSession, name: string): Promise<TeamInfo> {
   const data = await request<unknown>(session, "POST", "/teams", {
     name: name.trim(),
-    description: randomTeamCode(),
   });
-  const team = toTeam(data);
+  const team = readTeam(data);
   if (!team) {
     throw new Error(t("team.createFailed"));
   }
   return team;
 }
 
-export async function joinTeam(session: RemoteSession, teams: TeamInfo[], raw: string): Promise<TeamInfo> {
-  const text = raw.trim();
-  const code = text.toUpperCase();
-  let id = "";
-  if (UUID_RE.test(text)) {
-    id = text;
-  } else if (CODE_RE.test(code)) {
-    id = teams.find((team) => teamCodeOf(team) === code)?.id ?? "";
-    if (!id) {
-      throw new Error(t("team.codeNeedsId"));
-    }
-  } else {
+/** 用接口下发的团队码加入，不在本地团队列表里反查 id */
+export async function joinTeam(session: RemoteSession, raw: string): Promise<TeamInfo> {
+  const code = raw.trim();
+  if (!code) {
     throw new Error(t("team.badCode"));
   }
-  const data = await request<unknown>(session, "POST", `/teams/${id}/join`);
-  const team = toTeam(data);
+  const data = await request<unknown>(session, "POST", `/teams/${encodeURIComponent(code)}/join`);
+  const team = readTeam(data);
   if (!team) {
     throw new Error(t("team.joinFailed"));
   }

@@ -208,6 +208,15 @@
   background: var(--color-background);
 }
 
+/* 插件把表头行设成 sticky 且 z-index 高于行列菜单，菜单会画在表头下面 */
+.notion-editor .tc-table--heading .tc-row:first-child {
+  z-index: 1;
+}
+
+.notion-editor .tc-toolbox {
+  z-index: 5;
+}
+
 .notion-editor .tc-row--selected .tc-cell {
   background: var(--color-background);
 }
