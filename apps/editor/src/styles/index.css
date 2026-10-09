@@ -231,6 +231,20 @@
   vertical-align: top;
 }
 
+/* 图片按自身宽度靠左排，不撑满正文栏；连续图片同一行，放不下再换行 */
+.ce-block:has(> .ce-block__content > .cdx-image:not(.is-empty):not(.is-loading)) {
+  display: inline-block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 4px 12px 4px 0;
+  vertical-align: top;
+}
+
+.ce-block:has(> .ce-block__content > .cdx-image:not(.is-empty):not(.is-loading)) > .ce-block__content {
+  width: fit-content;
+  max-width: 100%;
+}
+
 .cdx-attachment {
   position: relative;
   display: flex;

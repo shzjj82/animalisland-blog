@@ -106,6 +106,7 @@ export const en: Messages = {
     uploading: "Uploading \"{{name}}\"…",
     unsupported: "Unsupported image: {{name}}",
     delete: "Delete image",
+    resize: "Resize",
   },
   blockEditor: {
     caption: "Caption",

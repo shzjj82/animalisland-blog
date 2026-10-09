@@ -12,6 +12,8 @@ export type ImageBlockData = {
   size?: number;
   mime?: string;
   source?: "local" | "remote";
+  /** 相对正文栏宽度的百分比。不写则按图片原始尺寸显示，最大不超过正文栏 */
+  width?: number;
 };
 
 export type ImageToolConfig = {
@@ -37,6 +39,14 @@ function isImageData(data: ImageBlockData | undefined): boolean {
   return Boolean(data?.file?.url || data?.fileId);
 }
 
+function storedWidth(data: ImageBlockData): number | undefined {
+  const width = data.width;
+  if (typeof width !== "number" || !Number.isFinite(width)) {
+    return undefined;
+  }
+  return Math.min(100, Math.max(15, Math.round(width)));
+}
+
 /** 正文里的图片。菜单、粘贴、拖入都能插入；Word 导入的图片也走这块。 */
 export class ImageBlockTool implements BlockTool {
   static get toolbox() {
@@ -54,6 +64,8 @@ export class ImageBlockTool implements BlockTool {
   private uploading = "";
   private error = "";
   private picked = false;
+  private resizeDrag: { pointerId: number; edge: "left" | "right"; startX: number; startWidth: number; column: number } | null = null;
+  private layoutObserver: ResizeObserver | null = null;
   private api: API;
   private block: BlockAPI;
   private readOnly: boolean;
@@ -70,7 +82,7 @@ export class ImageBlockTool implements BlockTool {
     this.paint();
     if (!this.readOnly && !isImageData(this.data) && !this.picked) {
       this.picked = true;
-      window.setTimeout(() => this.pick(), 0);
+      this.pick();
     }
     return this.wrapper;
   }
@@ -83,8 +95,16 @@ export class ImageBlockTool implements BlockTool {
       this.paintEmpty();
       return;
     }
+    const frame = document.createElement("div");
+    frame.className = "cdx-image__frame";
+    const width = storedWidth(this.data);
+    if (width) {
+      frame.classList.add("is-resized");
+      frame.style.width = `${width}%`;
+    }
     const img = document.createElement("img");
     img.alt = this.data.caption || this.data.name || "";
+    img.draggable = false;
     if (this.objectUrl) {
       img.src = this.objectUrl;
     } else {
@@ -108,19 +128,156 @@ export class ImageBlockTool implements BlockTool {
           .catch(() => undefined);
       }
     }
-    this.wrapper.append(img);
+    frame.append(img);
     if (!this.readOnly) {
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "cdx-image__delete";
-      remove.setAttribute("aria-label", t("image.delete"));
-      remove.innerHTML = TRASH_SVG;
-      remove.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        this.api.blocks.delete(this.api.blocks.getBlockIndex(this.block.id));
+      frame.append(this.resizeHandle("left"), this.resizeHandle("right"), this.deleteButton());
+    }
+    this.wrapper.append(frame);
+    if (storedWidth(this.data)) {
+      requestAnimationFrame(() => {
+        this.applyStoredWidth();
+        this.watchColumn();
       });
-      this.wrapper.append(remove);
+    }
+  }
+
+  /** 正文栏宽度。图片块本身是收缩的，不能拿它的宽度当百分比基准 */
+  private columnWidth(): number {
+    const redactor = this.wrapper.closest(".codex-editor__redactor");
+    if (redactor instanceof HTMLElement) {
+      const style = getComputedStyle(redactor);
+      const pad = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
+      const width = redactor.clientWidth - pad;
+      if (width > 0) {
+        return width;
+      }
+    }
+    return this.wrapper.clientWidth;
+  }
+
+  private applyStoredWidth() {
+    if (this.resizeDrag) {
+      return;
+    }
+    const frame = this.wrapper.querySelector(".cdx-image__frame");
+    const width = storedWidth(this.data);
+    if (!(frame instanceof HTMLElement) || !width) {
+      return;
+    }
+    const column = this.columnWidth();
+    if (column <= 0) {
+      return;
+    }
+    frame.classList.add("is-resized");
+    frame.style.width = `${Math.round((column * width) / 100)}px`;
+  }
+
+  private watchColumn() {
+    if (this.layoutObserver || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const redactor = this.wrapper.closest(".codex-editor__redactor");
+    if (!(redactor instanceof Element)) {
+      return;
+    }
+    this.layoutObserver = new ResizeObserver(() => this.applyStoredWidth());
+    this.layoutObserver.observe(redactor);
+  }
+
+  private resizeHandle(edge: "left" | "right"): HTMLButtonElement {
+    const handle = document.createElement("button");
+    handle.type = "button";
+    handle.className = `cdx-image__resize cdx-image__resize--${edge}`;
+    handle.setAttribute("aria-label", t("image.resize"));
+    handle.addEventListener("pointerdown", (event) => this.beginResize(event, edge));
+    handle.addEventListener("dragstart", (event) => event.preventDefault());
+    return handle;
+  }
+
+  private deleteButton(): HTMLButtonElement {
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "cdx-image__delete";
+    remove.setAttribute("aria-label", t("image.delete"));
+    remove.innerHTML = TRASH_SVG;
+    remove.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.removeBlock();
+    });
+    return remove;
+  }
+
+  private beginResize(event: PointerEvent, edge: "left" | "right") {
+    if (this.readOnly || !(event.currentTarget instanceof HTMLElement)) {
+      return;
+    }
+    const frame = this.wrapper.querySelector(".cdx-image__frame");
+    if (!(frame instanceof HTMLElement)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const column = this.columnWidth() || frame.getBoundingClientRect().width;
+    this.resizeDrag = {
+      pointerId: event.pointerId,
+      edge,
+      startX: event.clientX,
+      startWidth: frame.getBoundingClientRect().width,
+      column,
+    };
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // 个别环境下捕获指针会失败，文档级监听仍然能完成拖拽
+    }
+    this.wrapper.classList.add("is-resizing");
+    document.documentElement.classList.add("is-image-resizing");
+    document.addEventListener("pointermove", this.onResizeMove);
+    document.addEventListener("pointerup", this.onResizeEnd);
+    document.addEventListener("pointercancel", this.onResizeEnd);
+  }
+
+  /** 图片靠左，左边缘不动。向右拖右侧手柄，右边缘跟着光标；拖左侧手柄同样只改宽度 */
+  private onResizeMove = (event: PointerEvent) => {
+    const drag = this.resizeDrag;
+    const frame = this.wrapper.querySelector(".cdx-image__frame");
+    if (!drag || event.pointerId !== drag.pointerId || !(frame instanceof HTMLElement) || drag.column <= 0) {
+      return;
+    }
+    const along = drag.edge === "left" ? drag.startX - event.clientX : event.clientX - drag.startX;
+    const min = Math.min(drag.column, Math.max(120, drag.column * 0.12));
+    const next = Math.min(drag.column, Math.max(min, drag.startWidth + along));
+    frame.classList.add("is-resized");
+    frame.style.width = `${Math.round(next)}px`;
+  };
+
+  private onResizeEnd = (event: PointerEvent) => {
+    const drag = this.resizeDrag;
+    if (!drag || event.pointerId !== drag.pointerId) {
+      return;
+    }
+    this.resizeDrag = null;
+    document.removeEventListener("pointermove", this.onResizeMove);
+    document.removeEventListener("pointerup", this.onResizeEnd);
+    document.removeEventListener("pointercancel", this.onResizeEnd);
+    this.wrapper.classList.remove("is-resizing");
+    document.documentElement.classList.remove("is-image-resizing");
+    const frame = this.wrapper.querySelector(".cdx-image__frame");
+    if (!(frame instanceof HTMLElement) || drag.column <= 0) {
+      return;
+    }
+    const percent = Math.min(100, Math.max(15, Math.round((frame.getBoundingClientRect().width / drag.column) * 100)));
+    this.data = { ...this.data, width: percent };
+    this.applyStoredWidth();
+    this.watchColumn();
+    this.block.dispatchChange();
+  };
+
+  private removeBlock() {
+    const index = this.api.blocks.getBlockIndex(this.block.id);
+    if (index >= 0) {
+      this.api.blocks.delete(index);
     }
   }
 
@@ -153,15 +310,44 @@ export class ImageBlockTool implements BlockTool {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = IMAGE_ACCEPT;
+    input.hidden = true;
+    document.body.append(input);
+    let settled = false;
+    let dialogOpened = false;
+    const finish = () => {
+      input.remove();
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", onFocus);
+    };
+    const onBlur = () => {
+      dialogOpened = true;
+    };
+    const onFocus = () => {
+      window.setTimeout(() => {
+        if (!settled && dialogOpened && !isImageData(this.data) && !this.uploading) {
+          finish();
+          this.removeBlock();
+        }
+      }, 200);
+    };
     input.addEventListener("change", () => {
+      settled = true;
       const file = input.files?.[0];
+      finish();
       if (file) {
         void this.upload(file);
       } else if (!isImageData(this.data)) {
-        this.api.blocks.delete(this.api.blocks.getBlockIndex(this.block.id));
+        this.removeBlock();
       }
     });
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("focus", onFocus);
     input.click();
+    if (!dialogOpened) {
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", onFocus);
+      input.remove();
+    }
   }
 
   private async upload(file: File) {
@@ -204,7 +390,13 @@ export class ImageBlockTool implements BlockTool {
   }
 
   destroy() {
+    this.layoutObserver?.disconnect();
+    this.layoutObserver = null;
     this.wrapper.removeEventListener("click", this.handleEmptyClick);
+    document.removeEventListener("pointermove", this.onResizeMove);
+    document.removeEventListener("pointerup", this.onResizeEnd);
+    document.removeEventListener("pointercancel", this.onResizeEnd);
+    document.documentElement.classList.remove("is-image-resizing");
     if (this.objectUrl) {
       URL.revokeObjectURL(this.objectUrl);
       this.objectUrl = "";

@@ -104,6 +104,7 @@ export const zh = {
     uploading: "正在上传「{{name}}」…",
     unsupported: "暂不支持这张图片：{{name}}",
     delete: "删除图片",
+    resize: "调整大小",
   },
   blockEditor: {
     caption: "出处",
