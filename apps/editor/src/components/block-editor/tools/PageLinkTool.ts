@@ -1,5 +1,6 @@
 import type { BlockTool, BlockToolConstructorOptions } from "@editorjs/editorjs";
 import { pageTitle, t } from "@/i18n";
+import { menuIcons } from "../menuIcons";
 
 export type PageLinkData = {
   pageId: string;
@@ -21,7 +22,7 @@ export class PageLinkTool implements BlockTool {
   static get toolbox() {
     return {
       title: "Subpage · page",
-      icon: NOTES_ICON_SVG.replace('width="1em"', 'width="18"').replace('height="1em"', 'height="18"'),
+      icon: menuIcons.page,
     };
   }
 

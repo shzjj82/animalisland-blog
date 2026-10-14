@@ -1,6 +1,6 @@
 import type { API, BlockAPI, BlockTool, BlockToolConstructorOptions } from "@editorjs/editorjs";
 
-const CHAT_ICON = `<svg width="18" height="18" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M44 6H4V36H13V41L23 36H44V6Z" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 19.5V22.5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 19.5V22.5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M34 19.5V22.5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+import { menuIcons } from "../menuIcons";
 
 export type AiAssistInvokeContext = {
   blockIndex: number;
@@ -15,7 +15,7 @@ export class AiAssistTriggerTool implements BlockTool {
   static get toolbox() {
     return {
       title: "AI Chat · ai",
-      icon: CHAT_ICON,
+      icon: menuIcons.ai,
     };
   }
 

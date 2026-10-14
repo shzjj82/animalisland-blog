@@ -3,6 +3,7 @@ import { t } from "@/i18n";
 import { IMAGE_ACCEPT, isImageFile } from "@/lib/document/fileKinds";
 import { loadAttachment, type AttachmentData } from "@/store/fileStore";
 import { loadSession } from "@/store/remoteStore";
+import { menuIcons } from "../menuIcons";
 
 export type ImageBlockData = {
   file?: { url?: string };
@@ -71,7 +72,7 @@ function storedWidth(data: ImageBlockData): number | undefined {
 /** 正文里的图片。菜单、粘贴、拖入都能插入；Word 导入的图片也走这块。 */
 export class ImageBlockTool implements BlockTool {
   static get toolbox() {
-    return { title: "Image · image", icon: IMAGE_SVG };
+    return { title: "Image · image", icon: menuIcons.image };
   }
 
   static get isReadOnlySupported() {

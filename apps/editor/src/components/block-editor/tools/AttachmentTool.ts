@@ -3,6 +3,7 @@ import { t } from "@/i18n";
 import { fileTypeSvg } from "@/components/file-type-icon";
 import { ATTACHMENT_ACCEPT, fileKind, formatFileSize } from "@/lib/document/fileKinds";
 import type { AttachmentData } from "@/store/fileStore";
+import { menuIcons } from "../menuIcons";
 
 export type AttachmentToolConfig = {
   upload?: (file: File) => Promise<AttachmentData>;
@@ -23,7 +24,7 @@ function isAttachment(data: unknown): data is AttachmentData {
 /** 正文里的文件块：卡片展示，点击在侧边栏预览 */
 export class AttachmentTool implements BlockTool {
   static get toolbox() {
-    return { title: "File · file", icon: PAPERCLIP_SVG };
+    return { title: "File · file", icon: menuIcons.file };
   }
 
   static get isReadOnlySupported() {

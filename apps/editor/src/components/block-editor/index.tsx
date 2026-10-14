@@ -19,6 +19,7 @@ import type { AttachmentData } from "@/store/fileStore";
 import { htmlToBlocks } from "@/lib/document/htmlToBlocks";
 import { isImageFile } from "@/lib/document/fileKinds";
 import { bindEditingGuards } from "./editingGuards";
+import { menuIcons } from "./menuIcons";
 import { bindToolbarAnchor } from "./toolbarAnchor";
 import { revealText } from "./revealText";
 import "./blockEditor.css";
@@ -67,9 +68,6 @@ async function insertPastedImages(
     index += 1;
   }
 }
-
-const headingIcon = (label: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><text x="12" y="16.5" text-anchor="middle" font-size="${label === "H1" ? 13 : label === "H2" ? 12 : 11}" font-weight="800" font-family="ui-sans-serif,system-ui,sans-serif" fill="currentColor">${label}</text></svg>`;
 
 type Props = {
   doc: EditorJsDocument;
@@ -132,37 +130,46 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
       data: initialRef.current,
       readOnly,
       autofocus: !readOnly,
+      minHeight: 40,
       placeholder: t("blockEditor.placeholder"),
       i18n: editorI18n(),
       tools: {
+        paragraph: {
+          toolbox: { icon: menuIcons.text },
+        },
         header: {
           class: Header,
           inlineToolbar: inlineTools,
           config: { placeholder: t("blockEditor.heading"), levels: [1, 2, 3], defaultLevel: 1 },
           toolbox: [
-            { title: "Heading 1", icon: headingIcon("H1"), data: { level: 1 } },
-            { title: "Heading 2", icon: headingIcon("H2"), data: { level: 2 } },
-            { title: "Heading 3", icon: headingIcon("H3"), data: { level: 3 } },
+            { title: "Heading 1", icon: menuIcons.h1, data: { level: 1 } },
+            { title: "Heading 2", icon: menuIcons.h2, data: { level: 2 } },
+            { title: "Heading 3", icon: menuIcons.h3, data: { level: 3 } },
           ],
         },
         list: {
           class: List,
           inlineToolbar: inlineTools,
           toolbox: [
-            { title: "Unordered List", data: { style: "unordered" } },
-            { title: "Ordered List", data: { style: "ordered" } },
-            { title: "Checklist", data: { style: "checklist" } },
+            { title: "Unordered List", icon: menuIcons.ul, data: { style: "unordered" } },
+            { title: "Ordered List", icon: menuIcons.ol, data: { style: "ordered" } },
+            { title: "Checklist", icon: menuIcons.todo, data: { style: "checklist" } },
           ],
         },
         quote: {
           class: Quote,
           inlineToolbar: inlineTools,
           config: { quotePlaceholder: t("blockEditor.quote"), captionPlaceholder: t("blockEditor.caption") },
+          toolbox: { icon: menuIcons.quote },
         },
-        delimiter: Delimiter,
+        delimiter: {
+          class: Delimiter,
+          toolbox: { icon: menuIcons.line },
+        },
         table: {
           class: Table as unknown as typeof Header,
           inlineToolbar: inlineTools,
+          toolbox: { icon: menuIcons.table },
         },
         askAi: {
           class: AskAiInlineTool as unknown as typeof Header,
