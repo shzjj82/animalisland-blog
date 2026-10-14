@@ -14,6 +14,10 @@ export type ImageBlockData = {
   source?: "local" | "remote";
   /** 相对正文栏宽度的百分比。不写则按图片原始尺寸显示，最大不超过正文栏 */
   width?: number;
+  /** 不写或 left 为靠左。只有块级时，居中和右对齐才会挪位置 */
+  align?: "left" | "center" | "right";
+  /** 不写为内联并排；block 时单独占一行 */
+  layout?: "inline" | "block";
 };
 
 export type ImageToolConfig = {
@@ -23,6 +27,21 @@ export type ImageToolConfig = {
 const IMAGE_SVG = `<svg width="18" height="18" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="6" y="10" width="36" height="28" rx="3" stroke="currentColor" stroke-width="3"/><circle cx="17" cy="20" r="3" stroke="currentColor" stroke-width="3"/><path d="m6 32 10-8 8 7 6-5 12 9" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
 const TRASH_SVG = `<svg width="16" height="16" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 10v34h30V10H9Z" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><path d="M20 20v13M28 20v13M4 10h40" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="m16 10 3.3-6h9.5l3.2 6H16Z" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>`;
+
+function icon(paths: string[]): string {
+  const body = paths
+    .map((d) => `<path d="${d}" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`)
+    .join("");
+  return `<svg width="16" height="16" viewBox="0 0 48 48" fill="none" aria-hidden="true">${body}</svg>`;
+}
+
+const PREVIEW_SVG = icon(["M33 6H42V15", "M42 33V42H33", "M15 42H6V33", "M6 15V6H15"]);
+const DOWNLOAD_SVG = icon(["M6 24.0083V42H42V24", "M33 23L24 32L15 23", "M23.9917 6V32"]);
+const ALIGN_LEFT_SVG = icon(["M42 9H6", "M34 19H6", "M42 29H6", "M34 39H6"]);
+const ALIGN_CENTER_SVG = icon(["M36 19H12", "M42 9H6", "M42 29H6", "M36 39H12"]);
+const ALIGN_RIGHT_SVG = icon(["M42 9H6", "M42 19H14", "M42 29H6", "M42 39H14"]);
+const LAYOUT_INLINE_SVG = `<svg width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true"><rect x="4" y="8" width="18" height="32" rx="3" fill="currentColor"/><path d="M28 14h16M28 24h16M28 34h10" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg>`;
+const LAYOUT_BLOCK_SVG = `<svg width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M6 7h36M6 41h36" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><rect x="8" y="15" width="32" height="18" rx="3" fill="currentColor"/></svg>`;
 
 export function imageBlockData(uploaded: AttachmentData): ImageBlockData {
   return {
@@ -38,6 +57,8 @@ export function imageBlockData(uploaded: AttachmentData): ImageBlockData {
 function isImageData(data: ImageBlockData | undefined): boolean {
   return Boolean(data?.file?.url || data?.fileId);
 }
+
+type ImageCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
 function storedWidth(data: ImageBlockData): number | undefined {
   const width = data.width;
@@ -64,7 +85,14 @@ export class ImageBlockTool implements BlockTool {
   private uploading = "";
   private error = "";
   private picked = false;
-  private resizeDrag: { pointerId: number; edge: "left" | "right"; startX: number; startWidth: number; column: number } | null = null;
+  private resizeDrag: {
+    pointerId: number;
+    corner: ImageCorner;
+    startX: number;
+    startY: number;
+    startWidth: number;
+    column: number;
+  } | null = null;
   private layoutObserver: ResizeObserver | null = null;
   private api: API;
   private block: BlockAPI;
@@ -76,6 +104,8 @@ export class ImageBlockTool implements BlockTool {
     this.api = api;
     this.block = block;
     this.readOnly = readOnly;
+    this.wrapper.addEventListener("pointerenter", this.onBarEnter);
+    this.wrapper.addEventListener("pointerleave", this.onBarLeave);
   }
 
   render() {
@@ -95,6 +125,13 @@ export class ImageBlockTool implements BlockTool {
       this.paintEmpty();
       return;
     }
+    if (this.data.layout === "block") {
+      this.wrapper.classList.add("is-layout-block");
+    }
+    const align = this.data.align;
+    if (align === "left" || align === "center" || align === "right") {
+      this.wrapper.classList.add(`is-align-${align}`);
+    }
     const frame = document.createElement("div");
     frame.className = "cdx-image__frame";
     const width = storedWidth(this.data);
@@ -105,6 +142,11 @@ export class ImageBlockTool implements BlockTool {
     const img = document.createElement("img");
     img.alt = this.data.caption || this.data.name || "";
     img.draggable = false;
+    img.addEventListener("dblclick", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.openPreview();
+    });
     if (this.objectUrl) {
       img.src = this.objectUrl;
     } else {
@@ -128,9 +170,15 @@ export class ImageBlockTool implements BlockTool {
           .catch(() => undefined);
       }
     }
-    frame.append(img);
+    frame.append(img, this.hoverBar());
     if (!this.readOnly) {
-      frame.append(this.resizeHandle("left"), this.resizeHandle("right"), this.deleteButton());
+      frame.addEventListener("pointerdown", this.onFramePointerDown);
+      frame.append(
+        this.resizeHandle("top-left"),
+        this.resizeHandle("top-right"),
+        this.resizeHandle("bottom-left"),
+        this.resizeHandle("bottom-right"),
+      );
     }
     this.wrapper.append(frame);
     if (storedWidth(this.data)) {
@@ -184,31 +232,380 @@ export class ImageBlockTool implements BlockTool {
     this.layoutObserver.observe(redactor);
   }
 
-  private resizeHandle(edge: "left" | "right"): HTMLButtonElement {
+  private onFramePointerDown = (event: PointerEvent) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest(".cdx-image__resize, .cdx-image__bar")) {
+      return;
+    }
+    this.select();
+  };
+
+  /** 点中后才出现四角圆点；再点到图片外面就收起 */
+  private select() {
+    document.querySelectorAll(".cdx-image.is-selected").forEach((node) => {
+      if (node !== this.wrapper) {
+        node.classList.remove("is-selected");
+      }
+    });
+    if (this.wrapper.classList.contains("is-selected")) {
+      return;
+    }
+    this.wrapper.classList.add("is-selected");
+    document.addEventListener("pointerdown", this.onOutsidePointerDown);
+  }
+
+  private deselect() {
+    this.wrapper.classList.remove("is-selected");
+    document.removeEventListener("pointerdown", this.onOutsidePointerDown);
+  }
+
+  private onOutsidePointerDown = (event: PointerEvent) => {
+    if (this.resizeDrag) {
+      return;
+    }
+    const target = event.target;
+    if (target instanceof Node && this.wrapper.contains(target)) {
+      return;
+    }
+    this.deselect();
+  };
+
+  private resizeHandle(corner: ImageCorner): HTMLButtonElement {
     const handle = document.createElement("button");
     handle.type = "button";
-    handle.className = `cdx-image__resize cdx-image__resize--${edge}`;
+    handle.className = `cdx-image__resize cdx-image__resize--${corner}`;
     handle.setAttribute("aria-label", t("image.resize"));
-    handle.addEventListener("pointerdown", (event) => this.beginResize(event, edge));
+    handle.addEventListener("pointerdown", (event) => this.beginResize(event, corner));
     handle.addEventListener("dragstart", (event) => event.preventDefault());
     return handle;
   }
 
-  private deleteButton(): HTMLButtonElement {
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "cdx-image__delete";
-    remove.setAttribute("aria-label", t("image.delete"));
-    remove.innerHTML = TRASH_SVG;
-    remove.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      this.removeBlock();
-    });
-    return remove;
+  private hoverBar(): HTMLDivElement {
+    const bar = document.createElement("div");
+    bar.className = "cdx-image__bar";
+    bar.setAttribute("role", "toolbar");
+    const preview = this.actionButton(t("image.preview"), PREVIEW_SVG, () => this.openPreview());
+    const download = this.actionButton(t("image.download"), DOWNLOAD_SVG, () => void this.downloadImage());
+    bar.append(preview, download);
+    if (!this.readOnly) {
+      bar.append(
+        this.barDivider(),
+        this.layoutControl(),
+        this.alignControl(),
+        this.barDivider(),
+        this.actionButton(t("image.delete"), TRASH_SVG, () => this.removeBlock(), "is-danger"),
+      );
+    }
+    return bar;
   }
 
-  private beginResize(event: PointerEvent, edge: "left" | "right") {
+  private barDivider(): HTMLSpanElement {
+    const divider = document.createElement("span");
+    divider.className = "cdx-image__bar-divider";
+    divider.setAttribute("aria-hidden", "true");
+    return divider;
+  }
+
+  private actionButton(label: string, svg: string, onClick: () => void, extra?: string): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = extra ? `cdx-image__action ${extra}` : "cdx-image__action";
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    button.innerHTML = svg;
+    button.addEventListener("pointerdown", (event) => event.stopPropagation());
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onClick();
+    });
+    return button;
+  }
+
+  private layoutControl(): HTMLButtonElement {
+    return this.actionButton(this.layoutLabel(), this.data.layout === "block" ? LAYOUT_BLOCK_SVG : LAYOUT_INLINE_SVG, () => this.toggleLayout(), "is-layout");
+  }
+
+  private layoutLabel(): string {
+    return this.data.layout === "block" ? t("image.layoutBlock") : t("image.layoutInline");
+  }
+
+  private toggleLayout() {
+    const block = this.data.layout !== "block";
+    this.data = { ...this.data, layout: block ? "block" : undefined };
+    this.wrapper.classList.toggle("is-layout-block", block);
+    const button = this.wrapper.querySelector<HTMLButtonElement>(".cdx-image__action.is-layout");
+    if (button) {
+      const label = this.layoutLabel();
+      button.innerHTML = block ? LAYOUT_BLOCK_SVG : LAYOUT_INLINE_SVG;
+      button.title = label;
+      button.setAttribute("aria-label", label);
+    }
+    this.setAlignEnabled(block);
+    if (!block) {
+      this.setAlignMenuOpen(false);
+    }
+    this.block.dispatchChange();
+  }
+
+  private currentAlign(): "left" | "center" | "right" {
+    return this.data.align === "center" || this.data.align === "right" ? this.data.align : "left";
+  }
+
+  private alignLabel(align: "left" | "center" | "right"): string {
+    if (align === "center") {
+      return t("image.alignCenter");
+    }
+    if (align === "right") {
+      return t("image.alignRight");
+    }
+    return t("image.alignLeft");
+  }
+
+  private alignIcon(align: "left" | "center" | "right"): string {
+    if (align === "center") {
+      return ALIGN_CENTER_SVG;
+    }
+    if (align === "right") {
+      return ALIGN_RIGHT_SVG;
+    }
+    return ALIGN_LEFT_SVG;
+  }
+
+  /** 按钮显示当前对齐，点开后再选左对齐、居中或右对齐 */
+  private alignControl(): HTMLDivElement {
+    const align = this.currentAlign();
+    const wrap = document.createElement("div");
+    wrap.className = "cdx-image__align";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "cdx-image__action is-align";
+    button.setAttribute("aria-haspopup", "menu");
+    button.setAttribute("aria-expanded", "false");
+    button.title = this.alignLabel(align);
+    button.setAttribute("aria-label", this.alignLabel(align));
+    button.innerHTML = this.alignIcon(align);
+    button.addEventListener("pointerdown", (event) => event.stopPropagation());
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (button.disabled) {
+        return;
+      }
+      this.setAlignMenuOpen(!wrap.classList.contains("is-open"));
+    });
+    const menu = document.createElement("div");
+    menu.className = "cdx-image__align-menu";
+    menu.hidden = true;
+    menu.setAttribute("role", "menu");
+    for (const item of ["left", "center", "right"] as const) {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = "cdx-image__align-option";
+      option.dataset.align = item;
+      option.setAttribute("role", "menuitemradio");
+      option.setAttribute("aria-checked", String(item === align));
+      option.classList.toggle("is-active", item === align);
+      option.innerHTML = `${this.alignIcon(item)}<span>${this.alignLabel(item)}</span>`;
+      option.addEventListener("pointerdown", (event) => event.stopPropagation());
+      option.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.setAlign(item);
+        this.setAlignMenuOpen(false);
+      });
+      menu.append(option);
+    }
+    wrap.append(button, menu);
+    if (this.data.layout !== "block") {
+      button.disabled = true;
+      button.title = t("image.alignDisabled");
+      button.setAttribute("aria-label", t("image.alignDisabled"));
+    }
+    return wrap;
+  }
+
+  private setAlignEnabled(enabled: boolean) {
+    const button = this.wrapper.querySelector<HTMLButtonElement>(".cdx-image__action.is-align");
+    if (!button) {
+      return;
+    }
+    button.disabled = !enabled;
+    const label = enabled ? this.alignLabel(this.currentAlign()) : t("image.alignDisabled");
+    button.title = label;
+    button.setAttribute("aria-label", label);
+  }
+
+  private setAlignMenuOpen(open: boolean) {
+    const align = this.wrapper.querySelector(".cdx-image__align");
+    const menu = this.wrapper.querySelector<HTMLElement>(".cdx-image__align-menu");
+    const button = this.wrapper.querySelector(".cdx-image__action.is-align");
+    align?.classList.toggle("is-open", open);
+    this.wrapper.classList.toggle("is-align-open", open);
+    if (menu) {
+      menu.hidden = !open;
+    }
+    button?.setAttribute("aria-expanded", String(open));
+    document.removeEventListener("pointerdown", this.onAlignMenuOutside);
+    if (open) {
+      document.addEventListener("pointerdown", this.onAlignMenuOutside);
+    }
+    requestAnimationFrame(() => this.placeBar());
+  }
+
+  /** 下方放不下操作条时翻到图片上方，避免被滚动容器裁掉 */
+  private placeBar = () => {
+    const frame = this.wrapper.querySelector(".cdx-image__frame");
+    const bar = this.wrapper.querySelector(".cdx-image__bar");
+    if (!(frame instanceof HTMLElement) || !(bar instanceof HTMLElement)) {
+      return;
+    }
+    const rect = frame.getBoundingClientRect();
+    const scroller = this.scrollParent();
+    const bounds = scroller?.getBoundingClientRect();
+    const topLimit = Math.max(0, bounds?.top ?? 0);
+    const bottomLimit = Math.min(window.innerHeight, bounds?.bottom ?? window.innerHeight);
+    const menu = this.wrapper.querySelector(".cdx-image__align-menu");
+    const menuHeight = menu instanceof HTMLElement && !menu.hidden ? menu.offsetHeight + 8 : 0;
+    const needed = Math.max(bar.offsetHeight, 36) + 8 + menuHeight;
+    const spaceBelow = bottomLimit - rect.bottom;
+    const spaceAbove = rect.top - topLimit;
+    this.wrapper.classList.toggle("is-bar-above", spaceBelow < needed && spaceAbove > spaceBelow);
+  };
+
+  private scrollParent(): HTMLElement | null {
+    let node = this.wrapper.parentElement;
+    while (node && node !== document.body) {
+      const overflow = getComputedStyle(node).overflowY;
+      if (overflow === "auto" || overflow === "scroll") {
+        return node;
+      }
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  private onBarEnter = () => {
+    this.placeBar();
+    this.scrollParent()?.addEventListener("scroll", this.placeBar);
+    window.addEventListener("scroll", this.placeBar, true);
+    window.addEventListener("resize", this.placeBar);
+  };
+
+  private onBarLeave = () => {
+    if (this.wrapper.matches(":hover") || this.wrapper.classList.contains("is-align-open")) {
+      return;
+    }
+    this.scrollParent()?.removeEventListener("scroll", this.placeBar);
+    window.removeEventListener("scroll", this.placeBar, true);
+    window.removeEventListener("resize", this.placeBar);
+  };
+
+  private stopBarWatch() {
+    this.scrollParent()?.removeEventListener("scroll", this.placeBar);
+    window.removeEventListener("scroll", this.placeBar, true);
+    window.removeEventListener("resize", this.placeBar);
+  }
+
+  private onAlignMenuOutside = (event: PointerEvent) => {
+    const align = this.wrapper.querySelector(".cdx-image__align");
+    if (align && event.target instanceof Node && align.contains(event.target)) {
+      return;
+    }
+    this.setAlignMenuOpen(false);
+  };
+
+  private setAlign(align: "left" | "center" | "right") {
+    this.data = { ...this.data, align, layout: "block" };
+    this.wrapper.classList.add("is-layout-block");
+    this.wrapper.classList.remove("is-align-left", "is-align-center", "is-align-right");
+    this.wrapper.classList.add(`is-align-${align}`);
+    const layoutButton = this.wrapper.querySelector<HTMLButtonElement>(".cdx-image__action.is-layout");
+    if (layoutButton) {
+      const label = t("image.layoutBlock");
+      layoutButton.innerHTML = LAYOUT_BLOCK_SVG;
+      layoutButton.title = label;
+      layoutButton.setAttribute("aria-label", label);
+    }
+    const button = this.wrapper.querySelector<HTMLButtonElement>(".cdx-image__action.is-align");
+    if (button) {
+      const label = this.alignLabel(align);
+      button.innerHTML = this.alignIcon(align);
+      button.title = label;
+      button.setAttribute("aria-label", label);
+    }
+    this.wrapper.querySelectorAll<HTMLButtonElement>(".cdx-image__align-option").forEach((option) => {
+      const selected = option.dataset.align === align;
+      option.classList.toggle("is-active", selected);
+      option.setAttribute("aria-checked", String(selected));
+    });
+    this.block.dispatchChange();
+  }
+
+  private publicUrl(): string {
+    const url = this.data.file?.url?.trim() ?? "";
+    return /^https?:\/\//i.test(url) ? url : "";
+  }
+
+  private imageSource(): string {
+    return this.wrapper.querySelector("img")?.currentSrc || this.wrapper.querySelector("img")?.src || this.publicUrl();
+  }
+
+  private openPreview() {
+    const src = this.imageSource();
+    if (!src) {
+      return;
+    }
+    const overlay = document.createElement("div");
+    overlay.className = "cdx-image-preview";
+    const image = document.createElement("img");
+    image.src = src;
+    image.alt = this.data.caption || this.data.name || "";
+    image.addEventListener("click", (event) => event.stopPropagation());
+    overlay.append(image);
+    const close = () => {
+      overlay.remove();
+      document.removeEventListener("keydown", onKey);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    };
+    overlay.addEventListener("click", close);
+    document.addEventListener("keydown", onKey);
+    document.body.append(overlay);
+  }
+
+  private async downloadImage() {
+    const src = this.imageSource();
+    if (!src) {
+      return;
+    }
+    const name = this.data.name || "image";
+    try {
+      const response = await fetch(src);
+      if (!response.ok) {
+        throw new Error("download");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = name;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      const link = document.createElement("a");
+      link.href = this.publicUrl() || src;
+      link.download = name;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.click();
+    }
+  }
+
+  private beginResize(event: PointerEvent, corner: ImageCorner) {
     if (this.readOnly || !(event.currentTarget instanceof HTMLElement)) {
       return;
     }
@@ -218,14 +615,18 @@ export class ImageBlockTool implements BlockTool {
     }
     event.preventDefault();
     event.stopPropagation();
+    this.select();
     const column = this.columnWidth() || frame.getBoundingClientRect().width;
     this.resizeDrag = {
       pointerId: event.pointerId,
-      edge,
+      corner,
       startX: event.clientX,
+      startY: event.clientY,
       startWidth: frame.getBoundingClientRect().width,
       column,
     };
+    const cursor = corner === "top-left" || corner === "bottom-right" ? "nwse-resize" : "nesw-resize";
+    document.documentElement.style.setProperty("--image-resize-cursor", cursor);
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
     } catch {
@@ -238,14 +639,16 @@ export class ImageBlockTool implements BlockTool {
     document.addEventListener("pointercancel", this.onResizeEnd);
   }
 
-  /** 图片靠左，左边缘不动。向右拖右侧手柄，右边缘跟着光标；拖左侧手柄同样只改宽度 */
+  /** 四角圆点都改宽度，图片仍靠左。往外拖变大，往里拖变小 */
   private onResizeMove = (event: PointerEvent) => {
     const drag = this.resizeDrag;
     const frame = this.wrapper.querySelector(".cdx-image__frame");
     if (!drag || event.pointerId !== drag.pointerId || !(frame instanceof HTMLElement) || drag.column <= 0) {
       return;
     }
-    const along = drag.edge === "left" ? drag.startX - event.clientX : event.clientX - drag.startX;
+    const dx = drag.corner.endsWith("right") ? event.clientX - drag.startX : drag.startX - event.clientX;
+    const dy = drag.corner.startsWith("bottom") ? event.clientY - drag.startY : drag.startY - event.clientY;
+    const along = Math.abs(dx) >= Math.abs(dy) ? dx : dy;
     const min = Math.min(drag.column, Math.max(120, drag.column * 0.12));
     const next = Math.min(drag.column, Math.max(min, drag.startWidth + along));
     frame.classList.add("is-resized");
@@ -263,6 +666,7 @@ export class ImageBlockTool implements BlockTool {
     document.removeEventListener("pointercancel", this.onResizeEnd);
     this.wrapper.classList.remove("is-resizing");
     document.documentElement.classList.remove("is-image-resizing");
+    document.documentElement.style.removeProperty("--image-resize-cursor");
     const frame = this.wrapper.querySelector(".cdx-image__frame");
     if (!(frame instanceof HTMLElement) || drag.column <= 0) {
       return;
@@ -393,10 +797,14 @@ export class ImageBlockTool implements BlockTool {
     this.layoutObserver?.disconnect();
     this.layoutObserver = null;
     this.wrapper.removeEventListener("click", this.handleEmptyClick);
+    document.removeEventListener("pointerdown", this.onOutsidePointerDown);
+    document.removeEventListener("pointerdown", this.onAlignMenuOutside);
+    this.stopBarWatch();
     document.removeEventListener("pointermove", this.onResizeMove);
     document.removeEventListener("pointerup", this.onResizeEnd);
     document.removeEventListener("pointercancel", this.onResizeEnd);
     document.documentElement.classList.remove("is-image-resizing");
+    document.documentElement.style.removeProperty("--image-resize-cursor");
     if (this.objectUrl) {
       URL.revokeObjectURL(this.objectUrl);
       this.objectUrl = "";

@@ -245,6 +245,19 @@
   max-width: 100%;
 }
 
+/* 块级时退出并排，单独占满一行，对齐才有位置可挪 */
+.ce-block:has(> .ce-block__content > .cdx-image.is-layout-block:not(.is-empty):not(.is-loading)) {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  margin-right: 0;
+}
+
+.ce-block:has(> .ce-block__content > .cdx-image.is-layout-block:not(.is-empty):not(.is-loading)) > .ce-block__content {
+  width: 100%;
+  max-width: 100%;
+}
+
 .cdx-attachment {
   position: relative;
   display: flex;
