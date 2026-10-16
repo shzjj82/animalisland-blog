@@ -15,7 +15,6 @@ import {
   type LocalAttachment,
 } from "@/lib/ai/chat";
 import { readFileText } from "@/lib/document/fileText";
-import { retrieveWiki, type SearchDoc } from "@/lib/document/search";
 import { fileExtension } from "@/lib/document/fileKinds";
 import { iconParkOutline } from "@/lib/iconPark";
 import { t } from "@/i18n";
@@ -25,7 +24,6 @@ type Props = {
   open: boolean;
   focusToken: number;
   loggedIn: boolean;
-  loadDocs: () => Promise<SearchDoc[]>;
   onClose: () => void;
   onLogin: () => void;
 };
@@ -79,7 +77,7 @@ function userContent(question: string, files: LocalAttachment[] | undefined, upl
   return `${filePart}\n\n${questionPart}`;
 }
 
-export function WikiChat({ open, focusToken, loggedIn, loadDocs, onClose, onLogin }: Props) {
+export function WikiChat({ open, focusToken, loggedIn, onClose, onLogin }: Props) {
   const { t: tr } = useTranslation();
   const [prompt, setPrompt] = useState("");
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
@@ -167,19 +165,9 @@ export function WikiChat({ open, focusToken, loggedIn, loadDocs, onClose, onLogi
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const docs = loggedIn ? await loadDocs() : [];
-      const hits = text ? retrieveWiki(docs, text) : [];
       const uploadedFiles = toApiAttachments(attach).filter((item) =>
         item.kind === "image" ? Boolean(item.url) : Boolean(item.text.trim()),
       );
-      const wikiFiles: AiAttachment[] = hits.map((hit) => ({
-        kind: "text" as const,
-        name: hit.title,
-        text: hit.excerpt || tr("wikiAsk.empty"),
-      }));
-      if (!hits.length && text && !uploadedFiles.length) {
-        wikiFiles.push({ kind: "text", name: tr("wikiAsk.title"), text: tr("wikiAsk.empty") });
-      }
       const messages: AiChatMessage[] = history
         .map((item) => ({
           role: item.role,
@@ -198,8 +186,9 @@ export function WikiChat({ open, focusToken, loggedIn, loadDocs, onClose, onLogi
       const result = await aiChat(
         {
           messages,
-          attachments: capImages([...uploadedFiles, ...wikiFiles]),
+          attachments: capImages(uploadedFiles),
           system: t("wikiAsk.system"),
+          rag: true,
         },
         controller.signal,
         {
@@ -211,11 +200,7 @@ export function WikiChat({ open, focusToken, loggedIn, loadDocs, onClose, onLogi
         },
       );
       const finalText = result.reply.trim() || tr("spotlight.emptyReply");
-      const sources = hits.map((hit) => hit.title).filter(Boolean);
-      const withSources = sources.length
-        ? `${finalText}\n\n${tr("wikiAsk.sources")}: ${sources.join(tr("common.listSeparator"))}`
-        : finalText;
-      setBubbles((prev) => prev.map((item) => (item.id === assistantId ? { ...item, content: withSources } : item)));
+      setBubbles((prev) => prev.map((item) => (item.id === assistantId ? { ...item, content: finalText } : item)));
     } catch (err) {
       if (controller.signal.aborted) {
         return;

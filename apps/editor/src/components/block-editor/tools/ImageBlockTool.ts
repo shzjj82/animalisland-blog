@@ -151,25 +151,25 @@ export class ImageBlockTool implements BlockTool {
     if (this.objectUrl) {
       img.src = this.objectUrl;
     } else {
-      const url = this.data.file?.url?.trim() ?? "";
-      if (url) {
-        img.src = url;
-      } else if (this.data.fileId && this.data.name && this.data.source) {
-        const stored: AttachmentData = {
-          fileId: this.data.fileId,
-          name: this.data.name,
-          size: this.data.size ?? 0,
-          mime: this.data.mime || "image/png",
-          source: this.data.source,
-          url: this.data.file?.url,
-        };
-        void loadAttachment(loadSession(), stored)
-          .then((blob) => {
-            this.objectUrl = URL.createObjectURL(blob);
-            img.src = this.objectUrl;
-          })
-          .catch(() => undefined);
-      }
+    const url = this.data.file?.url?.trim() ?? "";
+    if (url) {
+      img.src = url;
+    } else if (this.data.fileId && this.data.name && this.data.source) {
+      const stored: AttachmentData = {
+        fileId: this.data.fileId,
+        name: this.data.name,
+        size: this.data.size ?? 0,
+        mime: this.data.mime || "image/png",
+        source: this.data.source,
+        url: this.data.file?.url,
+      };
+      void loadAttachment(loadSession(), stored)
+        .then((blob) => {
+          this.objectUrl = URL.createObjectURL(blob);
+          img.src = this.objectUrl;
+        })
+        .catch(() => undefined);
+    }
     }
     frame.append(img, this.hoverBar());
     if (!this.readOnly) {

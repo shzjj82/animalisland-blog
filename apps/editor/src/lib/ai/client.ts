@@ -155,13 +155,19 @@ export type AiChatStreamHandlers = {
   onDelta?: (delta: string) => void;
 };
 
-/** Nest 流式聊天（sync:false）；「添加到页面」仍用本地 Markdown → Editor.js */
+/**
+ * Nest 流式聊天（sync:false）。
+ * `rag: true` 时网关会再调 `POST /agents/rag/search`，业务须同时开通 agents.chat 与 agents.rag。
+ * 「添加到页面」仍用本地 Markdown → Editor.js。
+ */
 export async function aiChat(
   input: {
     messages: AiChatMessage[];
     attachments?: AiAttachment[];
     document?: EditorJsDocument;
     system?: string;
+    /** 根据 wiki 文档回答。只检索不聊天时不要走这里，改调 rag 接口。 */
+    rag?: boolean;
   },
   signal?: AbortSignal,
   handlers?: AiChatStreamHandlers,
@@ -179,6 +185,7 @@ export async function aiChat(
         messages,
         attachments: input.attachments,
         system: input.system,
+        ...(input.rag ? { rag: true } : {}),
       }),
       signal,
     });

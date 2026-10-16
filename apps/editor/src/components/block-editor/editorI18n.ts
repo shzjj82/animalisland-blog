@@ -40,6 +40,7 @@ export function editorI18n() {
         "Unordered List": "无序列表 · ul",
         "Ordered List": "有序列表 · ol",
         Checklist: "待办 · todo",
+        "Todo · todo": "待办 · todo",
         Quote: "引用",
         Table: "表格",
         Delimiter: "分隔线",

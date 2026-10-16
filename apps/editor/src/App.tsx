@@ -1295,7 +1295,6 @@ export function App() {
         open={wikiOpen}
         focusToken={wikiFocus}
         loggedIn={Boolean(session)}
-        loadDocs={() => loadSearchDocs(session, nodes)}
         onClose={() => setWikiOpen(false)}
         onLogin={() => {
           setWikiOpen(false);

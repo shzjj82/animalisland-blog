@@ -60,6 +60,9 @@ export function aiErrorMessage(message: string): string {
   if (message === "AI_NOT_CONFIGURED" || message === "FORBIDDEN") {
     return t("ai.notConfigured");
   }
+  if (message.includes("未开通")) {
+    return t("ai.featureDisabled", { detail: message });
+  }
   if (message === "GATEWAY_UNAVAILABLE" || message === "AI_FAILED") {
     return t("ai.gatewayUnavailable");
   }

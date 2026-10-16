@@ -269,6 +269,18 @@ function blocksToChildren(doc: EditorJsDocument): FileChild[] {
           children.push(cardLine(String(data.name)));
         }
         break;
+      case "todo": {
+        const todos = (data.items as { text?: string; done?: boolean; start?: string; end?: string }[] | undefined) ?? [];
+        for (const item of todos) {
+          const mark = item.done ? "☑" : "☐";
+          const dates = [item.start, item.end].filter(Boolean).join(" → ");
+          const line = `${mark} ${String(item.text ?? "").trim()}${dates ? ` (${dates})` : ""}`.trim();
+          if (line) {
+            children.push(new Paragraph({ spacing: BODY_SPACING, children: [textRun(line)] }));
+          }
+        }
+        break;
+      }
       default:
         break;
     }

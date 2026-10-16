@@ -236,6 +236,21 @@ function blocksToContent(doc: EditorJsDocument): PdfNode[] {
       case "paragraph":
         content.push({ text: inlineSpans(String(data.text ?? "")), margin: [0, 2, 0, 4] });
         break;
+      case "todo": {
+        const todos = (data.items as { text?: string; done?: boolean }[] | undefined) ?? [];
+        for (const item of todos) {
+          const line = `${item.done ? "☑" : "☐"} ${stripTags(String(item.text ?? "")).trim()}`.trim();
+          if (!line) {
+            continue;
+          }
+          content.push({
+            text: line,
+            margin: [0, 2, 0, 2],
+            ...(item.done ? { decoration: "lineThrough", color: MUTED } : {}),
+          });
+        }
+        break;
+      }
       case "list": {
         const style = String(data.style ?? "unordered");
         const items = (data.items as ListItem[] | undefined) ?? [];

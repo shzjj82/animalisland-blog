@@ -52,6 +52,11 @@ export function documentText(body: EditorJsDocument): string {
       case "attachment":
         parts.push(plain(data.name));
         break;
+      case "todo":
+        parts.push(
+          ...((data.items as { text?: string }[] | undefined) ?? []).map((item) => plain(item.text)),
+        );
+        break;
     }
   }
   return parts.map((part) => part.trim()).filter(Boolean).join(" ");

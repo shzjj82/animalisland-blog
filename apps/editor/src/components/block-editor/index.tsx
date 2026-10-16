@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 import { PageLinkTool, type PageLinkData } from "./tools/PageLinkTool";
 import { AttachmentTool } from "./tools/AttachmentTool";
 import { ImageBlockTool, imageBlockData } from "./tools/ImageBlockTool";
+import { TodoBlockTool } from "./tools/TodoBlockTool";
 import { VideoBlockTool } from "./tools/VideoBlockTool";
 import type { AttachmentData } from "@/store/fileStore";
 import { htmlToBlocks } from "@/lib/document/htmlToBlocks";
@@ -153,8 +154,10 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
           toolbox: [
             { title: "Unordered List", icon: menuIcons.ul, data: { style: "unordered" } },
             { title: "Ordered List", icon: menuIcons.ol, data: { style: "ordered" } },
-            { title: "Checklist", icon: menuIcons.todo, data: { style: "checklist" } },
           ],
+        },
+        todo: {
+          class: TodoBlockTool as unknown as typeof Header,
         },
         quote: {
           class: Quote,

@@ -46,8 +46,22 @@ function emptyTextLineBox(host: HTMLElement): DOMRect | null {
   return new DOMRect(rect.x, rect.y + borderTop + paddingTop, rect.width, lineHeight);
 }
 
+/** 待办块较高，手柄对齐顶部标签行，而不是整块垂直居中。 */
+function todoHeadBox(block: HTMLElement): DOMRect | null {
+  const head = block.querySelector<HTMLElement>(".cdx-todo__head");
+  if (!head) {
+    return null;
+  }
+  const rect = head.getBoundingClientRect();
+  return rect.height > 0 ? rect : null;
+}
+
 /** 第一行文字的实际盒子。没有文字时仍按这一行的中心对齐；图片等内容则对齐整块中心。 */
 function firstLineBox(block: HTMLElement): DOMRect | null {
+  const todo = todoHeadBox(block);
+  if (todo) {
+    return todo;
+  }
   const editable = block.querySelector<HTMLElement>("[contenteditable='true']");
   if (editable) {
     return textLineBox(editable) ?? emptyTextLineBox(editable);
@@ -86,7 +100,7 @@ function blockIconKey(block: HTMLElement): string {
   if (block.querySelector(".cdx-list-ordered")) {
     return "ol";
   }
-  if (block.querySelector(".cdx-list-checklist")) {
+  if (block.querySelector(".cdx-todo, .cdx-list-checklist")) {
     return "todo";
   }
   if (block.querySelector(".cdx-list")) {
