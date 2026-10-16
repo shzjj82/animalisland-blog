@@ -590,6 +590,9 @@ html.is-image-resizing * {
   flex-direction: column;
   gap: 10px;
   margin: 6px 0 10px;
+  padding: 12px;
+  border: 1px solid #eceae4;
+  border-radius: 12px;
 }
 
 .notion-editor .cdx-todo__head {
