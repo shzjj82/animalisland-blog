@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Close, Paperclip, Robot } from "@icon-park/react";
+import { Close, Copy, Paperclip, Refresh, Robot } from "@icon-park/react";
 import type { AiAttachment, AiChatMessage } from "@myblog/shared";
 import { Button } from "@/components/ui/button";
 import { ChatMarkdown } from "@/components/editor-spotlight/ChatMarkdown";
@@ -17,6 +17,7 @@ import {
 import { readFileText } from "@/lib/document/fileText";
 import { fileExtension } from "@/lib/document/fileKinds";
 import { pageTodos, retrieveWiki, type SearchDoc } from "@/lib/document/search";
+import { copyText } from "@/lib/clipboard";
 import { iconParkOutline } from "@/lib/iconPark";
 import { t } from "@/i18n";
 import { useTranslation } from "react-i18next";
@@ -122,10 +123,13 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [replyingId, setReplyingId] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const copiedTimer = useRef(0);
 
   useEffect(() => {
     if (!open) {
@@ -181,24 +185,13 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
     }
   };
 
-  const send = async () => {
-    const text = prompt.trim();
-    if ((!text && !attachments.length) || sending) {
-      return;
-    }
-    if (!loggedIn) {
-      setError(tr("wikiAsk.login"));
-      return;
-    }
-    const attach = attachments;
-    const user: ChatBubble = { id: uid(), role: "user", content: text, attachments: attach.length ? attach : undefined };
-    const history = [...bubbles, user];
-    const assistantId = uid();
-    setBubbles([...history, { id: assistantId, role: "assistant", content: "" }]);
-    setPrompt("");
-    setAttachments([]);
+  const answer = async (history: ChatBubble[], assistantId: string, onFail: () => void) => {
+    const user = [...history].reverse().find((item) => item.role === "user");
+    const text = user?.content.trim() ?? "";
+    const attach = user?.attachments ?? [];
     setError("");
     setSending(true);
+    setReplyingId(assistantId);
     const controller = new AbortController();
     abortRef.current = controller;
     try {
@@ -269,14 +262,75 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
         return;
       }
       setError(aiErrorMessage(err instanceof Error ? err.message : tr("spotlight.failedToSend")));
-      setBubbles((prev) => prev.filter((item) => item.id !== user.id && item.id !== assistantId));
-      setPrompt(text);
-      setAttachments(attach);
+      onFail();
     } finally {
       if (!controller.signal.aborted) {
         setSending(false);
+        setReplyingId(null);
       }
     }
+  };
+
+  const send = async () => {
+    const text = prompt.trim();
+    if ((!text && !attachments.length) || sending) {
+      return;
+    }
+    if (!loggedIn) {
+      setError(tr("wikiAsk.login"));
+      return;
+    }
+    const attach = attachments;
+    const user: ChatBubble = { id: uid(), role: "user", content: text, attachments: attach.length ? attach : undefined };
+    const history = [...bubbles, user];
+    const assistantId = uid();
+    setBubbles([...history, { id: assistantId, role: "assistant", content: "" }]);
+    setPrompt("");
+    setAttachments([]);
+    void answer(history, assistantId, () => {
+      setBubbles((prev) => prev.filter((item) => item.id !== user.id && item.id !== assistantId));
+      setPrompt(text);
+      setAttachments(attach);
+    });
+  };
+
+  const regenerate = (assistantId: string) => {
+    if (sending) {
+      return;
+    }
+    const index = bubbles.findIndex((item) => item.id === assistantId);
+    if (index < 0) {
+      return;
+    }
+    let userIndex = -1;
+    for (let i = index - 1; i >= 0; i -= 1) {
+      if (bubbles[i]?.role === "user") {
+        userIndex = i;
+        break;
+      }
+    }
+    if (userIndex < 0) {
+      return;
+    }
+    const previous = bubbles[index]?.content ?? "";
+    const history = bubbles.slice(0, userIndex + 1);
+    setBubbles([...history, { id: assistantId, role: "assistant", content: "" }]);
+    void answer(history, assistantId, () => {
+      setBubbles((prev) => prev.map((item) => (item.id === assistantId ? { ...item, content: previous } : item)));
+    });
+  };
+
+  const copyReply = async (item: ChatBubble) => {
+    const ok = await copyText(item.content);
+    if (!ok) {
+      setError(tr("wikiAsk.copyFailed"));
+      return;
+    }
+    setCopiedId(item.id);
+    window.clearTimeout(copiedTimer.current);
+    copiedTimer.current = window.setTimeout(() => {
+      setCopiedId((current) => (current === item.id ? null : current));
+    }, 1600);
   };
 
   return (
@@ -290,9 +344,23 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
       </header>
       <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
         {bubbles.map((item) => (
-          <div key={item.id} className={item.role === "user" ? "text-sm" : "rounded-md bg-muted px-3 py-2 text-sm"}>
+          <div key={item.id} className={item.role === "user" ? "select-text text-sm" : "select-text rounded-md bg-muted px-3 py-2 text-sm"}>
             {item.role === "assistant" ? (
-              <ChatMarkdown content={item.content || (sending ? tr("spotlight.thinking") : "")} />
+              <>
+                <ChatMarkdown content={item.content || (sending && item.id === replyingId ? tr("spotlight.thinking") : "")} />
+                {item.content.trim() && item.id !== replyingId ? (
+                  <div className="mt-2 flex items-center gap-1">
+                    <Button type="button" variant="ghost" size="xs" onClick={() => void copyReply(item)}>
+                      <Copy {...iconParkOutline} size={14} />
+                      {copiedId === item.id ? tr("wikiAsk.copied") : tr("wikiAsk.copy")}
+                    </Button>
+                    <Button type="button" variant="ghost" size="xs" disabled={sending} onClick={() => regenerate(item.id)}>
+                      <Refresh {...iconParkOutline} size={14} />
+                      {tr("wikiAsk.regenerate")}
+                    </Button>
+                  </div>
+                ) : null}
+              </>
             ) : (
               <>
                 {item.content}
