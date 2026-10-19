@@ -278,6 +278,23 @@ export function blocksToPreviewMarkdown(blocks: EditorJsBlock[]): string {
         }
         break;
       }
+      case "todo": {
+        const items = Array.isArray(data.items) ? data.items : [];
+        const lines = items
+          .map((item) => {
+            const row = item as { text?: string; done?: boolean };
+            const text = stripHtml(String(row.text ?? ""));
+            if (!text) {
+              return "";
+            }
+            return `- [${row.done ? "x" : " "}] ${text}`;
+          })
+          .filter(Boolean);
+        if (lines.length) {
+          parts.push(lines.join("\n"));
+        }
+        break;
+      }
       default: {
         const text = stripHtml(String(data.text ?? "").trim());
         if (text) {

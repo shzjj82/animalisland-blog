@@ -75,7 +75,7 @@ export function EditorSpotlight({
   const messageRef = useRef<HTMLTextAreaElement>(null);
   const composingRef = useRef(false);
 
-  const chat = useSpotlightChat({ open, editor, insertIndex, onInserted });
+  const chat = useSpotlightChat({ open, editor, insertIndex, loadPages, onInserted });
   const {
     prompt,
     setPrompt,

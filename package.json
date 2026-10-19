@@ -23,7 +23,9 @@
     "pm2:reload": "pnpm build && pm2 reload ecosystem.config.cjs",
     "pm2:stop": "pm2 stop myblog-api myblog-web",
     "pm2:delete": "pm2 delete myblog-api myblog-web",
-    "pm2:logs": "pm2 logs"
+    "pm2:logs": "pm2 logs",
+    "deploy:editor": "bash scripts/deploy-editor.sh",
+    "deploy:editor:fast": "bash scripts/deploy-editor.sh --skip-build"
   },
   "engines": {
     "node": ">=20"

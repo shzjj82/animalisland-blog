@@ -1045,6 +1045,22 @@ html.is-image-resizing * {
   text-decoration: line-through;
 }
 
+.notion-editor .cdx-todo__gantt-more {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground, #787774);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.notion-editor .cdx-todo__gantt-more:hover {
+  color: var(--foreground, #191919);
+}
+
 .cdx-todo__calendar {
   position: fixed;
   z-index: 80;

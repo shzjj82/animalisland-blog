@@ -16,6 +16,7 @@ import {
 } from "@/lib/ai/chat";
 import { readFileText } from "@/lib/document/fileText";
 import { fileExtension } from "@/lib/document/fileKinds";
+import { pageTodos, retrieveWiki, type SearchDoc } from "@/lib/document/search";
 import { iconParkOutline } from "@/lib/iconPark";
 import { t } from "@/i18n";
 import { useTranslation } from "react-i18next";
@@ -24,6 +25,7 @@ type Props = {
   open: boolean;
   focusToken: number;
   loggedIn: boolean;
+  loadPages?: () => Promise<SearchDoc[]>;
   onClose: () => void;
   onLogin: () => void;
 };
@@ -37,6 +39,41 @@ function capImages(list: AiAttachment[]): AiAttachment[] {
     images += 1;
     return images <= 6;
   });
+}
+
+function asksAboutTodos(query: string): boolean {
+  return /待办|未完成|已完成|todo/i.test(query);
+}
+
+function keepsTodo(query: string, done: boolean): boolean {
+  const open = /未完成|待办|todo/i.test(query);
+  const closed = /已完成/.test(query);
+  if (open && closed) {
+    return true;
+  }
+  if (closed && !open) {
+    return done;
+  }
+  if (open) {
+    return !done;
+  }
+  return true;
+}
+
+function formatTodos(docs: SearchDoc[], query: string, rule: string, empty: string): string {
+  const lines = [rule];
+  for (const page of pageTodos(docs)) {
+    const items = page.items.filter((item) => keepsTodo(query, item.done));
+    if (!items.length) {
+      continue;
+    }
+    lines.push(`《${page.title}》`);
+    for (const item of items) {
+      const range = item.start || item.end ? `（${item.start || "?"}至${item.end || "?"}）` : "";
+      lines.push(`- ${item.done ? "已完成" : "未完成"}：${item.text}${range}`);
+    }
+  }
+  return lines.length > 1 ? lines.join("\n") : empty;
 }
 
 const MESSAGE_LIMIT = 8000;
@@ -77,7 +114,7 @@ function userContent(question: string, files: LocalAttachment[] | undefined, upl
   return `${filePart}\n\n${questionPart}`;
 }
 
-export function WikiChat({ open, focusToken, loggedIn, onClose, onLogin }: Props) {
+export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLogin }: Props) {
   const { t: tr } = useTranslation();
   const [prompt, setPrompt] = useState("");
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
@@ -168,6 +205,22 @@ export function WikiChat({ open, focusToken, loggedIn, onClose, onLogin }: Props
       const uploadedFiles = toApiAttachments(attach).filter((item) =>
         item.kind === "image" ? Boolean(item.url) : Boolean(item.text.trim()),
       );
+      let retrieved = "";
+      let aboutTodos = false;
+      if (loadPages && text) {
+        aboutTodos = asksAboutTodos(text);
+        try {
+          const docs = await loadPages();
+          retrieved = aboutTodos
+            ? formatTodos(docs, text, tr("wikiAsk.todoRule"), tr("wikiAsk.todoEmpty"))
+            : retrieveWiki(docs, text)
+                .map((hit) => `《${hit.title}》\n${hit.excerpt}`)
+                .join("\n\n")
+                .slice(0, 5000);
+        } catch {
+          retrieved = "";
+        }
+      }
       const messages: AiChatMessage[] = history
         .map((item) => ({
           role: item.role,
@@ -183,12 +236,22 @@ export function WikiChat({ open, focusToken, loggedIn, onClose, onLogin }: Props
           content: userContent(text, attach, tr("wikiAsk.uploaded"), tr("wikiAsk.question"), tr("ai.attachmentsPrompt")) || tr("ai.attachmentsPrompt"),
         });
       }
+      if (retrieved) {
+        const last = messages[messages.length - 1];
+        if (last?.role === "user") {
+          const room = MESSAGE_LIMIT - last.content.length - 2;
+          const block = `${tr("wikiAsk.retrieved")}\n${retrieved}`.slice(0, Math.max(0, room));
+          if (block.trim()) {
+            last.content = `${block}\n\n${last.content}`;
+          }
+        }
+      }
       const result = await aiChat(
         {
           messages,
           attachments: capImages(uploadedFiles),
           system: t("wikiAsk.system"),
-          rag: true,
+          rag: !aboutTodos,
         },
         controller.signal,
         {

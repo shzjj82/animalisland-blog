@@ -193,8 +193,10 @@ export class TodoBlockTool implements BlockTool {
   private wrapper = document.createElement("div");
   private tab: Tab = "open";
   private gantt = false;
+  private ganttExpanded = false;
   private ganttYear = 0;
   private ganttMonth = 0;
+  private pendingScrollId: string | null = null;
   private calendar: HTMLDivElement | null = null;
   private calendarAnchor: HTMLElement | null = null;
   private leaveTimers: number[] = [];
@@ -309,6 +311,30 @@ export class TodoBlockTool implements BlockTool {
     }
     body.style.height = `${Math.ceil(height)}px`;
     body.style.overflowY = "auto";
+    this.revealPendingItem();
+  }
+
+  private revealPendingItem() {
+    const id = this.pendingScrollId;
+    if (!id) {
+      return;
+    }
+    const input = this.wrapper.querySelector<HTMLInputElement>(`[data-todo-focus="${CSS.escape(id)}"]`);
+    const scroller = input?.closest<HTMLElement>(".cdx-todo__list");
+    if (!input || !scroller) {
+      return;
+    }
+    this.pendingScrollId = null;
+    const row = input.closest<HTMLElement>(".cdx-todo__body") ?? input;
+    const top = row.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+    const bottom = top + row.getBoundingClientRect().height;
+    const padding = 8;
+    if (bottom > scroller.scrollTop + scroller.clientHeight) {
+      scroller.scrollTop = bottom - scroller.clientHeight + padding;
+    } else if (top < scroller.scrollTop) {
+      scroller.scrollTop = Math.max(0, top - padding);
+    }
+    input.focus({ preventScroll: true });
   }
 
   private header(): HTMLElement {
@@ -799,6 +825,7 @@ export class TodoBlockTool implements BlockTool {
       const now = new Date();
       this.ganttYear = now.getFullYear();
       this.ganttMonth = now.getMonth() + 1;
+      this.ganttExpanded = false;
       this.paint();
     });
     head.append(prev, title, next, today);
@@ -820,13 +847,47 @@ export class TodoBlockTool implements BlockTool {
     }
 
     board.append(head, weekdays, grid);
+    const hidden = Math.max(0, this.monthGanttItems().length - 3);
+    if (hidden > 0) {
+      const more = document.createElement("button");
+      more.type = "button";
+      more.className = "cdx-todo__gantt-more";
+      more.textContent = this.ganttExpanded ? t("todo.ganttLess") : t("todo.ganttMore", { count: hidden });
+      more.addEventListener("click", () => {
+        this.ganttExpanded = !this.ganttExpanded;
+        this.paint();
+      });
+      board.append(more);
+    }
     return board;
+  }
+
+  private monthGanttItems(): TodoItem[] {
+    const monthStart = utcDay(isoFromDate(new Date(this.ganttYear, this.ganttMonth - 1, 1)));
+    const monthEnd = utcDay(isoFromDate(new Date(this.ganttYear, this.ganttMonth, 0)));
+    const today = todayIso();
+    return this.data.items.filter((item) => {
+      const startIso = item.start || today;
+      const endIso = item.end || today;
+      const start = Math.min(utcDay(startIso), utcDay(endIso));
+      const end = Math.max(utcDay(startIso), utcDay(endIso));
+      return end >= monthStart && start <= monthEnd;
+    });
+  }
+
+  private visibleGanttItems(): TodoItem[] {
+    const items = this.monthGanttItems();
+    if (this.ganttExpanded || items.length <= 3) {
+      return items;
+    }
+    return items.slice(0, 3);
   }
 
   private shiftGantt(amount: number) {
     const next = new Date(this.ganttYear, this.ganttMonth - 1 + amount, 1);
     this.ganttYear = next.getFullYear();
     this.ganttMonth = next.getMonth() + 1;
+    this.ganttExpanded = false;
     this.paint();
   }
 
@@ -858,7 +919,7 @@ export class TodoBlockTool implements BlockTool {
     const weekStart = utcDay(isoFromDate(week[0]));
     const weekEnd = utcDay(isoFromDate(week[6]));
     const segments: GanttSegment[] = [];
-    for (const item of this.data.items) {
+    for (const item of this.visibleGanttItems()) {
       const startIso = item.start || today;
       const endIso = item.end || today;
       const start = Math.min(utcDay(startIso), utcDay(endIso));
@@ -938,9 +999,10 @@ export class TodoBlockTool implements BlockTool {
     this.data.items.splice(index + 1, 0, item);
     this.tab = "open";
     this.gantt = false;
+    this.pendingScrollId = item.id;
     this.commit();
     this.paint();
-    this.wrapper.querySelector<HTMLInputElement>(`[data-todo-focus="${CSS.escape(item.id)}"]`)?.focus();
+    this.wrapper.querySelector<HTMLInputElement>(`[data-todo-focus="${CSS.escape(item.id)}"]`)?.focus({ preventScroll: true });
   }
 
   private removeItem(id: string) {

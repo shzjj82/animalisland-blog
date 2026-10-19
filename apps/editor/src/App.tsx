@@ -77,8 +77,8 @@ import { exportDocument, type ExportFormat } from "@/lib/document/export";
 import { fileKind, isImageFile } from "@/lib/document/fileKinds";
 import { importSpreadsheet, importVideo, importWord, mergeImported, readInsertable, WORD_ACCEPT } from "@/lib/document/import";
 import { imageBlockData } from "@/components/block-editor/tools/ImageBlockTool";
-import { insertEditorBlocksAt } from "@/lib/document/insertBlocks";
-import { loadSearchDocs } from "@/lib/document/search";
+import { insertEditorBlocksAt, saveEditor } from "@/lib/document/insertBlocks";
+import { loadSearchDocs, withLiveDocument } from "@/lib/document/search";
 import {
   flushPendingAttachments,
   promoteAttachment,
@@ -256,6 +256,25 @@ export function App() {
     setWikiOpen(true);
     setWikiFocus((count) => count + 1);
   }, [session]);
+
+  const loadAskPages = useCallback(async () => {
+    const docs = await loadSearchDocs(session, nodes);
+    const current = pageRef.current;
+    const editor = editorRef.current;
+    if (!current || !editor) {
+      return docs;
+    }
+    try {
+      return withLiveDocument(docs, {
+        id: current.id,
+        title: current.title,
+        body: await saveEditor(editor),
+        updatedAt: current.updatedAt,
+      });
+    } catch {
+      return docs;
+    }
+  }, [session, nodes]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -1287,7 +1306,7 @@ export function App() {
         insertIndex={spotlightLaunch?.insertIndex ?? 0}
         launchActionId={spotlightLaunch?.actionId}
         selection={spotlightLaunch?.selection}
-        loadPages={() => loadSearchDocs(session, nodes)}
+        loadPages={loadAskPages}
         onOpenPage={(id, query) => void revealPage(id, query)}
         onAskWiki={openWiki}
       />
@@ -1295,6 +1314,7 @@ export function App() {
         open={wikiOpen}
         focusToken={wikiFocus}
         loggedIn={Boolean(session)}
+        loadPages={loadAskPages}
         onClose={() => setWikiOpen(false)}
         onLogin={() => {
           setWikiOpen(false);

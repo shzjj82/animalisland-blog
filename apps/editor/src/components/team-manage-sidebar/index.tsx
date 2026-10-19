@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { loadTeam, setTeamRole, type TeamInfo, type TeamMember, type TeamRole } from "@/store/teamStore";
+import { copyText } from "@/lib/clipboard";
 import type { RemoteSession } from "@/store/remoteStore";
 
 type Props = {
@@ -86,7 +87,7 @@ export function TeamManageSidebar({ session, team, onClose, onChanged }: Props) 
           row.original.field === t("team.code") && code ? (
             <span className="flex min-w-0 items-center gap-2">
               <span className="font-mono tracking-[0.2em]">{code}</span>
-              <Button type="button" size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(code)}>
+              <Button type="button" size="sm" variant="outline" onClick={() => void copyText(code)}>
                 {t("team.copyCode")}
               </Button>
             </span>

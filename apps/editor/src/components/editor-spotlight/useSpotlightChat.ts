@@ -15,6 +15,7 @@ import {
   type LocalAttachment,
 } from "@/lib/ai/chat";
 import { blocksToPreviewMarkdown, markdownToEditorBlocks } from "@/lib/ai/markdown";
+import { pageTodos, type SearchDoc } from "@/lib/document/search";
 import { t } from "@/i18n";
 import { loadSession } from "@/store/remoteStore";
 
@@ -29,10 +30,15 @@ type Options = {
   open: boolean;
   editor: EditorJS | null;
   insertIndex: number;
+  loadPages?: () => Promise<SearchDoc[]>;
   onInserted?: () => void;
 };
 
-export function useSpotlightChat({ open, editor, insertIndex, onInserted }: Options) {
+function asksAboutTodos(query: string): boolean {
+  return /待办|未完成|已完成|todo/i.test(query);
+}
+
+export function useSpotlightChat({ open, editor, insertIndex, loadPages, onInserted }: Options) {
   const [enabled, setEnabled] = useState(true);
   const [statusError, setStatusError] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -167,9 +173,46 @@ export function useSpotlightChat({ open, editor, insertIndex, onInserted }: Opti
       if (signal.aborted) {
         return;
       }
+      const messages = toApiMessages(nextBubbles);
+      if (loadPages && asksAboutTodos(text)) {
+        try {
+          const open = /未完成|待办|todo/i.test(text);
+          const closed = /已完成/.test(text);
+          const lines = [t("wikiAsk.todoRule")];
+          for (const page of pageTodos(await loadPages())) {
+            const items = page.items.filter((item) => {
+              if (open && closed) {
+                return true;
+              }
+              if (closed && !open) {
+                return item.done;
+              }
+              if (open) {
+                return !item.done;
+              }
+              return true;
+            });
+            if (!items.length) {
+              continue;
+            }
+            lines.push(`《${page.title}》`);
+            for (const item of items) {
+              const range = item.start || item.end ? `（${item.start || "?"}至${item.end || "?"}）` : "";
+              lines.push(`- ${item.done ? "已完成" : "未完成"}：${item.text}${range}`);
+            }
+          }
+          const retrieved = lines.length > 1 ? lines.join("\n") : t("wikiAsk.todoEmpty");
+          const last = messages[messages.length - 1];
+          if (last?.role === "user") {
+            last.content = `${retrieved}\n\n${last.content}`.slice(0, 8000);
+          }
+        } catch {
+          // 页面索引失败时仍按当前正文回答
+        }
+      }
       const result = await aiChat(
         {
-          messages: toApiMessages(nextBubbles),
+          messages,
           attachments: toApiAttachments(attach),
           document: editorDocument,
         },

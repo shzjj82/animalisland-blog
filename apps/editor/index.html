@@ -5,6 +5,38 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <title>wiki-agent</title>
+    <script>
+      // crypto.randomUUID 只在安全上下文（https / localhost）可用，
+      // 通过 http://ip:port 访问时不存在，会导致应用启动即白屏。这里补一个实现。
+      (function () {
+        var c = window.crypto || {};
+        if (typeof c.randomUUID === "function") return;
+        var hex = function (b, i) {
+          var v = b[i].toString(16);
+          return v.length < 2 ? "0" + v : v;
+        };
+        c.randomUUID = function () {
+          if (typeof c.getRandomValues === "function") {
+            var b = new Uint8Array(16);
+            c.getRandomValues(b);
+            b[6] = (b[6] & 0x0f) | 0x40;
+            b[8] = (b[8] & 0x3f) | 0x80;
+            return (
+              hex(b, 0) + hex(b, 1) + hex(b, 2) + hex(b, 3) + "-" +
+              hex(b, 4) + hex(b, 5) + "-" +
+              hex(b, 6) + hex(b, 7) + "-" +
+              hex(b, 8) + hex(b, 9) + "-" +
+              hex(b, 10) + hex(b, 11) + hex(b, 12) + hex(b, 13) + hex(b, 14) + hex(b, 15)
+            );
+          }
+          return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (ch) {
+            var r = (Math.random() * 16) | 0;
+            return (ch === "x" ? r : (r & 0x3) | 0x8).toString(16);
+          });
+        };
+        if (!window.crypto) window.crypto = c;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

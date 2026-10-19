@@ -28,6 +28,59 @@ function listText(items: ListItem[] = []): string[] {
   return items.flatMap((item) => [plain(item.content), ...listText(item.items)]);
 }
 
+/** 带上状态和日期，提问「待办 / 未完成 / todo」时才能命中条目本身 */
+function todoLine(item: { text?: string; done?: boolean; start?: string; end?: string }): string {
+  const text = plain(item.text).trim();
+  const start = String(item.start ?? "").trim();
+  const end = String(item.end ?? "").trim();
+  if (!text && !start && !end) {
+    return "";
+  }
+  const state = item.done ? "已完成" : "未完成";
+  const range = start || end ? ` ${start || "?"}至${end || "?"}` : "";
+  return `${state} 待办任务 todo ${text}${range}`.trim();
+}
+
+const TODO_MARK = /(?=未完成 待办任务 todo |已完成 待办任务 todo )/;
+
+export type PageTodo = {
+  done: boolean;
+  text: string;
+  start: string;
+  end: string;
+};
+
+/** 从检索正文里抽出待办，避免问答只拿到网关检索到的别的材料 */
+export function pageTodos(docs: SearchDoc[]): { title: string; items: PageTodo[] }[] {
+  const pages: { title: string; items: PageTodo[] }[] = [];
+  for (const doc of docs) {
+    const items: PageTodo[] = [];
+    for (const part of doc.text.split(TODO_MARK)) {
+      const match = part.trim().match(/^(未完成|已完成) 待办任务 todo ([\s\S]*)$/);
+      if (!match) {
+        continue;
+      }
+      let text = match[2].trim();
+      let start = "";
+      let end = "";
+      const range = text.match(/^(.*?) (\d{4}-\d{2}-\d{2}|\?)至(\d{4}-\d{2}-\d{2}|\?)$/);
+      if (range) {
+        text = range[1].trim();
+        start = range[2] === "?" ? "" : range[2];
+        end = range[3] === "?" ? "" : range[3];
+      }
+      if (!text && !start && !end) {
+        continue;
+      }
+      items.push({ done: match[1] === "已完成", text, start, end });
+    }
+    if (items.length) {
+      pages.push({ title: doc.title, items });
+    }
+  }
+  return pages;
+}
+
 export function documentText(body: EditorJsDocument): string {
   const parts: string[] = [];
   for (const block of body.blocks ?? []) {
@@ -54,7 +107,9 @@ export function documentText(body: EditorJsDocument): string {
         break;
       case "todo":
         parts.push(
-          ...((data.items as { text?: string }[] | undefined) ?? []).map((item) => plain(item.text)),
+          ...((data.items as { text?: string; done?: boolean; start?: string; end?: string }[] | undefined) ?? []).map(
+            (item) => todoLine(item),
+          ),
         );
         break;
     }
@@ -142,6 +197,10 @@ const WIKI_STOP = new Set([
   "一个", "这个", "那个", "the", "a", "an", "of", "to", "and", "or", "is", "what", "how", "for",
 ]);
 
+function isTodoTerm(term: string): boolean {
+  return term === "待办" || term === "未完成" || term === "已完成" || term === "todo" || term === "任务";
+}
+
 function wikiTerms(query: string): string[] {
   const parts = query
     .trim()
@@ -199,17 +258,18 @@ export function retrieveWiki(docs: SearchDoc[], query: string, limit = 6): WikiH
     let score = 0;
     let first = "";
     for (const term of terms) {
-      if (title.includes(term)) {
+      const inTitle = title.includes(term);
+      const inText = text.includes(term);
+      if (inTitle) {
         score += 8;
-        if (!first) {
-          first = term;
-        }
       }
-      if (text.includes(term)) {
+      if (inText) {
         score += 1;
-        if (!first) {
+        if (!first || !text.includes(first) || (isTodoTerm(term) && !isTodoTerm(first))) {
           first = term;
         }
+      } else if (!first && inTitle) {
+        first = term;
       }
     }
     if (score <= 0) {
@@ -226,4 +286,31 @@ export function retrieveWiki(docs: SearchDoc[], query: string, limit = 6): WikiH
   }
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, limit).map((item) => item.hit);
+}
+
+/** 用编辑器里尚未保存的正文盖住同一页的索引，避免刚写的待办检索不到 */
+export function withLiveDocument(
+  docs: SearchDoc[],
+  live: { id: string; title: string; body: EditorJsDocument; updatedAt?: string } | null,
+): SearchDoc[] {
+  if (!live) {
+    return docs;
+  }
+  const text = documentText(live.body);
+  const index = docs.findIndex((doc) => doc.id === live.id);
+  const previous = index >= 0 ? docs[index] : undefined;
+  const marker = previous?.text.indexOf("\n附件 ") ?? -1;
+  const files = previous && marker >= 0 ? previous.text.slice(marker) : "";
+  const next: SearchDoc = {
+    id: live.id,
+    title: live.title || previous?.title || "",
+    text: `${text}${files}`,
+    updatedAt: live.updatedAt || previous?.updatedAt || "",
+  };
+  if (index < 0) {
+    return [next, ...docs];
+  }
+  const copy = docs.slice();
+  copy[index] = next;
+  return copy;
 }

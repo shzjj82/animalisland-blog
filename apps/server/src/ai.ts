@@ -50,6 +50,23 @@ function summarizeDocument(document?: EditorJsDocument): string {
     if (block.type === "delimiter") {
       return `${index + 1}. [delimiter]`;
     }
+    if (block.type === "todo") {
+      const lines = (Array.isArray(data.items) ? data.items : [])
+        .map((item) => {
+          const row = item as { text?: string; done?: boolean; start?: string; end?: string };
+          const text = String(row.text ?? "").trim();
+          const start = String(row.start ?? "").trim();
+          const end = String(row.end ?? "").trim();
+          if (!text && !start && !end) {
+            return "";
+          }
+          const mark = row.done ? "x" : " ";
+          const range = start || end ? ` (${start || "?"}–${end || "?"})` : "";
+          return `[${mark}] ${text}${range}`;
+        })
+        .filter(Boolean);
+      return `${index + 1}. [todo] ${lines.join("; ").slice(0, 2000)}`;
+    }
     return `${index + 1}. [${block.type}]`;
   });
   return lines.join("\n");
