@@ -92,7 +92,7 @@ const BLOCK_ICONS: Record<string, string> = {
   video: `<svg width="16" height="16" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M8 12h24v24H8z" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><path d="M32 20l8-4v16l-8-4z" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>`,
 };
 
-function blockIconKey(block: HTMLElement): string {
+export function blockIconKey(block: HTMLElement): string {
   const header = block.querySelector("h1.ce-header, h2.ce-header, h3.ce-header");
   if (header) {
     return header.tagName === "H1" ? "H1" : header.tagName === "H2" ? "H2" : "H3";
@@ -130,8 +130,11 @@ function blockIconKey(block: HTMLElement): string {
   return "T";
 }
 
-/** 加号换成当前块的图标，点击行为仍是打开块菜单。 */
+/** 加号换成当前块的图标，点击行为仍是打开块菜单。移动端底栏已经铺开了样式图标，这里不再费劲换。 */
 function showBlockIcon(holder: HTMLElement, block: HTMLElement) {
+  if (window.matchMedia("(max-width: 767px)").matches) {
+    return;
+  }
   const plus = holder.querySelector<HTMLElement>(".ce-toolbar__plus");
   if (!plus) {
     return;

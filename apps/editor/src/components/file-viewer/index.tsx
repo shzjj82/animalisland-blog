@@ -4,6 +4,7 @@ import { Close, Download } from "@icon-park/react";
 import { FileTypeIcon } from "@/components/file-type-icon";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useIsMobile } from "@/lib/useMediaQuery";
 import { codeLanguage, fileExtension, fileKind, formatFileSize, videoMime } from "@/lib/document/fileKinds";
 import { loadAttachment, type AttachmentData } from "@/store/fileStore";
 import type { RemoteSession } from "@/store/remoteStore";
@@ -41,6 +42,7 @@ type LoadState = { status: "loading" } | { status: "error"; message: string } | 
 
 export function FileViewer({ file, session, className, onClose, onLoaded }: Props) {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [width, setWidth] = useState(readWidth);
   const [resizing, setResizing] = useState(false);
@@ -114,12 +116,30 @@ export function FileViewer({ file, session, className, onClose, onLoaded }: Prop
   }
 
   return (
-    <aside className={cn("flex h-full min-h-0 min-w-0 flex-col border-l border-border bg-background", className)} style={{ width }}>
+    <aside
+      className={cn("flex h-full min-h-0 min-w-0 flex-col border-l border-border bg-background", className)}
+      style={{
+        width: isMobile ? "100%" : width,
+        // 铺满屏时避开刘海 / Home 指示条（非刘海设备 env() 为 0，无副作用）
+        ...(isMobile
+          ? {
+              paddingTop: "env(safe-area-inset-top)",
+              paddingBottom: "env(safe-area-inset-bottom)",
+              paddingLeft: "env(safe-area-inset-left)",
+              paddingRight: "env(safe-area-inset-right)",
+            }
+          : null),
+      }}
+    >
       <div
         role="separator"
         aria-orientation="vertical"
         aria-label={t("attachment.resize")}
-        className={cn("absolute top-0 -left-1 z-10 h-full w-2 cursor-col-resize touch-none hover:bg-foreground/15", resizing && "bg-foreground/15")}
+        className={cn(
+          "absolute top-0 -left-1 z-10 h-full w-2 cursor-col-resize touch-none hover:bg-foreground/15",
+          resizing && "bg-foreground/15",
+          isMobile && "hidden",
+        )}
         onPointerDown={startResize}
       />
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">

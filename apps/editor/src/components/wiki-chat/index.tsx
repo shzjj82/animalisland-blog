@@ -20,6 +20,7 @@ import { pageTodos, retrieveWiki, type SearchDoc } from "@/lib/document/search";
 import { copyText } from "@/lib/clipboard";
 import { iconParkOutline } from "@/lib/iconPark";
 import { t } from "@/i18n";
+import { useVisualViewport } from "@/lib/useKeyboardInset";
 import { useTranslation } from "react-i18next";
 
 type Props = {
@@ -117,6 +118,7 @@ function userContent(question: string, files: LocalAttachment[] | undefined, upl
 
 export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLogin }: Props) {
   const { t: tr } = useTranslation();
+  const viewport = useVisualViewport();
   const [prompt, setPrompt] = useState("");
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
   const [bubbles, setBubbles] = useState<ChatBubble[]>([]);
@@ -334,7 +336,16 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
   };
 
   return (
-    <aside className="fixed top-0 right-0 bottom-0 z-50 flex w-[min(420px,100vw)] flex-col border-l border-border bg-background shadow-[-12px_0_32px_rgb(0_0_0/0.08)]">
+    <aside
+      className="fixed top-0 right-0 bottom-0 z-50 flex w-[min(420px,100vw)] flex-col border-l border-border bg-background pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] shadow-[-12px_0_32px_rgb(0_0_0/0.08)]"
+      /* 跟随可视视口（top + height）：键盘弹出 / iOS 平移可视视口时都精确覆盖可见区域，
+         键盘弹出时去掉底部安全距离，贴住键盘上沿 */
+      style={{
+        top: viewport.top,
+        height: viewport.height,
+        paddingBottom: viewport.keyboardOpen ? "0px" : undefined,
+      }}
+    >
       <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
         <Robot {...iconParkOutline} size={16} aria-hidden />
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{tr("wikiAsk.title")}</span>
@@ -394,9 +405,11 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
           rows={3}
           value={prompt}
           disabled={!loggedIn || sending}
+          enterKeyHint="send"
           placeholder={tr("wikiAsk.placeholder")}
           aria-label={tr("wikiAsk.placeholder")}
-          className="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          // text-base(16px) 防止 iOS 聚焦时整页放大；桌面端回到 text-sm
+          className="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
           onChange={(event) => setPrompt(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -415,7 +428,7 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
               className="hidden"
               onChange={(event) => void addFiles(Array.from(event.target.files ?? []))}
             />
-            <Button type="button" variant="ghost" size="sm" disabled={!loggedIn || uploading} onClick={() => fileRef.current?.click()}>
+            <Button type="button" variant="ghost" size="sm" className="min-h-9" disabled={!loggedIn || uploading} onClick={() => fileRef.current?.click()}>
               <Paperclip {...iconParkOutline} size={14} />
               {tr("wikiAsk.attach")}
             </Button>
@@ -427,7 +440,7 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
                 {tr("app.logIn")}
               </Button>
             ) : (
-              <Button type="submit" size="sm" disabled={sending || uploading || (!prompt.trim() && !attachments.length)}>
+              <Button type="submit" size="sm" className="min-h-9 px-4" disabled={sending || uploading || (!prompt.trim() && !attachments.length)}>
                 {tr("wikiAsk.send")}
               </Button>
             )}

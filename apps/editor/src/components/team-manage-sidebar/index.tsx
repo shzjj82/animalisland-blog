@@ -142,7 +142,7 @@ export function TeamManageSidebar({ session, team, onClose, onChanged }: Props) 
   );
 
   return (
-    <aside className="fixed top-0 right-0 bottom-0 z-50 flex w-[min(720px,100vw)] flex-col border-l border-border bg-background shadow-[-12px_0_32px_rgb(0_0_0/0.08)]">
+    <aside className="fixed top-0 right-0 bottom-0 z-50 flex w-[min(720px,100vw)] flex-col border-l border-border bg-background pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] shadow-[-12px_0_32px_rgb(0_0_0/0.08)]">
       <header className="flex items-center justify-between gap-2 border-b border-border px-5 py-3">
         <p className="text-sm font-medium">{team.name}</p>
         <Button type="button" variant="ghost" size="icon" aria-label={t("team.close")} onClick={onClose}>

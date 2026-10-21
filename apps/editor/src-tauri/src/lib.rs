@@ -112,7 +112,8 @@ pub fn run() {
             };
             #[cfg(not(debug_assertions))]
             match start_desktop_server(app) {
-                Ok(port) => match format!("http://127.0.0.1:{port}/").parse::<tauri::Url>() {
+                // 根路径是下载宣传页，编辑器在 /app 下（与 Web 部署保持一致）
+                Ok(port) => match format!("http://127.0.0.1:{port}/app").parse::<tauri::Url>() {
                     Ok(url) => {
                         if let Err(err) = window.navigate(url) {
                             eprintln!("{err}");

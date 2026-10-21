@@ -1,5 +1,5 @@
 import type EditorJS from "@editorjs/editorjs";
-import { Close, Comment, Search } from "@icon-park/react";
+import { Close, Comment, Search, Send } from "@icon-park/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { SpotlightChatPane } from "./SpotlightChatPane";
@@ -10,6 +10,7 @@ import { pageTitle } from "@/i18n";
 import { iconParkOutline } from "@/lib/iconPark";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import { useVisualViewport } from "@/lib/useKeyboardInset";
 import "./spotlight.css";
 
 export type SpotlightAction = {
@@ -66,6 +67,7 @@ export function EditorSpotlight({
   onAskWiki,
 }: Props) {
   const { t } = useTranslation();
+  const viewport = useVisualViewport();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const [action, setAction] = useState<SpotlightAction | null>(null);
@@ -241,7 +243,17 @@ export function EditorSpotlight({
   }
 
   return createPortal(
-    <div className="editor-spotlight-root" role="presentation">
+    <div
+      className="editor-spotlight-root"
+      role="presentation"
+      /* 跟随可视视口（top + height）：键盘弹出 / iOS 平移可视视口时都精确覆盖可见区域；
+         键盘弹出时去掉底部安全距离，贴住键盘上沿 */
+      style={{
+        top: viewport.top,
+        height: viewport.height,
+        paddingBottom: viewport.keyboardOpen ? "8px" : undefined,
+      }}
+    >
       <button
         type="button"
         className="editor-spotlight-scrim"
@@ -273,6 +285,8 @@ export function EditorSpotlight({
                 className="editor-spotlight-message"
                 rows={1}
                 value={prompt}
+                // 让移动端虚拟键盘显示「发送/前往」，而不是换行
+                enterKeyHint="send"
                 placeholder={quote ? t("spotlight.askAboutTheSelection") : t("spotlight.messagePlaceholder")}
                 aria-label={t("spotlight.messageLabel")}
                 onChange={(e) => setPrompt(e.currentTarget.value)}
@@ -306,6 +320,16 @@ export function EditorSpotlight({
                   }
                 }}
               />
+              {/* 移动端：输入框旁边直接给一个发送按钮（桌面端靠 Enter / 底部按钮） */}
+              <button
+                type="button"
+                className="editor-spotlight-send"
+                disabled={!chat.canSend}
+                aria-label={t("spotlight.send")}
+                onClick={() => void send()}
+              >
+                <Send {...iconParkOutline} size={18} />
+              </button>
             </>
           ) : (
             <>

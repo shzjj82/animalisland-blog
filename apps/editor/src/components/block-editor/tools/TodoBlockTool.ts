@@ -1,4 +1,4 @@
-import type { BlockTool, BlockToolConstructorOptions } from "@editorjs/editorjs";
+import type { API, BlockAPI, BlockTool, BlockToolConstructorOptions } from "@editorjs/editorjs";
 import { appLocale, t } from "@/i18n";
 import { menuIcons } from "../menuIcons";
 
@@ -187,9 +187,31 @@ export class TodoBlockTool implements BlockTool {
     return true;
   }
 
+  /** 让待办和正文/标题/列表/引用可以互相转换：导出每行的文字，导入时一行变一条 */
+  static get conversionConfig() {
+    return {
+      export: (data: TodoData): string =>
+        normalize(data)
+          .items.map((item) => item.text.trim())
+          .filter(Boolean)
+          .join("\n"),
+      import: (text: string): TodoData => {
+        const lines = String(text ?? "")
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean);
+        return {
+          notify: false,
+          items: (lines.length ? lines : [""]).map((line) => ({ ...blankItem(), text: line })),
+        };
+      },
+    };
+  }
+
   private data: TodoData;
   private readOnly: boolean;
-  private block?: { dispatchChange?: () => void };
+  private api: API;
+  private block?: BlockAPI;
   private wrapper = document.createElement("div");
   private tab: Tab = "open";
   private gantt = false;
@@ -202,14 +224,21 @@ export class TodoBlockTool implements BlockTool {
   private leaveTimers: number[] = [];
   private heightFrame = 0;
 
-  constructor({ data, readOnly, block }: BlockToolConstructorOptions<TodoData>) {
+  constructor({ data, readOnly, block, api }: BlockToolConstructorOptions<TodoData>) {
     this.data = normalize(data);
     this.readOnly = Boolean(readOnly);
     this.block = block;
+    this.api = api;
     this.wrapper.className = "cdx-todo";
     this.wrapper.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === "Backspace") {
+        // 一直吞掉会让 Editor.js 以为这个块永远非空，待办块就再也删不掉
         event.stopPropagation();
+      }
+      // 一条待办都没有时（空状态），退格 = 删掉整个待办块
+      if (event.key === "Backspace" && this.data.items.length === 0) {
+        event.preventDefault();
+        this.deleteBlock();
       }
     });
   }
@@ -460,7 +489,12 @@ export class TodoBlockTool implements BlockTool {
       }
       if (event.key === "Backspace" && text.value === "") {
         event.preventDefault();
-        this.removeItem(item.id);
+        // 只剩这一条、而且还是空的：再退格就是想把整个待办块删掉
+        if (this.data.items.length <= 1) {
+          this.deleteBlock();
+        } else {
+          this.removeItem(item.id);
+        }
       }
     });
 
@@ -1005,13 +1039,39 @@ export class TodoBlockTool implements BlockTool {
     this.wrapper.querySelector<HTMLInputElement>(`[data-todo-focus="${CSS.escape(item.id)}"]`)?.focus({ preventScroll: true });
   }
 
+  /** 整块待办删掉，光标落到上一块（最后一条清空后再退格就是这个意图） */
+  private deleteBlock() {
+    if (this.readOnly) {
+      return;
+    }
+    try {
+      const current = this.api.blocks.getCurrentBlockIndex();
+      const index = current >= 0 ? current : this.block ? this.api.blocks.getBlockIndex(this.block.id) : -1;
+      if (index < 0) {
+        return;
+      }
+      this.api.blocks.delete(index);
+      // 删掉之后原来的 index 位置是后一块，光标要给到 index - 1（也就是上一块）
+      this.api.caret.setToBlock(Math.max(0, index - 1), "end");
+    } catch {
+      /* 编辑器状态异常时就不删了，留在原地更安全 */
+    }
+  }
+
   private removeItem(id: string) {
     const index = this.data.items.findIndex((item) => item.id === id);
     if (index < 0) {
       return;
     }
+    const previous = this.data.items[index - 1];
     this.data.items.splice(index, 1);
     this.commit();
     this.paint();
+    // 删掉一条后把光标交还给上一条，不然焦点掉到 body，键盘会收起来
+    if (previous) {
+      this.wrapper
+        .querySelector<HTMLInputElement>(`[data-todo-focus="${CSS.escape(previous.id)}"]`)
+        ?.focus({ preventScroll: true });
+    }
   }
 }

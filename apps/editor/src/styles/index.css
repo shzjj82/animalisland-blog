@@ -84,6 +84,9 @@
   #root {
     height: 100%;
     overflow: hidden;
+    /* 页面本身不可滚。iOS 在键盘弹起时仍允许“拖动整页”（平移可视视口），
+       外壳跟着 offsetTop 走就会整屏上下抖。禁止页面级回弹，拖动只留给内部滚动区 */
+    overscroll-behavior: none;
   }
 
   body {

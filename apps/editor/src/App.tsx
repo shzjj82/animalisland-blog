@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type EditorJS from "@editorjs/editorjs";
 import { useTranslation } from "react-i18next";
-import { CloudStorage, Delete, Download, Export, HardDisk, People, Plus, Robot, Search } from "@icon-park/react";
+import { CloudStorage, CloseSmall, Delete, Download, Export, HamburgerButton, HardDisk, MoreTwo, People, Plus, Robot, Search } from "@icon-park/react";
 import type { EditorJsBlock, EditorJsDocument } from "@myblog/shared";
 import { BlockEditor } from "@/components/block-editor";
 import type { PageLinkData } from "@/components/block-editor/tools/PageLinkTool";
@@ -23,7 +23,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverSeparator, PopoverTrigger } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
+import { useIsMobile } from "@/lib/useMediaQuery";
+import { useVisualViewport } from "@/lib/useKeyboardInset";
 import {
   createLocal,
   ensureLocalPages,
@@ -118,8 +121,62 @@ function readSidebarWidth(): number {
   return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, raw));
 }
 
+type MenuRowProps = {
+  icon?: ReactNode;
+  children: ReactNode;
+  disabled?: boolean;
+  danger?: boolean;
+  onClick: () => void;
+};
+
+/** 移动端「更多」菜单里的一行操作 */
+function MenuRow({ icon, children, disabled, danger, onClick }: MenuRowProps) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      className={cn(
+        "flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm disabled:pointer-events-none disabled:opacity-50",
+        danger ? "text-destructive hover:bg-destructive/10" : "hover:bg-muted",
+      )}
+      onClick={onClick}
+    >
+      {icon}
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+    </button>
+  );
+}
+
 export function App() {
   const { t, i18n } = useTranslation();
+  const isMobile = useIsMobile();
+  /** 可视视口（top + height）：外壳永远精确覆盖用户看到的那块区域 */
+  const viewport = useVisualViewport();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  /** 移动端编辑器底栏的挂载点：底栏由 BlockEditor 通过 portal 渲染进来，
+      占据真实布局空间（在滚动区之后），因此永远不会跟着内容滚动 */
+  const [barSlot, setBarSlot] = useState<HTMLDivElement | null>(null);
+
+  // 回到桌面端时收起抽屉，避免残留状态
+  useEffect(() => {
+    if (!isMobile) {
+      setSidebarOpen(false);
+    }
+  }, [isMobile]);
+
+  useEffect(() => {
+    if (!isMobile || !sidebarOpen) {
+      return;
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSidebarOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isMobile, sidebarOpen]);
   const [session, setSession] = useState<RemoteSession | null>(() => loadSession());
   const [nodes, setNodes] = useState<PageNode[]>([]);
   const [page, setPage] = useState<EditorPage | null>(null);
@@ -501,6 +558,7 @@ export function App() {
   }
 
   async function openPage(id: string) {
+    setSidebarOpen(false);
     setError("");
     setReveal(null);
     if (pageRef.current?.id !== id) {
@@ -1052,10 +1110,52 @@ export function App() {
 
   return (
     <div
-      className="grid h-svh overflow-hidden bg-background"
-      style={{ gridTemplateColumns: `${sidebarWidth}px minmax(0, 1fr)` }}
+      /* 整个外壳钉在“可视视口”上（top 跟随 offsetTop、height = 可视高度）：
+         键盘弹出 / iOS 平移可视视口露光标时，外壳始终精确覆盖用户看到的那块区域，
+         底栏（布局流内）正好贴住键盘上沿；文档没有可滚动内容，iOS 无法平移页面 */
+      className="fixed inset-x-0 grid overflow-hidden bg-background"
+      style={{
+        gridTemplateColumns: isMobile ? "minmax(0, 1fr)" : `${sidebarWidth}px minmax(0, 1fr)`,
+        top: viewport.top,
+        height: viewport.height,
+      }}
     >
-      <aside className="relative flex h-full min-h-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar px-3 py-4 text-sidebar-foreground">
+      {isMobile && sidebarOpen ? (
+        <button
+          type="button"
+          aria-label={t("app.closePageList")}
+          className="fixed inset-0 z-40 bg-foreground/25 backdrop-blur-[1px]"
+          onClick={() => setSidebarOpen(false)}
+        />
+      ) : null}
+      <aside
+        className={cn(
+          "relative flex h-full min-h-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar px-3 py-4 text-sidebar-foreground",
+          isMobile &&
+            "fixed inset-y-0 left-0 z-50 w-[min(84vw,320px)] transition-transform duration-200 ease-out",
+          // 阴影只在打开时挂：关闭态若保留，12px 偏移 + 32px 模糊会从屏幕左缘渗进来
+          isMobile && sidebarOpen && "translate-x-0 shadow-[12px_0_32px_rgb(0_0_0/0.14)]",
+          isMobile && !sidebarOpen && "-translate-x-full shadow-none",
+        )}
+        aria-hidden={isMobile && !sidebarOpen}
+        style={
+          isMobile
+            ? {
+                paddingLeft: "max(0.75rem, env(safe-area-inset-left))",
+                paddingTop: "max(1rem, env(safe-area-inset-top))",
+                paddingBottom: "max(1rem, env(safe-area-inset-bottom))",
+              }
+            : undefined
+        }
+      >
+        {isMobile ? (
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="truncate px-1 text-sm font-semibold text-foreground">{t("app.title")}</span>
+            <Button type="button" variant="ghost" size="icon" aria-label={t("app.closePageList")} onClick={() => setSidebarOpen(false)}>
+              <CloseSmall {...iconProps} />
+            </Button>
+          </div>
+        ) : null}
         <div className="mb-3 flex items-center gap-1">
           <div className="relative min-w-0 flex-1">
             <Search
@@ -1158,20 +1258,63 @@ export function App() {
           role="separator"
           aria-orientation="vertical"
           aria-label={t("app.resizeSidebar")}
-          className="absolute top-0 -right-1 z-10 h-full w-2 cursor-col-resize touch-none hover:bg-foreground/15"
+          className={cn(
+            "absolute top-0 -right-1 z-10 h-full w-2 cursor-col-resize touch-none hover:bg-foreground/15",
+            isMobile && "hidden",
+          )}
           onPointerDown={startSidebarResize}
         />
       </aside>
       <main className="flex h-full min-h-0 min-w-0 flex-col bg-background">
-        <header className="flex shrink-0 items-center justify-between gap-4 px-6 pt-3 text-xs text-muted-foreground">
-          <span className="inline-flex items-center gap-3">
-            <span className="inline-flex items-center gap-1.5">
+        <header
+          className="flex shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3 pt-2 pb-1 text-xs text-muted-foreground sm:gap-4 sm:border-b-0 sm:px-6 sm:pt-3 sm:pb-0"
+          /* 安全距离用内联 style：避免 Tailwind px-* / pt-* 的覆盖顺序不确定 */
+          style={
+            isMobile
+              ? {
+                  paddingTop: "max(0.5rem, env(safe-area-inset-top))",
+                  paddingLeft: "max(0.75rem, env(safe-area-inset-left))",
+                  paddingRight: "max(0.75rem, env(safe-area-inset-right))",
+                  // 头部不可滚：把竖划手势拦掉，否则 iOS 会拖动整页导致外壳抖动
+                  touchAction: "none",
+                }
+              : undefined
+          }
+        >
+          <span className="inline-flex min-w-0 flex-1 items-center gap-1.5 sm:gap-3">
+            {isMobile ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t("app.openPageList")}
+                aria-expanded={sidebarOpen}
+                onClick={() => setSidebarOpen(true)}
+              >
+                <HamburgerButton {...iconProps} />
+              </Button>
+            ) : null}
+            <span className="inline-flex shrink-0 items-center gap-1.5">
               {remote ? <CloudStorage {...iconProps} size={14} /> : <HardDisk {...iconProps} size={14} />}
-              {remote ? t("app.remote") : t("app.local")}
+              <span className="hidden sm:inline">{remote ? t("app.remote") : t("app.local")}</span>
             </span>
-            <span className={error ? "text-destructive" : undefined}>{error || hint}</span>
+            <span className={cn("min-w-0 truncate", error && "text-destructive")}>{error || hint}</span>
           </span>
-          <span className="inline-flex items-center gap-2">
+          <input
+            ref={importInputRef}
+            type="file"
+            accept={WORD_ACCEPT}
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) {
+                void readImport(file);
+              }
+            }}
+          />
+          {/* 桌面端：完整按钮组 */}
+          <span className="hidden shrink-0 items-center gap-2 sm:inline-flex">
             {session && syncSettings.enabled && syncPlan && !syncStep ? (
               <Button type="button" variant="outline" size="sm" onClick={() => setSyncStep("summary")}>
                 <CloudStorage {...iconProps} />
@@ -1182,19 +1325,6 @@ export function App() {
               <Download {...iconProps} />
               {t("common.import")}
             </Button>
-            <input
-              ref={importInputRef}
-              type="file"
-              accept={WORD_ACCEPT}
-              className="hidden"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                event.target.value = "";
-                if (file) {
-                  void readImport(file);
-                }
-              }}
-            />
             <Popover open={exportOpen} onOpenChange={setExportOpen}>
               <PopoverTrigger asChild>
                 <Button type="button" variant="outline" size="sm" disabled={!page}>
@@ -1230,6 +1360,81 @@ export function App() {
             </Button>
             <LanguageSwitch onChange={(locale) => void switchLocale(locale)} />
           </span>
+          {/* 移动端：更多菜单 + AI */}
+          <span className="inline-flex shrink-0 items-center gap-1 sm:hidden">
+            <Popover open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+              <PopoverTrigger asChild>
+                <Button type="button" variant="outline" size="icon" aria-label={t("app.moreActions")}>
+                  <MoreTwo {...iconProps} />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-60 p-1">
+                {session && syncSettings.enabled && syncPlan && !syncStep ? (
+                  <>
+                    <MenuRow
+                      icon={<CloudStorage {...iconProps} />}
+                      onClick={() => {
+                        setMobileMenuOpen(false);
+                        setSyncStep("summary");
+                      }}
+                    >
+                      {t("common.syncLocalPages")} · {syncPlanSize(syncPlan)}
+                    </MenuRow>
+                    <PopoverSeparator />
+                  </>
+                ) : null}
+                <MenuRow
+                  icon={<Download {...iconProps} />}
+                  disabled={!page}
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    importInputRef.current?.click();
+                  }}
+                >
+                  {t("common.import")}
+                </MenuRow>
+                <MenuRow
+                  icon={<FileTypeIcon type="pdf" />}
+                  disabled={!page}
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    if (page) void exportPage(page.id, "pdf");
+                  }}
+                >
+                  {t("common.exportPdf")}
+                </MenuRow>
+                <MenuRow
+                  icon={<FileTypeIcon type="word" />}
+                  disabled={!page}
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    if (page) void exportPage(page.id, "word");
+                  }}
+                >
+                  {t("common.exportWord")}
+                </MenuRow>
+                <MenuRow
+                  icon={<Delete {...iconProps} />}
+                  danger
+                  disabled={!page || pageReadOnly}
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    if (page) void removePage(page.id);
+                  }}
+                >
+                  {t("common.delete")}
+                </MenuRow>
+                <PopoverSeparator />
+                <div className="flex items-center justify-between gap-2 px-2 py-1">
+                  <span className="text-xs text-muted-foreground">{t("common.language")}</span>
+                  <LanguageSwitch onChange={(locale) => void switchLocale(locale)} />
+                </div>
+              </PopoverContent>
+            </Popover>
+            <Button type="button" variant="outline" size="icon" aria-label={t("wikiAsk.title")} onClick={openWiki}>
+              <Robot {...iconProps} />
+            </Button>
+          </span>
         </header>
         <FileDropZone
           hasPage={Boolean(page)}
@@ -1258,12 +1463,15 @@ export function App() {
                 setViewing({ data, replace });
               }}
               onConfirmDeleteFile={confirmDeleteFile}
+              barSlot={barSlot}
               reveal={reveal}
             />
           ) : (
             <EmptyState hasPages={nodes.length > 0} onCreate={() => void createPage(null)} />
           )}
         </FileDropZone>
+        {/* 底栏挂在滚动区之后：滚动区到这里结束，底栏不会盖正文，也滚不动 */}
+        <div ref={setBarSlot} className="shrink-0" />
       </main>
       {viewing ? (
         <FileViewer

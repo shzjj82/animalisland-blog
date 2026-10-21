@@ -1191,3 +1191,86 @@ html.is-image-resizing * {
   font-size: 12px;
   color: #5b8def;
 }
+
+/* —— 移动端适配（< 768px） —— */
+@media (max-width: 767px) {
+  /* 移动端不留工具栏槽位：Editor.js 会把悬浮工具栏钳制在屏幕内、压在行首，
+     预留的 padding 只会被浪费。正文左右对称 16px，工具栏作为浮动药丸盖在行首
+     （仅在块聚焦时出现，自带白底 + 描边 + 阴影）。 */
+  .notion-editor .ce-toolbar__actions {
+    gap: 0;
+    z-index: 3;
+    margin-right: 2px;
+    padding: 1px;
+    background: var(--background, #fff);
+  }
+
+  .notion-editor .ce-toolbar__plus,
+  .notion-editor .ce-toolbar__settings-btn {
+    width: 22px;
+    height: 22px;
+  }
+
+  /* 行首两个按钮移动端都不再需要：加号（块图标）底栏有「+」；
+     ⋮ 是「点击调整 / 或拖拽移动」的手柄，触屏上没有拖拽，块操作改由底栏的 ⋯ 打开。
+     用 opacity 而不是 display:none —— 弹层要按这两个按钮的位置定位，藏成 0 尺寸会飘到屏幕外。
+     容器里挂着插入块和块设置的弹层，也只去掉药丸外观，本身不能隐藏 */
+  .notion-editor .ce-toolbar__plus,
+  .notion-editor .ce-toolbar__settings-btn {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .notion-editor .ce-toolbar__actions {
+    padding: 0;
+    margin-right: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .notion-editor .ce-toolbar__plus svg,
+  .notion-editor .ce-toolbar__settings-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  /* 加号 / 块菜单不超出屏幕 */
+  .notion-editor .ce-popover__container {
+    --width: min(268px, calc(100vw - 24px));
+    --max-height: min(360px, 52vh);
+  }
+
+  /* 选中文字的行内工具栏不贴边溢出 */
+  .notion-editor .ce-inline-toolbar {
+    max-width: calc(100vw - 16px);
+    overflow-x: auto;
+  }
+
+  /* 图片与表格在窄屏自适应 */
+  .notion-editor img {
+    max-width: 100%;
+    height: auto;
+  }
+
+  .notion-editor .tc-wrap {
+    overflow-x: auto;
+  }
+}
+
+/* 移动端底栏的样式条：横向可滑，但不显示滚动条；竖向一律不滚动
+   （overflow-x:auto 会让 overflow-y 隐式变成 auto，手指一竖划就去滚它，看起来就是抖动；
+   也不要做 scroll-snap，吸附会让内容来回跳） */
+.editor-style-strip {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  overscroll-behavior: contain;
+  touch-action: pan-x;
+}
+
+.editor-style-strip::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}

@@ -87,3 +87,19 @@
   padding: 12px 16px !important;
   background: transparent;
 }
+
+/* —— 移动端：整屏预览 —— */
+@media (max-width: 767px) {
+  .file-viewer-drawer {
+    animation: none;
+  }
+
+  .file-viewer-docx .docx-wrapper {
+    padding: 8px;
+  }
+
+  .file-viewer-sheet th,
+  .file-viewer-sheet td {
+    max-width: 220px;
+  }
+}

@@ -1,4 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { DownC, More, Plus, Robot } from "@icon-park/react";
 import EditorJS from "@editorjs/editorjs";
 import Delimiter from "@editorjs/delimiter";
 import Header from "@editorjs/header";
@@ -11,6 +13,8 @@ import { AiAssistTriggerTool } from "./tools/AiAssistTriggerTool";
 import { AskAiInlineTool } from "./tools/AskAiInlineTool";
 import { editorI18n } from "./editorI18n";
 import { useTranslation } from "react-i18next";
+import { useIsMobile } from "@/lib/useMediaQuery";
+import { useVisualViewport } from "@/lib/useKeyboardInset";
 import { PageLinkTool, type PageLinkData } from "./tools/PageLinkTool";
 import { AttachmentTool } from "./tools/AttachmentTool";
 import { ImageBlockTool, imageBlockData } from "./tools/ImageBlockTool";
@@ -21,11 +25,35 @@ import { htmlToBlocks } from "@/lib/document/htmlToBlocks";
 import { isImageFile } from "@/lib/document/fileKinds";
 import { bindEditingGuards } from "./editingGuards";
 import { menuIcons } from "./menuIcons";
-import { bindToolbarAnchor } from "./toolbarAnchor";
+import { bindToolbarAnchor, blockIconKey } from "./toolbarAnchor";
 import { revealText } from "./revealText";
+import { cn } from "@/lib/utils";
 import "./blockEditor.css";
 
 const inlineTools = ["link", "bold", "italic", "askAi"];
+
+/** 底栏样式按钮的 aria-label 只能取这几个键（写成联合类型，动态取词才不会绕过 i18n 的类型校验） */
+type BlockStyleLabel =
+  | "blockEditor.styleText"
+  | "blockEditor.styleH1"
+  | "blockEditor.styleH2"
+  | "blockEditor.styleH3"
+  | "blockEditor.styleBullet"
+  | "blockEditor.styleNumbered"
+  | "blockEditor.styleTodo"
+  | "blockEditor.styleQuote";
+
+/** 移动端底栏直接摆出来的块样式：点图标即切换，不再弹菜单。key 与 blockIconKey 的返回值一致 */
+const blockStyles: { key: string; icon: string; label: BlockStyleLabel; tool: string; data?: Record<string, unknown> }[] = [
+  { key: "T", icon: menuIcons.text, label: "blockEditor.styleText", tool: "paragraph" },
+  { key: "H1", icon: menuIcons.h1, label: "blockEditor.styleH1", tool: "header", data: { level: 1 } },
+  { key: "H2", icon: menuIcons.h2, label: "blockEditor.styleH2", tool: "header", data: { level: 2 } },
+  { key: "H3", icon: menuIcons.h3, label: "blockEditor.styleH3", tool: "header", data: { level: 3 } },
+  { key: "ul", icon: menuIcons.ul, label: "blockEditor.styleBullet", tool: "list", data: { style: "unordered" } },
+  { key: "ol", icon: menuIcons.ol, label: "blockEditor.styleNumbered", tool: "list", data: { style: "ordered" } },
+  { key: "todo", icon: menuIcons.todo, label: "blockEditor.styleTodo", tool: "todo" },
+  { key: "quote", icon: menuIcons.quote, label: "blockEditor.styleQuote", tool: "quote" },
+];
 
 function imageFilesFromClipboard(data: DataTransfer): File[] {
   const files = Array.from(data.files).filter(isImageFile);
@@ -86,12 +114,24 @@ type Props = {
   /** 打开后定位到这段文字；nonce 变化时重新定位，同一页也能再次触发 */
   reveal?: { text: string; nonce: number } | null;
   readOnly?: boolean;
+  /** 移动端底栏挂载点（父级布局流里的一个空容器）；不传则不渲染底栏 */
+  barSlot?: HTMLElement | null;
 };
 
-export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolvePageTitle, onReady, onAi, onAskSelection, onUploadFile, onUploadError, onOpenFile, onConfirmDeleteFile, reveal, readOnly = false }: Props) {
+export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolvePageTitle, onReady, onAi, onAskSelection, onUploadFile, onUploadError, onOpenFile, onConfirmDeleteFile, reveal, readOnly = false, barSlot }: Props) {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
+  const { keyboardOpen } = useVisualViewport();
+  const [ready, setReady] = useState(false);
+  const [editing, setEditing] = useState(false);
+  /** 当前块的样式（用于底栏高亮），取值与 blockIconKey 一致 */
+  const [blockKind, setBlockKind] = useState("T");
+  const editorInstanceRef = useRef<EditorJS | null>(null);
   const holderRef = useRef<HTMLDivElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
   const readyRef = useRef(false);
+  /** 正在做块样式转换：这期间焦点丢失是正常现象，不算离开编辑器 */
+  const switchingRef = useRef(false);
   const revealRef = useRef(reveal);
   revealRef.current = reveal;
   const onChangeRef = useRef(onChange);
@@ -130,7 +170,9 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
       holder,
       data: initialRef.current,
       readOnly,
-      autofocus: !readOnly,
+      // 移动端不自动聚焦：一进页面 Editor.js 就把光标塞进正文，focus 立刻为真，
+      // 底栏（以及 iOS 上跟着起来的键盘）会在用户还没操作时就出现在底部
+      autofocus: !readOnly && !isMobile,
       minHeight: 40,
       placeholder: t("blockEditor.placeholder"),
       i18n: editorI18n(),
@@ -227,6 +269,8 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
       onReady() {
         new DragDrop(editor, "2px solid #191919");
         readyRef.current = true;
+        editorInstanceRef.current = editor;
+        setReady(true);
         onReadyRef.current?.(editor);
         const pending = revealRef.current;
         if (pending?.text) {
@@ -313,9 +357,25 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
       unbindToolbar();
       holder.removeEventListener("paste", onPaste, true);
       onReadyRef.current?.(null);
+      editorInstanceRef.current = null;
+      setReady(false);
       destroy();
     };
   }, []);
+
+  /**
+   * 兜底：键盘已经弹起、焦点也确实在编辑器里，但 focusin 没被捕获到时，
+   * 底栏不该缺席（用户预期“键盘一弹就在键盘上方出现”）。
+   */
+  useEffect(() => {
+    if (!keyboardOpen) {
+      return;
+    }
+    const active = document.activeElement;
+    if (active && holderRef.current?.contains(active)) {
+      setEditing(true);
+    }
+  }, [keyboardOpen]);
 
   useEffect(() => {
     const holder = holderRef.current;
@@ -326,5 +386,228 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
     return () => window.clearTimeout(timer);
   }, [reveal?.nonce, reveal?.text]);
 
-  return <div className="notion-editor mx-auto max-w-3xl pt-6 pr-6 pb-20 pl-20" ref={holderRef} />;
+  /** 底部工具栏按钮：阻止默认行为抢焦点，保证编辑器光标不丢（pointerdown / mousedown 都兜住） */
+  function keepEditorFocus(event: { preventDefault: () => void }) {
+    event.preventDefault();
+  }
+
+  /** 把光标放回当前块。setToBlock 会同步更新 currentBlock，块菜单才知道对谁生效 */
+  function focusCurrentBlock(): boolean {
+    const editor = editorInstanceRef.current;
+    if (!editor) {
+      return false;
+    }
+    try {
+      const current = editor.blocks.getCurrentBlockIndex();
+      const target = current >= 0 ? current : editor.blocks.getBlocksCount() - 1;
+      if (target < 0) {
+        return false;
+      }
+      editor.caret.setToBlock(target, "end");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** 「+」：插入块。走 Editor.js 官方 API，比点 DOM 更稳（内部会先 moveAndOpen 定位工具栏） */
+  function openBlockMenu() {
+    const editor = editorInstanceRef.current;
+    if (!editor || !focusCurrentBlock()) {
+      return;
+    }
+    editor.toolbar.toggleToolbox(true);
+  }
+
+  /** 读当前块的样式，用于底栏高亮 */
+  function refreshBlockKind() {
+    const editor = editorInstanceRef.current;
+    if (!editor) {
+      return;
+    }
+    try {
+      const index = editor.blocks.getCurrentBlockIndex();
+      const block = index >= 0 ? editor.blocks.getBlockByIndex(index) : undefined;
+      setBlockKind(block ? blockIconKey(block.holder) : "T");
+    } catch {
+      setBlockKind("T");
+    }
+  }
+
+  /** 底栏样式图标：直接把当前块转成目标类型（走官方 convert，文本由 conversionConfig 带过去） */
+  function applyBlockStyle(tool: string, data?: Record<string, unknown>) {
+    const editor = editorInstanceRef.current;
+    if (!editor) {
+      return;
+    }
+    try {
+      const index = editor.blocks.getCurrentBlockIndex();
+      const block = index >= 0 ? editor.blocks.getBlockByIndex(index) : undefined;
+      if (!block) {
+        return;
+      }
+      // 换块时旧块的 DOM 会被拿掉，焦点一定会短暂丢失；这段时间别让底栏以为用户收起了键盘
+      switchingRef.current = true;
+      void editor.blocks
+        .convert(block.id, tool, data)
+        .then((next) => {
+          try {
+            editor.caret.setToBlock(next.id, "end");
+          } catch {
+            /* 转换后光标放不回去就算了 */
+          }
+          switchingRef.current = false;
+          setEditing(true);
+          refreshBlockKind();
+        })
+        .catch(() => {
+          switchingRef.current = false;
+          setEditing(true);
+        });
+    } catch {
+      switchingRef.current = false;
+      /* 该类型不支持相互转换：保持原样 */
+    }
+  }
+
+  /** ⋯：块操作（删除 / 上移 / 下移）。移动端行首的 ⋮ 已经隐藏，入口挪到底栏 */
+  function openBlockSettings() {
+    const editor = editorInstanceRef.current;
+    if (!editor || !focusCurrentBlock()) {
+      return;
+    }
+    editor.toolbar.toggleBlockSettings(true);
+  }
+
+  /** 呼出 AI */
+  function openAi() {
+    const editor = editorInstanceRef.current;
+    if (!editor) {
+      return;
+    }
+    let index = 0;
+    try {
+      index = Math.max(0, editor.blocks.getCurrentBlockIndex());
+    } catch {
+      index = 0;
+    }
+    onAiRef.current?.(index);
+  }
+
+  /** 收起软键盘 */
+  function dismissKeyboard() {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement) {
+      active.blur();
+    }
+  }
+
+  /* 光标在块之间移动时刷新底栏的样式高亮 */
+  useEffect(() => {
+    const holder = holderRef.current;
+    if (!holder || !ready) {
+      return;
+    }
+    const refresh = () => refreshBlockKind();
+    holder.addEventListener("keyup", refresh);
+    holder.addEventListener("mouseup", refresh);
+    return () => {
+      holder.removeEventListener("keyup", refresh);
+      holder.removeEventListener("mouseup", refresh);
+    };
+    // refreshBlockKind 只读 ref + setState，不需要进依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
+
+  /* 放在所有 useState 之后：压缩后如果提前引用会命中 TDZ（Cannot access before initialization） */
+  const showBar = isMobile && ready && !readOnly && editing;
+  const barIconProps = { theme: "outline" as const, strokeWidth: 3, size: 20 };
+  const barButtonClass =
+    "flex h-11 w-10 shrink-0 items-center justify-center rounded-lg text-foreground/70 transition-colors active:bg-muted active:text-foreground";
+
+  return (
+    <>
+      <div
+        className="notion-editor mx-auto max-w-3xl pt-4 px-4 pb-6 sm:pt-6 sm:pr-6 sm:pb-20 sm:pl-20"
+        /* 横屏刘海：正文左右也避开非安全区（竖屏 env() 为 0，等价 px-4） */
+        style={
+          isMobile
+            ? {
+                paddingLeft: "max(1rem, env(safe-area-inset-left))",
+                paddingRight: "max(1rem, env(safe-area-inset-right))",
+              }
+            : undefined
+        }
+        onFocusCapture={() => setEditing(true)}
+        onBlurCapture={(event) => {
+          const next = event.relatedTarget as Node | null;
+          // 换块过程中焦点必然短暂丢失，此时不能把底栏收起来（否则键盘会跟着掉）
+          if (switchingRef.current) {
+            return;
+          }
+          // 焦点落到底部工具栏（部分浏览器 pointerdown 兜不住）时不算离开编辑器
+          if (!next || (!event.currentTarget.contains(next) && !barRef.current?.contains(next))) {
+            setEditing(false);
+          }
+        }}
+        ref={holderRef}
+      />
+      {showBar && barSlot
+        ? createPortal(
+            <div
+              ref={barRef}
+              /* 不再是 fixed：占据父级布局流的一行，内容怎么滚它都不动 */
+              className="flex items-center gap-1 border-t border-border bg-background pt-1"
+              style={{
+                // 键盘弹起时去掉底部安全距离，贴住键盘上沿
+                paddingBottom: keyboardOpen ? "0.375rem" : "max(0.375rem, env(safe-area-inset-bottom))",
+                paddingLeft: "max(0.5rem, env(safe-area-inset-left))",
+                paddingRight: "max(0.5rem, env(safe-area-inset-right))",
+                // 只允许横向手势（样式条要滑）。竖向划动若交给浏览器，
+                // iOS 会去“拖动整页”（平移可视视口），外壳跟着 offsetTop 走就是整屏抖动
+                touchAction: "pan-x",
+              }}
+            >
+              {/* pointerdown / mousedown 都阻止默认行为，避免点按钮时编辑器失焦、光标丢失 */}
+              <button type="button" aria-label={t("app.insertBlock")} className={barButtonClass} onPointerDown={keepEditorFocus} onMouseDown={keepEditorFocus} onClick={openBlockMenu}>
+                <Plus {...barIconProps} />
+              </button>
+              {/* 字体/块样式直接铺在底栏上，点哪个就是哪种，不再弹菜单 */}
+              <div className="editor-style-strip flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+                {blockStyles.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    aria-label={t(item.label)}
+                    aria-pressed={blockKind === item.key}
+                    className={cn(
+                      "flex h-11 w-10 shrink-0 items-center justify-center rounded-lg transition-colors",
+                      blockKind === item.key ? "bg-muted text-foreground" : "text-foreground/70 active:bg-muted",
+                    )}
+                    onPointerDown={keepEditorFocus}
+                    onMouseDown={keepEditorFocus}
+                    onClick={() => applyBlockStyle(item.tool, item.data)}
+                  >
+                    <span
+                      className="pointer-events-none flex h-[18px] w-[18px] items-center justify-center"
+                      dangerouslySetInnerHTML={{ __html: item.icon }}
+                    />
+                  </button>
+                ))}
+              </div>
+              <button type="button" aria-label={t("app.aiChatTitle")} className={barButtonClass} onPointerDown={keepEditorFocus} onMouseDown={keepEditorFocus} onClick={openAi}>
+                <Robot {...barIconProps} />
+              </button>
+              <button type="button" aria-label={t("app.blockActions")} className={barButtonClass} onPointerDown={keepEditorFocus} onMouseDown={keepEditorFocus} onClick={openBlockSettings}>
+                <More {...barIconProps} />
+              </button>
+              <button type="button" aria-label={t("app.hideKeyboard")} className={barButtonClass} onClick={dismissKeyboard}>
+                <DownC {...barIconProps} />
+              </button>
+            </div>,
+            barSlot,
+          )
+        : null}
+    </>
+  );
 }
