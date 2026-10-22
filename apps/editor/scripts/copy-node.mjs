@@ -39,7 +39,13 @@ function readFromTarGz(archive, member) {
  * 否则 Intel 机器上本地服务起不来。自带的 node 只有一个架构时，把另一个下下来 lipo 合成。
  */
 function makeUniversal(dest) {
-  const info = execFileSync("lipo", ["-info", dest], { encoding: "utf8" });
+  let info = "";
+  try {
+    info = execFileSync("lipo", ["-info", dest], { encoding: "utf8" });
+  } catch {
+    // 没有 lipo 就不折腾，沿用当前架构
+    return;
+  }
   const have = { x64: /x86_64/.test(info), arm64: /arm64/.test(info) };
   if (have.x64 && have.arm64) {
     return;
