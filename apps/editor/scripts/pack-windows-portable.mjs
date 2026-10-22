@@ -38,11 +38,12 @@ const zipName = `wiki-agent-${version}-windows.zip`;
 const zipPath = path.join(releaseDir, zipName);
 fs.rmSync(zipPath, { force: true });
 
-/** macOS 用 ditto（最稳），有 zip 就用 zip，Windows Runner 落到 tar */
+/** macOS 用 ditto（最稳），有 zip 就用 zip，Windows Runner 落到 tar / 7z */
 const attempts = [
   ["ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", "wiki-agent-windows", zipPath]],
   ["zip", ["-r", "-q", zipPath, "wiki-agent-windows"]],
   ["tar", ["-a", "-c", "-f", zipPath, "wiki-agent-windows"]],
+  ["7z", ["a", "-bso0", zipPath, "wiki-agent-windows"]],
 ];
 for (const [command, args] of attempts) {
   const result = spawnSync(command, args, { cwd: releaseDir, stdio: "pipe" });

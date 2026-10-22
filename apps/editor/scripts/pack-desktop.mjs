@@ -87,7 +87,10 @@ function packMacos() {
       "src-tauri/resources/node",
     ]);
   }
-  run("pnpm", ["exec", "tauri", "build", "--target", "universal-apple-darwin", "--bundles", "app,dmg"]);
+  // dmg 自己用 hdiutil 打：tauri 的 create-dmg 会去执行它生成的 bundle_dmg.sh，
+  // 那个脚本没有执行权限时直接 Permission denied，整个打包白跑
+  run("pnpm", ["exec", "tauri", "build", "--target", "universal-apple-darwin", "--bundles", "app"]);
+  run(process.execPath, ["scripts/pack-macos-dmg.mjs"]);
 
   const bundle = path.join(targetDir(), "universal-apple-darwin/release/bundle");
   const app = path.join(bundle, "macos/wiki-agent.app");

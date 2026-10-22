@@ -50,6 +50,7 @@ jobs:
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
       - name: 写入版本号
+        shell: bash
         working-directory: apps/editor
         run: node scripts/set-version.mjs "${{ steps.ver.outputs.version }}"
 
@@ -66,6 +67,13 @@ jobs:
         with:
           workspaces: apps/editor/src-tauri -> target
 
+      # tauri.macos.conf.json / tauri.windows.conf.json 把 resources/node(.exe) 声明进了 bundle.resources，
+      # 构建期就会校验存在性：没有这个文件 build.rs 直接 panic（本地打包由 pack-desktop.mjs 负责这一步）
+      - name: 准备 Node 运行时
+        shell: bash
+        working-directory: apps/editor
+        run: node scripts/copy-node.mjs ${{ matrix.name == 'macos' && 'darwin' || 'win32' }}
+
       # macOS：通用二进制（Apple 芯片 + Intel），dmg
       - name: 打包 macOS
         if: matrix.name == 'macos'
@@ -75,7 +83,15 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: pnpm exec tauri build --target universal-apple-darwin --bundles app,dmg
+        run: pnpm exec tauri build --target universal-apple-darwin --bundles app
+
+      # dmg 用 scripts/pack-macos-dmg.mjs 自己打：tauri 自带的 create-dmg 脚本
+      # 会因为 bundle_dmg.sh 没有执行权限直接失败（Permission denied），自己打更稳
+      - name: 生成 dmg
+        if: matrix.name == 'macos'
+        shell: bash
+        working-directory: apps/editor
+        run: node scripts/pack-macos-dmg.mjs
 
       - name: 收集 dmg
         if: matrix.name == 'macos'
@@ -87,13 +103,16 @@ jobs:
       # Windows：NSIS 安装版 + 便携版 zip（便携版由 pack-windows-portable.mjs 组装）
       - name: 打包 Windows 安装版
         if: matrix.name == 'windows'
+        shell: bash
         working-directory: apps/editor
         run: pnpm exec tauri build --bundles nsis
 
+      # 便携版复用上一步已经打好的 exe，脚本里只组装 zip
       - name: 组装 Windows 便携版
         if: matrix.name == 'windows'
+        shell: bash
         working-directory: apps/editor
-        run: node scripts/copy-node.mjs win32 && node scripts/pack-windows-portable.mjs
+        run: node scripts/pack-windows-portable.mjs
 
       - name: 收集 Windows 产物
         if: matrix.name == 'windows'
@@ -114,10 +133,23 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
+
+      # 手动触发时 tag 可能还不存在，Release 需要一个 tag 才能挂上去
+      - name: 补 tag（仅手动触发）
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "v${{ inputs.version }}" || true
+          git push origin "v${{ inputs.version }}" || true
 
       - name: 创建 Release 并上传安装包
         uses: softprops/action-gh-release@v2
