@@ -46,10 +46,14 @@ const attempts = [
   ["7z", ["a", "-bso0", zipPath, "wiki-agent-windows"]],
 ];
 for (const [command, args] of attempts) {
-  const result = spawnSync(command, args, { cwd: releaseDir, stdio: "pipe" });
-  if (result.status === 0 && fs.existsSync(zipPath)) {
-    console.log(zipPath);
-    process.exit(0);
+  try {
+    const result = spawnSync(command, args, { cwd: releaseDir, stdio: "pipe" });
+    if (result.status === 0 && fs.existsSync(zipPath)) {
+      console.log(zipPath);
+      process.exit(0);
+    }
+  } catch {
+    // 该命令不存在，换下一个
   }
 }
 console.error("目录已生成，但没有打成 zip");

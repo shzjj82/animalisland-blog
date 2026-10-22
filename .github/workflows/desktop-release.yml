@@ -101,11 +101,13 @@ jobs:
           cp apps/editor/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg apps/editor/artifacts/
 
       # Windows：NSIS 安装版 + 便携版 zip（便携版由 pack-windows-portable.mjs 组装）
+      # 安装版要现装 NSIS，失败也不能连累便携版 zip（下载页主要就是 zip）
       - name: 打包 Windows 安装版
         if: matrix.name == 'windows'
         shell: bash
         working-directory: apps/editor
         run: pnpm exec tauri build --bundles nsis
+        continue-on-error: true
 
       # 便携版复用上一步已经打好的 exe，脚本里只组装 zip
       - name: 组装 Windows 便携版
@@ -119,7 +121,12 @@ jobs:
         shell: bash
         run: |
           mkdir -p apps/editor/artifacts
-          cp apps/editor/src-tauri/target/release/bundle/nsis/*.exe apps/editor/artifacts/
+          # NSIS 安装版：有就带上，没有也不算失败
+          if ls apps/editor/src-tauri/target/release/bundle/nsis/*.exe >/dev/null 2>&1; then
+            cp apps/editor/src-tauri/target/release/bundle/nsis/*.exe apps/editor/artifacts/
+          else
+            echo "没有 NSIS 安装版，只出便携包"
+          fi
           cp apps/editor/release/wiki-agent-*-windows.zip apps/editor/artifacts/
 
       - uses: actions/upload-artifact@v4
