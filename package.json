@@ -25,7 +25,8 @@
     "pm2:delete": "pm2 delete myblog-api myblog-web",
     "pm2:logs": "pm2 logs",
     "deploy:editor": "bash scripts/deploy-editor.sh",
-    "deploy:editor:fast": "bash scripts/deploy-editor.sh --skip-build"
+    "deploy:editor:fast": "bash scripts/deploy-editor.sh --skip-build",
+    "deploy:release": "bash scripts/sync-editor-release.sh"
   },
   "engines": {
     "node": ">=20"
