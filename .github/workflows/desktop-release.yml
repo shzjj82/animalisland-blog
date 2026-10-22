@@ -74,15 +74,40 @@ jobs:
         working-directory: apps/editor
         run: node scripts/copy-node.mjs ${{ matrix.name == 'macos' && 'darwin' || 'win32' }}
 
-      # macOS：通用二进制（Apple 芯片 + Intel），dmg
-      - name: 打包 macOS
+      # 关键：APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID 只要是「存在的环境变量」，
+      # 哪怕是空字符串，tauri 也会去跑公证，然后被 notarytool 以 Team ID 不合法打回来。
+      # 所以没配齐证书时这些变量一个都不要写进环境。
+      - name: 准备签名环境（没配证书就用临时签名）
         if: matrix.name == 'macos'
-        working-directory: apps/editor
+        shell: bash
         env:
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -n "$APPLE_SIGNING_IDENTITY" ] && [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+            {
+              echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY"
+              echo "APPLE_ID=$APPLE_ID"
+              echo "APPLE_PASSWORD=$APPLE_PASSWORD"
+              echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"
+              [ -n "$APPLE_CERTIFICATE" ] && echo "APPLE_CERTIFICATE=$APPLE_CERTIFICATE"
+              [ -n "$APPLE_CERTIFICATE_PASSWORD" ] && echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD"
+            } >> "$GITHUB_ENV"
+            echo "已配置 Developer ID：签名并公证"
+          else
+            echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+            echo "未配置签名证书：临时签名，不公证"
+          fi
+
+      # macOS：通用二进制（Apple 芯片 + Intel），只打 app，dmg 下一步自己生成
+      - name: 打包 macOS
+        if: matrix.name == 'macos'
+        shell: bash
+        working-directory: apps/editor
         run: pnpm exec tauri build --target universal-apple-darwin --bundles app
 
       # dmg 用 scripts/pack-macos-dmg.mjs 自己打：tauri 自带的 create-dmg 脚本
