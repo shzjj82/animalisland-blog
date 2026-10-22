@@ -127,9 +127,22 @@ jobs:
           files: artifacts/*
           generate_release_notes: true
 
+      # secrets 不能用在 if 里（Actions 解析阶段就报 Unrecognized named-value），
+      # 所以先用一步把它转成普通输出，再用这个输出去决定要不要同步
+      - name: 判断是否配置了部署密钥
+        id: deploy
+        env:
+          EDITOR_SSH_KEY: ${{ secrets.EDITOR_SSH_KEY }}
+        run: |
+          if [ -n "$EDITOR_SSH_KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # 配了 EDITOR_SSH_KEY 就把安装包同步到自己的下载目录，下载页读的就是这个目录
       - name: 同步到下载服务器
-        if: ${{ secrets.EDITOR_SSH_KEY != '' }}
+        if: steps.deploy.outputs.enabled == 'true'
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EDITOR_SSH_HOST }}
