@@ -34,14 +34,24 @@ SSH_OPTS=(-o StrictHostKeyChecking=no -o ConnectTimeout=10)
 [[ -n "$SSH_KEY" ]] && SSH_OPTS+=(-i "$SSH_KEY")
 
 if [[ "$BUILD" == "1" ]]; then
-  echo "▶ 构建 editor web 产物（gateway → $GATEWAY）"
+  echo "▶ 构建 editor web 产物（gateway → ${GATEWAY}）"
   (cd "$REPO_ROOT" && GATEWAY_BASE_URL="$GATEWAY" pnpm pack:web)
 fi
 
 if [[ ! -f "$BUNDLE/server.mjs" || ! -d "$BUNDLE/dist" ]]; then
-  echo "✗ 缺少产物：$BUNDLE（server.mjs / dist）" >&2
+  echo "✗ 缺少产物：${BUNDLE}（server.mjs / dist）" >&2
   exit 1
 fi
+
+# --skip-build 复用旧产物时最容易踩的坑：旧 dist 里没有下载页和版本清单，
+# 传上去会让 / 变回 SPA、/version.json 返回 HTML。宁可拒绝也不静默回滚。
+for required in dist/download.html dist/version.json; do
+  if [[ ! -f "$BUNDLE/$required" ]]; then
+    echo "✗ 产物不完整：缺少 $BUNDLE/$required" >&2
+    echo "  这是旧版本打出来的包，去掉 --skip-build 重新构建后再部署。" >&2
+    exit 1
+  fi
+done
 
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
@@ -78,7 +88,7 @@ TARBALL="editor-web-$(date +%Y%m%d-%H%M%S).tar.gz"
 TARBALL_PATH="/tmp/$TARBALL"
 tar -czf "$TARBALL_PATH" -C "$STAGE" dist server.mjs ecosystem.config.cjs
 
-echo "▶ 上传 $TARBALL_PATH → $SSH_USER@$SSH_HOST:$SSH_PORT"
+echo "▶ 上传 ${TARBALL_PATH} → ${SSH_USER}@${SSH_HOST}:${SSH_PORT}"
 scp "${SSH_OPTS[@]}" -P "$SSH_PORT" "$TARBALL_PATH" "$SSH_USER@$SSH_HOST:/tmp/$TARBALL"
 
 echo "▶ 服务器安装 / 重启服务"
@@ -109,6 +119,7 @@ else
 fi
 
 TOML=/etc/frp/frpc.toml
+NEED_FRPC_RESTART=0
 if [ -f "$TOML" ]; then
   if ! grep -q 'name = "editor"' "$TOML"; then
     cp "$TOML" "$TOML.bak.$(date +%Y%m%d%H%M%S)"
@@ -121,12 +132,10 @@ localIP = "127.0.0.1"
 localPort = $EDITOR_PORT
 remotePort = $REMOTE_PORT
 EOF
+    NEED_FRPC_RESTART=1
   fi
-# 注意：SSH 本身就走 frp 隧道（remote 1022 → 本机 22），
-# 下面 restart frpc 会短暂断开本次连接，属正常现象；等 5~10s 隧道自动恢复。
-  systemctl restart frpc || true
 else
-  echo "⚠ 未找到 $TOML，跳过 frpc 配置" >&2
+  echo "⚠ 未找到 ${TOML}，跳过 frpc 配置" >&2
 fi
 
 for i in $(seq 1 20); do
@@ -138,9 +147,14 @@ for i in $(seq 1 20); do
   sleep 1
 done
 
-sleep 2
-systemctl is-active frpc || true
-pm2 list | grep -E '^\|? *[0-9]+ *\| *editor' || pm2 describe editor | head -5
+pm2 describe editor 2>/dev/null | grep -E 'status|uptime' || pm2 list | grep editor || true
+
+# frpc 重启会掐断本次 ssh（SSH 本身就走这条隧道），所以放到脱离子会话的后台执行，
+# 让本次 ssh 先正常结束；调用方等公网入口恢复即可。
+if [ "$NEED_FRPC_RESTART" = "1" ]; then
+  echo "▶ frpc 配置已更新，后台重启（会短暂断线）"
+  setsid bash -c "sleep 2; systemctl restart frpc" >/dev/null 2>&1 < /dev/null &
+fi
 REMOTE
 
 rm -f "$TARBALL_PATH"
