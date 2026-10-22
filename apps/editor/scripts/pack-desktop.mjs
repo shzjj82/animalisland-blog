@@ -102,25 +102,9 @@ function packMacos() {
   }
 }
 
+/** Windows 便携包交给独立脚本，本地和 CI 共用同一份逻辑与文件名 */
 function assembleWindowsPortable() {
-  const exe = path.join(targetDir(), "x86_64-pc-windows-msvc/release/wiki-agent.exe");
-  if (!fs.existsSync(exe)) {
-    console.error("没有找到 wiki-agent.exe");
-    process.exit(1);
-  }
-  const out = path.join(releaseDir, "wiki-agent-windows");
-  fs.rmSync(out, { recursive: true, force: true });
-  fs.mkdirSync(out, { recursive: true });
-  fs.copyFileSync(exe, path.join(out, "wiki-agent.exe"));
-  const runtime = path.join(out, "runtime");
-  fs.mkdirSync(runtime, { recursive: true });
-  fs.copyFileSync(path.join(root, "src-tauri/resources/node.exe"), path.join(runtime, "wiki-agent-service.exe"));
-  fs.copyFileSync(path.join(root, "src-tauri/resources/desktop-server.mjs"), path.join(runtime, "desktop-server.mjs"));
-  fs.cpSync(path.join(root, "dist"), path.join(runtime, "dist"), { recursive: true });
-  const zipPath = path.join(releaseDir, "wiki-agent-windows.zip");
-  fs.rmSync(zipPath, { force: true });
-  run("zip", ["-r", "-q", zipPath, "wiki-agent-windows"], { cwd: releaseDir });
-  console.log(zipPath);
+  run(process.execPath, ["scripts/pack-windows-portable.mjs"]);
 }
 
 /** Homebrew 的 llvm / lld 是 keg-only，不进 PATH；交叉编译要用里面的 llvm-rc、lld-link */

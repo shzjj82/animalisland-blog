@@ -5,12 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5174",
-    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "build": "tsc -p tsconfig.json --noEmit && vite build && node scripts/gen-version.mjs",
     "build:desktop": "pnpm --filter @myblog/shared build && pnpm build && node scripts/bundle-server.mjs",
     "desktop": "tauri dev",
     "pack:web": "pnpm --filter @myblog/shared build && pnpm build && node scripts/bundle-server.mjs && node scripts/pack-web.mjs",
     "pack:macos": "node scripts/pack-desktop.mjs macos",
     "pack:windows": "node scripts/pack-desktop.mjs windows",
+    "version:set": "node scripts/set-version.mjs",
+    "version:gen": "node scripts/gen-version.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

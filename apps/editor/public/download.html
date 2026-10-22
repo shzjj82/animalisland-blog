@@ -158,6 +158,7 @@
       .dl .desc { font-size: 13.5px; color: var(--ink-2); }
       .dl .file { font-size: 12.5px; color: var(--ink-2); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
       .dl .btn { margin-top: 16px; width: 100%; }
+      .dl .btn.is-off { background: var(--bg-soft); color: var(--ink-2); border-color: var(--line); cursor: default; }
 
       .data { background: var(--ink); color: #fff; }
       .data .sec-head h2 { color: #fff; }
@@ -203,7 +204,7 @@
 
     <main>
       <section class="hero wrap">
-        <span class="eyebrow">v0.0.1 · macOS / Windows / 网页版</span>
+        <span class="eyebrow js-hero-ver">v0.0.1 · macOS / Windows / 网页版</span>
         <h1>下载 wiki-agent</h1>
         <p class="sub">
           本地优先的知识库编辑器。块编辑、页面树、待办和 AI 助手在同一个页面里，
@@ -317,7 +318,7 @@
                 macOS
               </div>
               <div class="desc">Apple 芯片与 Intel 通用包</div>
-              <div class="file">wiki-agent_0.0.1_universal.dmg · 92 MB</div>
+              <div class="file js-name">wiki-agent_0.0.1_universal.dmg · 92 MB</div>
               <a class="btn btn-primary" href="/downloads/wiki-agent_0.0.1_universal.dmg" download>下载 .dmg</a>
             </div>
             <div class="dl" data-os="win">
@@ -327,8 +328,8 @@
                 Windows
               </div>
               <div class="desc">Windows 10 / 11，解压后运行</div>
-              <div class="file">wiki-agent-windows.zip · 43 MB</div>
-              <a class="btn btn-primary" href="/downloads/wiki-agent-windows.zip" download>下载 .zip</a>
+              <div class="file js-name">wiki-agent-0.0.1-windows.zip · 43 MB</div>
+              <a class="btn btn-primary" href="/downloads/wiki-agent-0.0.1-windows.zip" download>下载 .zip</a>
             </div>
             <div class="dl">
               <div class="os">
@@ -373,7 +374,7 @@
     <footer>
       <div class="foot-inner">
         <span class="brand-sm"><img src="/logo.png" alt="" />wiki-agent</span>
-        <span>v0.0.1 · online.championsea.wiki-agent</span>
+        <span class="foot-ver">v0.0.1 · online.championsea.wiki-agent</span>
         <nav class="foot-links">
           <a href="/app">网页版</a>
           <a href="#download">下载</a>
@@ -393,6 +394,58 @@
         card.classList.add("reco");
         var badge = card.querySelector(".badge");
         if (badge) badge.hidden = false;
+      })();
+
+      // 版本号与安装包以 /version.json 为准（服务端按下载目录里真实存在的文件生成）。
+      // HTML 里写的是上一次发布的兜底值，取不到接口就照原样显示，不给 404 链接。
+      (function () {
+        function mb(size) {
+          if (!size) return "";
+          var m = size / 1024 / 1024;
+          return (m >= 10 ? Math.round(m) : m.toFixed(1)) + " MB";
+        }
+
+        function apply(data) {
+          if (!data || !data.version) return;
+          var v = "v" + data.version;
+
+          var hero = document.querySelector(".js-hero-ver");
+          if (hero) hero.textContent = v + " · macOS / Windows / 网页版";
+          var foot = document.querySelector(".foot-ver");
+          if (foot) foot.textContent = v + " · online.championsea.wiki-agent";
+
+          (data.files || []).forEach(function (file) {
+            if (!file.name) return;
+            var card = document.querySelector('.dl[data-os="' + file.os + '"]');
+            if (!card) return;
+            // 同一个平台按「必选优先」选一条：优先展示已上传的便携包
+            var current = card.querySelector(".js-name");
+            var btn = card.querySelector(".btn");
+            if (!current || !btn) return;
+            if (file.optional && btn.getAttribute("href")) return;
+
+            if (!file.available) {
+              current.textContent = file.name + " · 构建中";
+              btn.textContent = "构建中";
+              btn.removeAttribute("href");
+              btn.removeAttribute("download");
+              btn.classList.add("is-off");
+              return;
+            }
+            current.textContent = file.name + " · " + mb(file.size);
+            btn.textContent = file.os === "mac" ? "下载 .dmg" : "下载 .zip";
+            btn.setAttribute("href", file.url);
+            btn.setAttribute("download", "");
+            btn.classList.remove("is-off");
+          });
+        }
+
+        fetch("/version.json", { cache: "no-store" })
+          .then(function (res) {
+            return res.ok ? res.json() : null;
+          })
+          .then(apply)
+          .catch(function () {});
       })();
     </script>
   </body>

@@ -32,17 +32,19 @@ const MIME: Record<string, string> = {
  *
  *   1. /auth /docs /agents /upload /teams   → 反代到网关
  *   2. /downloads/<file>                    → downloadDir 里的安装包（支持 Range）
- *   3. 别名 308 跳转                         → /download、/download.html、/downloads
- *   4. /                                     → dist/download.html（下载宣传页 = 站点首页）
- *   5. /app、/app/*                          → index.html（编辑器 SPA，含深链回落）
- *   6. dist 里真实存在的文件                  → 直接返回（带缓存头）
- *   7. 其他                                  → 404
+ *   3. /version.json                        → 版本号 + 实际存在的安装包（下载页据此渲染）
+ *   4. 别名 308 跳转                         → /download、/download.html、/downloads
+ *   5. /                                     → dist/download.html（下载宣传页 = 站点首页）
+ *   6. /app、/app/*                          → index.html（编辑器 SPA，含深链回落）
+ *   7. dist 里真实存在的文件                  → 直接返回（带缓存头）
+ *   8. 其他                                  → 404
  *
  * 编辑器不再占用根路径：根是给人的落地页，工具在 /app 下面。
  * 桌面版 WebView 也加载 /app（见 src-tauri/src/lib.rs）。
  */
 const HOME_PAGE = "download.html";
 const APP_PREFIX = "/app";
+const VERSION_PATH = "/version.json";
 
 /** 旧地址 / 常见手误 → canonical 路径 */
 const REDIRECTS: Record<string, string> = {
@@ -163,6 +165,93 @@ function sendDownload(req: IncomingMessage, res: ServerResponse, file: string): 
   fs.createReadStream(file).pipe(res);
 }
 
+/** 安装包文件名 → 平台；version.json 缺失时靠它反推 */
+const FILE_OS: Record<string, string> = {
+  ".dmg": "mac",
+  ".pkg": "mac",
+  ".zip": "win",
+  ".exe": "win",
+  ".msi": "win",
+};
+
+function versionOf(name: string): string | null {
+  const match = name.match(/(\d+)\.(\d+)\.(\d+)/);
+  return match ? match[0] : null;
+}
+
+function compareVersion(a: string, b: string): number {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i += 1) {
+    if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) - (pb[i] ?? 0);
+  }
+  return 0;
+}
+
+/**
+ * /version.json：下载页唯一的数据源。
+ * 以 dist/version.json（构建时生成）声明的版本和文件名为准，
+ * 再用下载目录里真实存在的文件补上大小与 available —— 没上传就是没上传，页面显示「构建中」，
+ * 而不是给一个 404 的链接。
+ */
+function serveVersionJson(distRoot: string, req: IncomingMessage, res: ServerResponse): boolean {
+  const pathname = decodeURIComponent(new URL(req.url ?? "/", "http://127.0.0.1").pathname);
+  if (pathname !== VERSION_PATH) {
+    return false;
+  }
+  const dir = resolveDownloadsDir(distRoot);
+
+  let version = "";
+  let builtAt: string | null = null;
+  let declared: Array<{ os: string; name: string; label?: string; optional?: boolean }> = [];
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(distRoot, "version.json"), "utf8"));
+    version = String(manifest.version ?? "");
+    builtAt = typeof manifest.builtAt === "string" ? manifest.builtAt : null;
+    declared = Array.isArray(manifest.files) ? manifest.files : [];
+  } catch {
+    // 没有 manifest 就按下载目录里最大版本反推
+    if (fs.existsSync(dir)) {
+      for (const name of fs.readdirSync(dir)) {
+        const found = versionOf(name);
+        if (found && (!version || compareVersion(found, version) > 0)) {
+          version = found;
+        }
+      }
+      declared = fs
+        .readdirSync(dir)
+        .map((name) => ({ os: FILE_OS[path.extname(name).toLowerCase()] ?? "other", name }))
+        .filter((file) => file.os !== "other");
+    }
+  }
+
+  const files = declared.map((file) => {
+    const target = path.resolve(dir, file.name);
+    const inside = target.startsWith(`${dir}${path.sep}`);
+    const stat = inside && fs.existsSync(target) && fs.statSync(target).isFile() ? fs.statSync(target) : null;
+    return {
+      os: file.os,
+      name: file.name,
+      label: file.label ?? "",
+      url: `/downloads/${encodeURIComponent(file.name)}`,
+      size: stat ? stat.size : null,
+      available: Boolean(stat),
+      optional: Boolean(file.optional),
+    };
+  });
+
+  const body = JSON.stringify({ version, builtAt, files }, null, 2);
+  res.statusCode = 200;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache");
+  if (req.method === "HEAD") {
+    res.end();
+    return true;
+  }
+  res.end(body);
+  return true;
+}
+
 function serveDownload(distRoot: string, req: IncomingMessage, res: ServerResponse): boolean {
   const pathname = decodeURIComponent(new URL(req.url ?? "/", "http://127.0.0.1").pathname);
   // 只接 /downloads/<file>；/downloads 本身交给 REDIRECTS 去跳转
@@ -262,6 +351,9 @@ export function startDesktopServer(distDir: string): Promise<number> {
       return;
     }
     if (serveDownload(root, req, res)) {
+      return;
+    }
+    if (serveVersionJson(root, req, res)) {
       return;
     }
     serveStatic(root, req, res);

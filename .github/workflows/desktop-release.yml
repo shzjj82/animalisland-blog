@@ -1,0 +1,142 @@
+name: desktop-release
+
+# 打包不依赖本机硬件：打 tag 就出 macOS / Windows 安装包，并上传到 GitHub Release。
+# 版本号来自 tag（v0.0.2 -> 0.0.2），写入 package.json 与 tauri.conf.json，
+# 产物名、下载页展示的版本号都由它推导，不需要再手工改 HTML。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号，例如 0.0.2"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos
+            os: macos-latest
+          - name: windows
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 解析版本号
+        id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ inputs.version }}"
+          else
+            V="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: 写入版本号
+        working-directory: apps/editor
+        run: node scripts/set-version.mjs "${{ steps.ver.outputs.version }}"
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 安装 Rust（macOS 需要两个架构做通用包）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.name == 'macos' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: 缓存 Rust 产物
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/editor/src-tauri -> target
+
+      # macOS：通用二进制（Apple 芯片 + Intel），dmg
+      - name: 打包 macOS
+        if: matrix.name == 'macos'
+        working-directory: apps/editor
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: pnpm exec tauri build --target universal-apple-darwin --bundles app,dmg
+
+      - name: 收集 dmg
+        if: matrix.name == 'macos'
+        shell: bash
+        run: |
+          mkdir -p apps/editor/artifacts
+          cp apps/editor/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg apps/editor/artifacts/
+
+      # Windows：NSIS 安装版 + 便携版 zip（便携版由 pack-windows-portable.mjs 组装）
+      - name: 打包 Windows 安装版
+        if: matrix.name == 'windows'
+        working-directory: apps/editor
+        run: pnpm exec tauri build --bundles nsis
+
+      - name: 组装 Windows 便携版
+        if: matrix.name == 'windows'
+        working-directory: apps/editor
+        run: node scripts/copy-node.mjs win32 && node scripts/pack-windows-portable.mjs
+
+      - name: 收集 Windows 产物
+        if: matrix.name == 'windows'
+        shell: bash
+        run: |
+          mkdir -p apps/editor/artifacts
+          cp apps/editor/src-tauri/target/release/bundle/nsis/*.exe apps/editor/artifacts/
+          cp apps/editor/release/wiki-agent-*-windows.zip apps/editor/artifacts/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wiki-agent-${{ steps.ver.outputs.version }}-${{ matrix.name }}
+          path: apps/editor/artifacts/*
+          if-no-files-found: error
+
+  release:
+    name: 发布到 GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: 创建 Release 并上传安装包
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
+          name: wiki-agent ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
+          files: artifacts/*
+          generate_release_notes: true
+
+      # 配了 EDITOR_SSH_KEY 就把安装包同步到自己的下载目录，下载页读的就是这个目录
+      - name: 同步到下载服务器
+        if: ${{ secrets.EDITOR_SSH_KEY != '' }}
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EDITOR_SSH_HOST }}
+          username: ${{ secrets.EDITOR_SSH_USER }}
+          key: ${{ secrets.EDITOR_SSH_KEY }}
+          port: ${{ secrets.EDITOR_SSH_PORT || 22 }}
+          source: "artifacts/*"
+          target: /opt/apps/editor/downloads
+          strip_components: 1
+          overwrite: true
