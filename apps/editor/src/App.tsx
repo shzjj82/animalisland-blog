@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type EditorJS from "@editorjs/editorjs";
 import { useTranslation } from "react-i18next";
-import { CloudStorage, CloseSmall, Delete, Download, Export, HamburgerButton, HardDisk, MoreTwo, People, Plus, Robot, Search } from "@icon-park/react";
+import { CloudStorage, CloseSmall, Delete, Download, Export, HamburgerButton, HardDisk, MoreTwo, People, Plus, Redo, Robot, Search, Undo } from "@icon-park/react";
 import type { EditorJsBlock, EditorJsDocument } from "@myblog/shared";
-import { BlockEditor } from "@/components/block-editor";
+import { BlockEditor, type EditorHistoryApi } from "@/components/block-editor";
 import type { PageLinkData } from "@/components/block-editor/tools/PageLinkTool";
 import { ChangePasswordDialog } from "@/components/change-password-dialog";
 import { EditorSpotlight, type SpotlightAction } from "@/components/editor-spotlight";
@@ -239,9 +239,50 @@ export function App() {
   );
   const readOnlyRef = useRef(pageReadOnly);
   readOnlyRef.current = pageReadOnly;
+  /** 编辑器内部的撤销栈：顶栏按钮与 Cmd/Ctrl+Z 都走这里 */
+  const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
+  const historyRef = useRef<EditorHistoryApi | null>(null);
+  const bindHistory = useCallback((api: EditorHistoryApi | null) => {
+    historyRef.current = api;
+    setHistoryState({ canUndo: api?.canUndo ?? false, canRedo: api?.canRedo ?? false });
+  }, []);
   const sessionRef = useRef<RemoteSession | null>(session);
   sessionRef.current = session;
   const remote = session !== null;
+
+  /**
+   * Cmd/Ctrl+Z 撤销、Shift+Cmd/Ctrl+Z 或 Ctrl+Y 重做。
+   * 编辑器之外的输入框（登录、搜索）留给浏览器原生撤销；编辑器里的输入一律走文档级历史，
+   * 否则原生 undo 只改 DOM、不触发 onChange，存下来的还是改之前的内容。
+   */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.metaKey && !event.ctrlKey) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key !== "z" && key !== "y") {
+        return;
+      }
+      const api = historyRef.current;
+      if (!api || readOnlyRef.current) {
+        return;
+      }
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const inEditor = Boolean(target?.closest(".notion-editor"));
+      if (!inEditor && target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+        return;
+      }
+      event.preventDefault();
+      if (key === "y" || event.shiftKey) {
+        api.redo();
+      } else {
+        api.undo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => subscribeSession(setSession), []);
 
@@ -1321,6 +1362,26 @@ export function App() {
                 {t("common.syncLocalPages")} · {syncPlanSize(syncPlan)}
               </Button>
             ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label={t("app.undo")}
+              disabled={!page || pageReadOnly || !historyState.canUndo}
+              onClick={() => historyRef.current?.undo()}
+            >
+              <Undo {...iconProps} />
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label={t("app.redo")}
+              disabled={!page || pageReadOnly || !historyState.canRedo}
+              onClick={() => historyRef.current?.redo()}
+            >
+              <Redo {...iconProps} />
+            </Button>
             <Button type="button" variant="outline" size="sm" disabled={!page} onClick={() => importInputRef.current?.click()}>
               <Download {...iconProps} />
               {t("common.import")}
@@ -1463,6 +1524,7 @@ export function App() {
                 setViewing({ data, replace });
               }}
               onConfirmDeleteFile={confirmDeleteFile}
+              onHistory={bindHistory}
               barSlot={barSlot}
               reveal={reveal}
             />

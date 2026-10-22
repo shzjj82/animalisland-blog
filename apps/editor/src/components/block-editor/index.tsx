@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { DownC, More, Plus, Robot } from "@icon-park/react";
+import { CloseSmall, DownC, More, Plus, Redo, Robot, Undo } from "@icon-park/react";
 import EditorJS from "@editorjs/editorjs";
 import Delimiter from "@editorjs/delimiter";
 import Header from "@editorjs/header";
@@ -27,8 +27,17 @@ import { bindEditingGuards } from "./editingGuards";
 import { menuIcons } from "./menuIcons";
 import { bindToolbarAnchor, blockIconKey } from "./toolbarAnchor";
 import { revealText } from "./revealText";
+import { useDocHistory } from "./useDocHistory";
 import { cn } from "@/lib/utils";
 import "./blockEditor.css";
+
+/** 撤销 / 重做的对外接口：顶栏按钮和快捷键都在 App 里，靠它调到编辑器内部的历史栈 */
+export type EditorHistoryApi = {
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+};
 
 const inlineTools = ["link", "bold", "italic", "askAi"];
 
@@ -114,14 +123,17 @@ type Props = {
   /** 打开后定位到这段文字；nonce 变化时重新定位，同一页也能再次触发 */
   reveal?: { text: string; nonce: number } | null;
   readOnly?: boolean;
+  /** 非移动端的撤销 / 重做按钮在顶栏，通过这个回调拿到编辑器里的历史栈 */
+  onHistory?: (api: EditorHistoryApi | null) => void;
   /** 移动端底栏挂载点（父级布局流里的一个空容器）；不传则不渲染底栏 */
   barSlot?: HTMLElement | null;
 };
 
-export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolvePageTitle, onReady, onAi, onAskSelection, onUploadFile, onUploadError, onOpenFile, onConfirmDeleteFile, reveal, readOnly = false, barSlot }: Props) {
+export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolvePageTitle, onReady, onAi, onAskSelection, onUploadFile, onUploadError, onOpenFile, onConfirmDeleteFile, reveal, readOnly = false, onHistory, barSlot }: Props) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
-  const { keyboardOpen } = useVisualViewport();
+  const viewport = useVisualViewport();
+  const { keyboardOpen } = viewport;
   const [ready, setReady] = useState(false);
   const [editing, setEditing] = useState(false);
   /** 当前块的样式（用于底栏高亮），取值与 blockIconKey 一致 */
@@ -159,6 +171,17 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
   const readOnlyRef = useRef(readOnly);
   readOnlyRef.current = readOnly;
   const initialRef = useRef(doc);
+  const history = useDocHistory();
+  /** 撤销 / 重做期间由我们自己渲染，别把这一次变更又记进历史栈 */
+  const applyingRef = useRef(false);
+  const onHistoryRef = useRef(onHistory);
+  onHistoryRef.current = onHistory;
+  const undoRef = useRef<() => void>(() => {});
+  const redoRef = useRef<() => void>(() => {});
+  /** 刚删掉块时给的撤销提示：误删之后底栏可能已经收起，得有个不用找按钮的入口 */
+  const [removedToast, setRemovedToast] = useState<{ count: number } | null>(null);
+  const blockCountRef = useRef(doc.blocks?.length ?? 0);
+  const toastTimerRef = useRef(0);
 
   useEffect(() => {
     const holder = holderRef.current;
@@ -270,6 +293,9 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
         new DragDrop(editor, "2px solid #191919");
         readyRef.current = true;
         editorInstanceRef.current = editor;
+        // 打开时的内容就是历史起点：撤销不会撤到上一页去
+        history.reset(initialRef.current);
+        blockCountRef.current = editor.blocks.getBlocksCount();
         setReady(true);
         onReadyRef.current?.(editor);
         const pending = revealRef.current;
@@ -286,6 +312,19 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
           return;
         }
         onChangeRef.current(saved);
+        // 撤销 / 重做是我们自己 render 回去的，不能又记一笔
+        if (!applyingRef.current) {
+          history.commit(saved);
+          const before = blockCountRef.current;
+          const after = saved.blocks.length;
+          blockCountRef.current = after;
+          // 块变少了就是删除：弹一条「撤销」，底栏收起来也还能救回来
+          if (after < before) {
+            setRemovedToast({ count: before - after });
+            window.clearTimeout(toastTimerRef.current);
+            toastTimerRef.current = window.setTimeout(() => setRemovedToast(null), 6000);
+          }
+        }
       },
     });
 
@@ -356,7 +395,9 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
       unbindGuards();
       unbindToolbar();
       holder.removeEventListener("paste", onPaste, true);
+      window.clearTimeout(toastTimerRef.current);
       onReadyRef.current?.(null);
+      onHistoryRef.current?.(null);
       editorInstanceRef.current = null;
       setReady(false);
       destroy();
@@ -479,6 +520,70 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
     editor.toolbar.toggleBlockSettings(true);
   }
 
+  /** 把历史里的整份文档渲染回去（撤销 / 重做共用） */
+  function applyHistory(body: EditorJsDocument | null) {
+    const editor = editorInstanceRef.current;
+    const holder = holderRef.current;
+    if (!editor || !body) {
+      return;
+    }
+    const hadFocus = Boolean(holder && document.activeElement && holder.contains(document.activeElement));
+    let at = -1;
+    try {
+      at = editor.blocks.getCurrentBlockIndex();
+    } catch {
+      at = -1;
+    }
+    applyingRef.current = true;
+    void editor.isReady
+      .then(() => editor.render(body))
+      .catch(() => undefined)
+      .then(() => {
+        applyingRef.current = false;
+        // render 是程序化写入，Editor.js 不一定触发 onChange，这里主动通知外层落盘
+        onChangeRef.current(body);
+        blockCountRef.current = body.blocks.length;
+        if (hadFocus) {
+          // 尽量回到撤销前所在的那一块，超出范围就落到最后一块
+          try {
+            const last = editor.blocks.getBlocksCount() - 1;
+            if (last >= 0) {
+              editor.caret.setToBlock(Math.min(Math.max(at, 0), last), "end");
+            }
+          } catch {
+            /* 光标放不回去就算了 */
+          }
+        }
+        refreshBlockKind();
+      });
+  }
+
+  function handleUndo() {
+    if (readOnlyRef.current) {
+      return;
+    }
+    applyHistory(history.undo());
+  }
+
+  function handleRedo() {
+    if (readOnlyRef.current) {
+      return;
+    }
+    applyHistory(history.redo());
+  }
+  undoRef.current = handleUndo;
+  redoRef.current = handleRedo;
+
+  /** 顶栏按钮要知道现在能不能撤 / 能不能重做 */
+  useEffect(() => {
+    onHistoryRef.current?.({
+      undo: () => undoRef.current(),
+      redo: () => redoRef.current(),
+      canUndo: history.canUndo,
+      canRedo: history.canRedo,
+    });
+  }, [history.canUndo, history.canRedo]);
+
   /** 呼出 AI */
   function openAi() {
     const editor = editorInstanceRef.current;
@@ -524,6 +629,8 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
   const barIconProps = { theme: "outline" as const, strokeWidth: 3, size: 20 };
   const barButtonClass =
     "flex h-11 w-10 shrink-0 items-center justify-center rounded-lg text-foreground/70 transition-colors active:bg-muted active:text-foreground";
+  /* 提示条贴着可视视口底部；键盘开着时让出底栏的高度 */
+  const toastBottom = viewport.top + viewport.height - (keyboardOpen ? 56 : 16);
 
   return (
     <>
@@ -552,6 +659,41 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
         }}
         ref={holderRef}
       />
+      {removedToast && !readOnly
+        ? createPortal(
+            <div
+              className="pointer-events-none fixed inset-x-0 z-50 flex justify-center px-3"
+              style={{ top: toastBottom, transform: "translateY(-100%)" }}
+            >
+              <div className="pointer-events-auto flex items-center gap-3 rounded-lg bg-foreground px-3.5 py-2 text-background shadow-lg">
+                <span className="text-sm">{t("app.blockDeleted", { count: removedToast.count })}</span>
+                <button
+                  type="button"
+                  className="text-sm font-medium underline underline-offset-2"
+                  onClick={() => {
+                    setRemovedToast(null);
+                    window.clearTimeout(toastTimerRef.current);
+                    handleUndo();
+                  }}
+                >
+                  {t("app.undo")}
+                </button>
+                <button
+                  type="button"
+                  aria-label={t("common.cancel")}
+                  className="text-background/60"
+                  onClick={() => {
+                    setRemovedToast(null);
+                    window.clearTimeout(toastTimerRef.current);
+                  }}
+                >
+                  <CloseSmall theme="outline" strokeWidth={3} size={16} />
+                </button>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
       {showBar && barSlot
         ? createPortal(
             <div
@@ -568,6 +710,29 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
                 touchAction: "pan-x",
               }}
             >
+              {/* 撤销 / 重做：误删一个块按一下就能回来 */}
+              <button
+                type="button"
+                aria-label={t("app.undo")}
+                disabled={!history.canUndo}
+                className={cn(barButtonClass, !history.canUndo && "opacity-40")}
+                onPointerDown={keepEditorFocus}
+                onMouseDown={keepEditorFocus}
+                onClick={handleUndo}
+              >
+                <Undo {...barIconProps} />
+              </button>
+              <button
+                type="button"
+                aria-label={t("app.redo")}
+                disabled={!history.canRedo}
+                className={cn(barButtonClass, !history.canRedo && "opacity-40")}
+                onPointerDown={keepEditorFocus}
+                onMouseDown={keepEditorFocus}
+                onClick={handleRedo}
+              >
+                <Redo {...barIconProps} />
+              </button>
               {/* pointerdown / mousedown 都阻止默认行为，避免点按钮时编辑器失焦、光标丢失 */}
               <button type="button" aria-label={t("app.insertBlock")} className={barButtonClass} onPointerDown={keepEditorFocus} onMouseDown={keepEditorFocus} onClick={openBlockMenu}>
                 <Plus {...barIconProps} />
