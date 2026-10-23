@@ -110,20 +110,23 @@ jobs:
         working-directory: apps/editor
         run: pnpm exec tauri build --target universal-apple-darwin --bundles app
 
-      # dmg 用 scripts/pack-macos-dmg.mjs 自己打：tauri 自带的 create-dmg 脚本
-      # 会因为 bundle_dmg.sh 没有执行权限直接失败（Permission denied），自己打更稳
+      # dmg 自己打，不用 tauri 的 create-dmg：create-dmg 靠 AppleScript 驱动 Finder 排版窗口，
+      # runner 上没有图形会话会失败，打出来的镜像没有 .DS_Store / 卷图标，
+      # 挂载后就是「没排版的那种拖拽窗口」。pack-macos-dmg.mjs 直接把窗口排版写进镜像，
+      # 本地和 CI 产物完全一致。
       - name: 生成 dmg
         if: matrix.name == 'macos'
         shell: bash
         working-directory: apps/editor
         run: node scripts/pack-macos-dmg.mjs
 
+      # 只收 wiki-agent_*.dmg：rw.*.dmg 是中间镜像，几百 MB，别混进 Release
       - name: 收集 dmg
         if: matrix.name == 'macos'
         shell: bash
         run: |
           mkdir -p apps/editor/artifacts
-          cp apps/editor/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg apps/editor/artifacts/
+          cp apps/editor/src-tauri/target/universal-apple-darwin/release/bundle/dmg/wiki-agent_*.dmg apps/editor/artifacts/
 
       # Windows：NSIS 安装版 + 便携版 zip（便携版由 pack-windows-portable.mjs 组装）
       # 安装版要现装 NSIS，失败也不能连累便携版 zip（下载页主要就是 zip）

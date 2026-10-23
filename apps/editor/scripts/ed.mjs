@@ -596,9 +596,10 @@ async function cmdOssUpload(ver, dir, flags) {
   if (!dir) die("用法：pnpm ed oss upload <x.y.z> <目录>");
   if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) die(`目录不存在：${dir}`);
 
+  // rw.*.dmg 是 create-dmg 留下的中间镜像，几百 MB，别传上去
   const items = fs
     .readdirSync(dir)
-    .filter((n) => /\.(dmg|zip|exe)$/i.test(n))
+    .filter((n) => /\.(dmg|zip|exe)$/i.test(n) && !n.startsWith("rw."))
     .map((n) => {
       const file = path.join(dir, n);
       return { name: n, size: fs.statSync(file).size, ensure: async () => file };

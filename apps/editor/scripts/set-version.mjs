@@ -18,6 +18,9 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pkgFile = path.join(root, "package.json");
 const tauriConfFile = path.join(root, "src-tauri/tauri.conf.json");
+// 下载页里 JS 没跑起来时的兜底内容（文件名、OSS 直链、页脚版本）是写死的，
+// 跟着版本号一起换，不然发完新版页面还挂着上个版本的链接
+const downloadPageFile = path.join(root, "public/download.html");
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
@@ -47,6 +50,14 @@ fs.writeFileSync(pkgFile, `${JSON.stringify(pkg, null, 2)}\n`);
 
 const confText = fs.readFileSync(tauriConfFile, "utf8");
 fs.writeFileSync(tauriConfFile, confText.replace(/"version":\s*"[^"]+"/, `"version": "${next}"`));
+
+if (fs.existsSync(downloadPageFile)) {
+  const html = fs.readFileSync(downloadPageFile, "utf8");
+  if (html.includes(current)) {
+    fs.writeFileSync(downloadPageFile, html.replaceAll(current, next));
+    console.log(`public/download.html 里的 ${current} 已同步为 ${next}`);
+  }
+}
 
 console.log(`${current} → ${next}`);
 if (wantTag) {

@@ -100,15 +100,17 @@ function packMacos() {
       "src-tauri/resources/node",
     ]);
   }
-  // dmg 自己用 hdiutil 打：tauri 的 create-dmg 会去执行它生成的 bundle_dmg.sh，
-  // 那个脚本没有执行权限时直接 Permission denied，整个打包白跑
+  // dmg 自己用 hdiutil 打：tauri 的 create-dmg 靠 AppleScript 驱动 Finder 排版窗口，
+  // CI 上没有图形会话跑不通，打出来就是没排版的窗口；自己打还能把排版写进镜像，
+  // 本地和 CI 产物一致（见 scripts/pack-macos-dmg.mjs）
   run("pnpm", ["exec", "tauri", "build", "--target", "universal-apple-darwin", "--bundles", "app"]);
   run(process.execPath, ["scripts/pack-macos-dmg.mjs"]);
 
   const bundle = path.join(targetDir(), "universal-apple-darwin/release/bundle");
   const app = path.join(bundle, "macos/wiki-agent.app");
   for (const name of fs.readdirSync(path.join(bundle, "dmg"))) {
-    if (name.endsWith(".dmg")) {
+    // rw.*.dmg 是 create-dmg 留下的中间镜像，别当成产物
+    if (name.endsWith(".dmg") && !name.startsWith("rw.")) {
       copyInto(path.join(bundle, "dmg", name));
     }
   }
