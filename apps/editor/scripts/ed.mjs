@@ -566,8 +566,8 @@ async function writeIndex(client, cfg, currentVersion, versions) {
         name: o.name.split("/").pop(),
         size: o.size,
         os: /\.(dmg|pkg)$/i.test(o.name) ? "mac" : "win",
-        // 和 gen-version.mjs 的约定一致：NSIS 安装版是可选项，便携 zip 才是主推
-        optional: /setup\.exe$/i.test(o.name),
+        // 和 gen-version.mjs 的约定一致：NSIS 安装版是主推，便携 zip 是备选
+        optional: /-windows\.zip$/i.test(o.name),
       })),
     });
   }
@@ -632,6 +632,20 @@ async function cmdOssLs() {
   const indexed = (index.versions || []).map((x) => x.version);
   const drift = versions.filter((v) => !indexed.includes(v));
   info(`索引：${indexed.join(", ") || "(空)"}${drift.length ? yellow(`，缺 ${drift.join(", ")}`) : ""}`);
+}
+
+/** 只按 OSS 上真实存在的对象重算 index.json（改了主推/可选约定时用），不动任何对象 */
+async function cmdOssReindex(ver) {
+  const cfg = requireOss();
+  const client = ossClient(cfg);
+  const versions = (await listVersions(client, cfg)).sort(compareDesc);
+  if (!versions.length) die("OSS 上还没有任何版本，先跑 oss push / oss upload");
+
+  const index = await getJson(client, indexKey(cfg)).catch(() => null);
+  const wanted = ver ? normalizeVersion(ver) : index?.current || versions[0];
+  const current = versions.includes(wanted) ? wanted : versions[0];
+  if (wanted !== current) warn(`OSS 上没有 ${wanted}，索引 current 用 ${current}`);
+  await writeIndex(client, cfg, current, versions);
 }
 
 function cmdSync(ver, flags) {
@@ -780,6 +794,7 @@ ${bold("命令")}
                      ${dim("--keep N 保留几个旧版本；--from-github 强制回 GitHub 取包")}
   ${cyan("oss upload")} <x.y.z> <目录>  直接上传本地目录里的 dmg/zip/exe（CI 用）
   ${cyan("oss ls")}                 看 OSS 上已有哪些版本
+  ${cyan("oss reindex")} [x.y.z]    按 OSS 上真实对象重算 index.json（改了主推包时用它）
   ${cyan("sync")}                   同 oss push（旧名字，保留兼容）
   ${cyan("logs")}                   服务器 pm2 日志
                      ${dim("--lines 200 指定行数")}
@@ -844,7 +859,8 @@ async function main() {
       if (sub === "push") return cmdOssPush(arg2, flags);
       if (sub === "upload") return cmdOssUpload(arg2, positional[3], flags);
       if (sub === "ls" || sub === "list") return cmdOssLs();
-      die(`用法：pnpm ed oss push [x.y.z] | oss upload <x.y.z> <目录> | oss ls`);
+      if (sub === "reindex") return cmdOssReindex(arg2);
+      die(`用法：pnpm ed oss push [x.y.z] | oss upload <x.y.z> <目录> | oss ls | oss reindex [x.y.z]`);
       break;
     }
     case "sync":
