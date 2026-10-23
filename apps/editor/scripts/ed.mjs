@@ -20,6 +20,21 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  deleteObject,
+  headObject,
+  listObjects,
+  listVersions,
+  loadEnvFiles,
+  objectKey,
+  ossClient,
+  ossConfig,
+  ossMissing,
+  ossReady,
+  publicBase,
+  publicUrl,
+  putFile,
+} from "./lib/oss.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const EDITOR_DIR = path.resolve(HERE, "..");
@@ -241,15 +256,26 @@ async function cmdStatus() {
     }
   }
 
-  step("服务器 downloads");
-  const ls = sshCapture(`ls -l ${CONFIG.remoteDir}/downloads 2>/dev/null`);
-  if (ls.ok && ls.out) {
-    for (const line of ls.out.split("\n").filter((l) => /\.(dmg|zip|exe)$/i.test(l))) {
-      const parts = line.trim().split(/\s+/);
-      info(`${String(fmtSize(Number(parts[4]))).padStart(8)}  ${parts.slice(8).join(" ")}`);
-    }
+  step("OSS 上的安装包");
+  loadEnvFiles();
+  const cfg = ossConfig();
+  if (!ossReady(cfg)) {
+    info(red(`未配置 OSS（缺 ${ossMissing(cfg).join(", ")}）`));
   } else {
-    info(dim("读取失败（ssh 不通或目录为空）"));
+    try {
+      const client = ossClient(cfg);
+      const versions = (await listVersions(client, cfg)).sort(compareDesc);
+      if (!versions.length) {
+        info(dim("还没有上传过任何版本"));
+      }
+      for (const v of versions) {
+        const objs = await listObjects(client, `${cfg.prefix}/${v}/`);
+        const total = objs.reduce((sum, o) => sum + o.size, 0);
+        info(`${v === local ? green("→") : " "} ${v.padEnd(10)} ${String(objs.length).padStart(2)} 个文件  ${fmtSize(total)}`);
+      }
+    } catch (err) {
+      info(red(`列不出对象：${err.message}`));
+    }
   }
 }
 
@@ -317,106 +343,258 @@ function cmdRelease(ver, flags) {
   if (hasGithubCli()) info(`盯进度：${dim(`gh run watch --workflow=desktop-release.yml`)}`);
 }
 
-/* ----------------------------------------------------------------- sync */
+/* ------------------------------------------------------------------ oss */
 
-const REMOTE_SYNC = String.raw`
-const { execFileSync } = require("node:child_process");
-const fs = require("node:fs");
-const path = require("node:path");
+/** 下载缓存：同一个版本的产物只从 GitHub 拉一次 */
+const ASSET_CACHE = path.join(EDITOR_DIR, "release", "assets");
 
-const [ver, repo, remoteDir, keepOld] = process.argv.slice(2);
-const dir = path.join(remoteDir, "downloads");
-
-function apiGet(url) {
-  return JSON.parse(
-    execFileSync(
-      "curl",
-      ["-sSL", "--fail", "--retry", "3", "--retry-delay", "2",
-       "-H", "Accept: application/vnd.github+json",
-       "-H", "User-Agent: wiki-agent-cli", url],
-      { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 },
-    ),
-  );
-}
-
-let release;
-try {
-  release = apiGet("https://api.github.com/repos/" + repo + "/releases/tags/v" + ver);
-} catch {
-  console.error("读不到 Release v" + ver + "（curl 已在上方说明原因）");
-  console.error("确认 CI 已跑完：https://github.com/" + repo + "/releases/tag/v" + ver);
-  process.exit(1);
-}
-
-const assets = (release.assets || []).filter((a) => /\.(dmg|zip|exe)$/i.test(a.name));
-if (!assets.length) {
-  console.error("Release v" + ver + " 里没有 dmg/zip/exe 产物");
-  process.exit(1);
-}
-
-fs.mkdirSync(dir, { recursive: true });
-const wanted = new Set();
-
-for (const a of assets) {
-  const dest = path.join(dir, a.name);
-  wanted.add(a.name);
-  const exists = fs.existsSync(dest) ? fs.statSync(dest).size : -1;
-  if (exists === a.size) {
-    console.log("= " + a.name + "  已是最新（" + a.size + " B）");
-    continue;
+const compareDesc = (a, b) => {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i += 1) {
+    if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pb[i] ?? 0) - (pa[i] ?? 0);
   }
-  console.log("↓ " + a.name + "  " + a.size + " B");
-  execFileSync(
-    "curl",
-    ["-sSL", "--fail", "--retry", "3", "--retry-delay", "2",
-     "-H", "Accept: application/octet-stream",
-     "-H", "User-Agent: wiki-agent-cli",
-     "-o", dest + ".part",
-     "https://api.github.com/repos/" + repo + "/releases/assets/" + a.id],
-    { stdio: "inherit" },
-  );
-  fs.renameSync(dest + ".part", dest);
-  const got = fs.statSync(dest).size;
-  if (got !== a.size) {
-    console.error(a.name + " 大小不符：期望 " + a.size + "，实际 " + got);
-    process.exit(1);
+  return 0;
+};
+
+function requireOss() {
+  loadEnvFiles();
+  const cfg = ossConfig();
+  if (!ossReady(cfg)) {
+    die(`OSS 未配置：缺少 ${ossMissing(cfg).join(", ")}\n  本地写进仓库根 .env，CI 里用 Secrets 注入`);
   }
+  return cfg;
 }
 
-if (keepOld !== "1") {
-  for (const f of fs.readdirSync(dir)) {
-    if (!wanted.has(f) && /\.(dmg|zip|exe)$/i.test(f)) {
-      fs.unlinkSync(path.join(dir, f));
-      console.log("- 清理旧产物 " + f);
+async function fetchReleaseAssets(version) {
+  const clean = (assets) =>
+    (assets || [])
+      .filter((a) => /\.(dmg|zip|exe)$/i.test(a.name))
+      .map((a) => ({ id: a.id, name: a.name, size: a.size, url: a.browser_download_url || a.url }));
+
+  if (hasGithubCli()) {
+    const r = capture("gh", ["release", "view", `v${version}`, "--json", "assets"]);
+    if (r.ok) {
+      const list = clean(JSON.parse(r.out).assets);
+      if (list.length) return list;
     }
   }
+  try {
+    const rel = await repoApi(`/releases/tags/v${version}`);
+    const list = clean(rel.assets);
+    if (list.length) return list;
+    die(`Release v${version} 里没有 dmg/zip/exe 产物`);
+  } catch (err) {
+    die(`读不到 Release v${version}（${err.message}）：先确认 CI 已跑完 → https://github.com/${CONFIG.repo}/releases/tag/v${version}`);
+  }
 }
 
-console.log("--- 当前 downloads:");
-for (const f of fs.readdirSync(dir).sort()) {
-  console.log("  " + String(fs.statSync(path.join(dir, f)).size).padStart(10) + "  " + f);
+async function download(url, dest, expect) {
+  const res = await fetch(url, {
+    headers: { accept: "application/octet-stream", "user-agent": "wiki-agent-cli" },
+    redirect: "follow",
+  });
+  if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+  const total = Number(res.headers.get("content-length") || expect || 0);
+  const tmp = `${dest}.part`;
+  const fd = fs.openSync(tmp, "w");
+  let got = 0;
+  let lastPct = -1;
+  try {
+    for await (const chunk of res.body) {
+      fs.writeSync(fd, chunk);
+      got += chunk.length;
+      if (total) {
+        const pct = Math.floor((got / total) * 100);
+        if (pct >= lastPct + 20) {
+          lastPct = pct;
+          info(`${String(pct).padStart(3)}%  ${fmtSize(got)} / ${fmtSize(total)}`);
+        }
+      }
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  if (expect && got !== expect) {
+    fs.rmSync(tmp, { force: true });
+    throw new Error(`大小不符：期望 ${expect}，实际 ${got}`);
+  }
+  fs.renameSync(tmp, dest);
+  return got;
 }
-`;
+
+function scpArgs(from, to) {
+  const args = ["-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=15"];
+  if (fs.existsSync(CONFIG.key)) args.push("-i", CONFIG.key);
+  args.push("-P", CONFIG.port, from, to);
+  return args;
+}
+
+/**
+ * 从服务器捞一份已在 downloads 里的包。
+ * 本机直连 GitHub 只有几十 KB/s（实测 65 KB/s，92MB 的 dmg 要 40 分钟），
+ * 走 ssh 回传能到 2 MB/s 以上 —— 迁移期的包基本都在服务器上，优先用它。
+ */
+function copyFromServer(version, asset) {
+  const dir = path.join(ASSET_CACHE, version);
+  fs.mkdirSync(dir, { recursive: true });
+  const dest = path.join(dir, asset.name);
+  const remote = `${CONFIG.user}@${CONFIG.host}:${CONFIG.remoteDir}/downloads/${asset.name}`;
+  const r = spawnSync("scp", scpArgs(remote, dest), { stdio: ["ignore", "ignore", "ignore"], encoding: "utf8" });
+  if (r.status !== 0 || !fs.existsSync(dest)) return null;
+  if (fs.statSync(dest).size !== asset.size) {
+    fs.rmSync(dest, { force: true });
+    return null;
+  }
+  return dest;
+}
+
+async function ensureLocalAsset(version, asset, flags) {
+  const dir = path.join(ASSET_CACHE, version);
+  fs.mkdirSync(dir, { recursive: true });
+  const dest = path.join(dir, asset.name);
+  if (fs.existsSync(dest) && fs.statSync(dest).size === asset.size) {
+    info(`${dim("本地已有")} ${asset.name}`);
+    return dest;
+  }
+  if (!flags.fromGithub) {
+    const fromServer = copyFromServer(version, asset);
+    if (fromServer) {
+      info(`${dim("取自服务器")} ${asset.name}`);
+      return fromServer;
+    }
+  }
+  step(`取包 ${asset.name}  ${fmtSize(asset.size)}  ${dim("(GitHub，可能很慢)")}`);
+  const url = asset.id
+    ? `https://api.github.com/repos/${CONFIG.repo}/releases/assets/${asset.id}`
+    : asset.url;
+  await download(url, dest, asset.size);
+  return dest;
+}
+
+/** 传完立刻用公共域名验一次：HEAD 拿大小、Range 拿前 1KB，确认真的能下 */
+async function verifyPublic(url, expect) {
+  const head = await fetch(url, { method: "HEAD" });
+  if (!head.ok) return { ok: false, why: `HEAD ${head.status}` };
+  const size = Number(head.headers.get("content-length") || 0);
+  if (expect && size !== expect) return { ok: false, why: `大小 ${size} ≠ ${expect}` };
+  const range = await fetch(url, { headers: { range: "bytes=0-1023" } });
+  if (range.status !== 206) return { ok: false, why: `Range ${range.status}（不支持断点续传）` };
+  await range.arrayBuffer();
+  return { ok: true, size };
+}
+
+/** 核心上传流程：items = [{ name, size, ensure(): Promise<path> }] */
+async function uploadMany(cfg, version, items, flags) {
+  const client = ossClient(cfg);
+  step(`v${version} → OSS ${publicBase(cfg)}/${encodeURIComponent(cfg.prefix)}/${version}/`);
+  const uploaded = [];
+
+  for (const item of items) {
+    const key = objectKey(cfg, version, item.name);
+    const url = publicUrl(cfg, version, item.name);
+    const already = await headObject(client, key);
+
+    if (already.exists && already.size === item.size) {
+      info(`${dim("OSS 已有，跳过上传")} ${item.name}`);
+    } else {
+      const local = await item.ensure();
+      step(`上传 ${item.name}  ${fmtSize(item.size)}`);
+      let lastPct = -1;
+      await putFile(client, key, local, item.name, (pct) => {
+        const p = Math.floor(pct * 100);
+        if (p >= lastPct + 20 || p === 100) {
+          lastPct = p;
+          info(`${String(p).padStart(3)}%`);
+        }
+      });
+      const head = await headObject(client, key);
+      if (head.size !== item.size) die(`上传后大小不符：OSS ${head.size}，期望 ${item.size}`);
+    }
+
+    const check = await verifyPublic(url, item.size);
+    if (!check.ok) {
+      die(`公共访问校验失败（${check.why}）：${url}\n  检查 bucket 读权限与 OSS_PUBLIC_BASE 域名绑定`);
+    }
+    uploaded.push({ name: item.name, url, size: item.size });
+    ok(`${item.name}  ${dim(url)}`);
+  }
+
+  // 清旧版本：路径里带版本号，留着既占空间也容易误点
+  const keepN = Math.max(flags.keep ?? 2, 1);
+  const versions = (await listVersions(client, cfg)).sort(compareDesc);
+  const keep = new Set(versions.slice(0, keepN));
+  keep.add(version);
+  for (const old of versions) {
+    if (keep.has(old)) continue;
+    for (const obj of await listObjects(client, `${cfg.prefix}/${old}/`)) {
+      await deleteObject(client, obj.name);
+    }
+    ok(`清理旧版本 ${old}`);
+  }
+
+  step("当前 OSS 上的版本");
+  for (const v of (await listVersions(client, cfg)).sort(compareDesc)) {
+    const objs = await listObjects(client, `${cfg.prefix}/${v}/`);
+    const total = objs.reduce((sum, o) => sum + o.size, 0);
+    info(`${v === version ? green("→") : " "} ${v.padEnd(10)} ${String(objs.length).padStart(2)} 个文件  ${fmtSize(total)}`);
+  }
+  return uploaded;
+}
+
+/** 从 GitHub Release 取包再上传（本机补传用） */
+async function cmdOssPush(ver, flags) {
+  const cfg = requireOss();
+  const v = assertVersion(normalizeVersion(ver || localVersion()));
+  const assets = await fetchReleaseAssets(v);
+  return uploadMany(
+    cfg,
+    v,
+    assets.map((a) => ({ name: a.name, size: a.size, ensure: () => ensureLocalAsset(v, a, flags) })),
+    flags,
+  );
+}
+
+/** 直接把本地目录里的产物传上去（CI 用，不需要再回 GitHub 拉一遍） */
+async function cmdOssUpload(ver, dir, flags) {
+  const cfg = requireOss();
+  const v = assertVersion(normalizeVersion(ver || localVersion()));
+  if (!dir) die("用法：pnpm ed oss upload <x.y.z> <目录>");
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) die(`目录不存在：${dir}`);
+
+  const items = fs
+    .readdirSync(dir)
+    .filter((n) => /\.(dmg|zip|exe)$/i.test(n))
+    .map((n) => {
+      const file = path.join(dir, n);
+      return { name: n, size: fs.statSync(file).size, ensure: async () => file };
+    });
+  if (!items.length) die(`目录里没有 dmg/zip/exe：${dir}`);
+  return uploadMany(cfg, v, items, flags);
+}
+
+async function cmdOssLs() {
+  const cfg = requireOss();
+  const client = ossClient(cfg);
+  step(`${publicBase(cfg)}/${encodeURIComponent(cfg.prefix)}/`);
+  const versions = (await listVersions(client, cfg)).sort(compareDesc);
+  if (!versions.length) {
+    info(dim("还没有上传过任何版本"));
+    return;
+  }
+  for (const v of versions) {
+    const objs = await listObjects(client, `${cfg.prefix}/${v}/`);
+    const total = objs.reduce((sum, o) => sum + o.size, 0);
+    info(`${v.padEnd(10)} ${String(objs.length).padStart(2)} 个文件  ${fmtSize(total).padStart(8)}`);
+    for (const o of objs) info(`  ${dim(fmtSize(o.size).padStart(8))}  ${o.name.split("/").pop()}`);
+  }
+}
 
 function cmdSync(ver, flags) {
-  const v = normalizeVersion(ver || localVersion());
-  assertVersion(v);
-
-  step(`从 GitHub Release v${v} 同步安装包 → ${CONFIG.host}:${CONFIG.remoteDir}/downloads`);
-  const remoteCmd = `node - ${[v, CONFIG.repo, CONFIG.remoteDir, flags.keepOld ? "1" : "0"].map(shellQuote).join(" ")}`;
-  const r = spawnSync("ssh", sshArgs(remoteCmd), {
-    cwd: ROOT,
-    stdio: ["pipe", "inherit", "inherit"],
-    input: REMOTE_SYNC,
-    encoding: "utf8",
-  });
-  if (r.status !== 0) {
-    console.error(`${red("✗")} 同步失败：Release v${v} 不存在，或 CI 还没产出安装包`);
-    info(`看 ${cyan(`https://github.com/${CONFIG.repo}/releases/tag/v${v}`)}`);
-    process.exit(1);
-  }
-  ok("安装包已就位");
+  return cmdOssPush(ver, flags);
 }
+
 
 async function verifyLive(expectVersion) {
   step("校验线上 /version.json");
@@ -450,15 +628,16 @@ function cmdDeploy(flags) {
 
 async function cmdShip(ver, flags) {
   const v = normalizeVersion(ver || localVersion());
+  // 先把包传到 OSS 再切页面：否则部署完的那一瞬间页面上的下载链接是死的
+  await cmdOssPush(v, flags);
   cmdDeploy(flags);
-  // deploy 脚本会 restart frpc，公网入口会短暂断开；等回来再做后续 ssh / 校验
+  // deploy 脚本可能重启 frpc，公网入口会短暂断开；等回来再做校验
   waitForLive();
-  cmdSync(v, flags);
   const good = await verifyLive(v);
   if (good) {
     ok(`完成：${liveBase()}/ 已是 v${v}`);
   } else {
-    warn("产物或版本号仍不对，检查上面缺失项后再跑一次 pnpm ed sync");
+    warn("产物或版本号仍不对，检查上面缺失项后再跑一次 pnpm ed oss push");
     process.exitCode = 1;
   }
 }
@@ -505,9 +684,34 @@ async function cmdDoctor() {
     row("连接", red(probe.err || "失败"));
   }
 
-  step("GitHub 可达性（服务器侧，CI 产物由它拉取）");
+  step("GitHub 可达性（服务器侧）");
   const gh = sshCapture(`curl -s -o /dev/null -w '%{http_code}' https://api.github.com`);
   info(gh.out === "200" ? green("api.github.com 200") : yellow(`api.github.com ${gh.out || "无响应"}`));
+
+  step("OSS");
+  loadEnvFiles();
+  const cfg = ossConfig();
+  if (!ossReady(cfg)) {
+    row("配置", red(`缺少 ${ossMissing(cfg).join(", ")}`));
+  } else {
+    row("bucket", `${cfg.bucket} @ ${cfg.region}`);
+    row("安装包前缀", cfg.prefix);
+    row("对外域名", cfg.publicBase || dim(`未设 OSS_PUBLIC_BASE，用 ${cfg.bucket}.${cfg.region}.aliyuncs.com`));
+    try {
+      const probeObj = `${cfg.prefix}/`;
+      const url = `${publicBase(cfg)}/${encodeURIComponent(probeObj)}`;
+      const res = await fetch(url, { method: "HEAD" });
+      info(res.status < 500 ? green(`公共域名可达（${res.status}）`) : red(`公共域名异常（${res.status}）`));
+    } catch (err) {
+      info(red(`公共域名不可达：${err.message}`));
+    }
+    try {
+      const versions = (await listVersions(ossClient(cfg), cfg)).sort(compareDesc);
+      info(versions.length ? `已上传版本：${versions.join(", ")}` : dim("还没有上传过版本"));
+    } catch (err) {
+      info(red(`列不出对象：${err.message}`));
+    }
+  }
 
   step(`线上 ${liveBase()}`);
   const code = capture("curl", ["-s", "-o", "/dev/null", "-w", "%{http_code}", `${liveBase()}/`]).out;
@@ -526,37 +730,45 @@ ${bold("命令")}
   ${cyan("status")}                 本地版本 / 线上版本 / 产物可用性 / 最近 CI
   ${cyan("release")} <x.y.z>        改版本号 → commit → tag → push（触发 GitHub 打包）
                      ${dim("--dry-run 只改不推；--force 允许重复版本号或脏工作区")}
-  ${cyan("ship")} [x.y.z]           部署 web + 同步安装包 + 校验（发版后一条命令收尾）
-                     ${dim("--skip-build 复用已有 dist；--keep-old 保留旧版本安装包")}
+  ${cyan("ship")} [x.y.z]           传 OSS + 部署 web + 校验（发版后一条命令收尾）
+                     ${dim("--skip-build 复用已有 dist；--keep N 保留几个旧版本（默认 2）")}
   ${cyan("deploy")}                 只部署 web 端
                      ${dim("--skip-build 跳过 vite build")}
-  ${cyan("sync")} [x.y.z]           只从 Release 同步安装包到服务器 downloads
-                     ${dim("版本号默认取 apps/editor/package.json，下载在服务器侧执行")}
+  ${cyan("oss push")} [x.y.z]       把 Release 里的安装包传到 OSS（公共读，带版本路径）
+                     ${dim("--keep N 保留几个旧版本；--from-github 强制回 GitHub 取包")}
+  ${cyan("oss upload")} <x.y.z> <目录>  直接上传本地目录里的 dmg/zip/exe（CI 用）
+  ${cyan("oss ls")}                 看 OSS 上已有哪些版本
+  ${cyan("sync")}                   同 oss push（旧名字，保留兼容）
   ${cyan("logs")}                   服务器 pm2 日志
                      ${dim("--lines 200 指定行数")}
-  ${cyan("doctor")}                 环境与连通性自检
+  ${cyan("doctor")}                 环境与连通性自检（含 OSS 读写）
 
 ${bold("环境变量")}
+  OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET / OSS_REGION / OSS_BUCKET   安装包存放
+  OSS_DOWNLOAD_PREFIX（默认 wiki-agent）/ OSS_PUBLIC_BASE（自定义域名，留空用 OSS 默认域名）
   DEPLOY_SSH_HOST / DEPLOY_SSH_USER / DEPLOY_SSH_PORT / DEPLOY_SSH_KEY
   EDITOR_REMOTE_DIR / EDITOR_REMOTE_PORT / GH_REPO
+  ${dim("本地从仓库根 .env 读取；CI 里用 Secrets 注入，进程环境优先")}
 
 ${bold("典型流程")}
-  pnpm ed release 0.0.3     ${dim("# 改版本号并推 tag，CI 开始构建")}
-  pnpm ed ship              ${dim("# 等 CI 完成后：部署 web + 拉产物 + 校验")}
+  pnpm ed release 0.0.3     ${dim("# 改版本号并推 tag，CI 开始构建并上传 OSS")}
+  pnpm ed ship              ${dim("# 等 CI 完成后：传 OSS + 部署 web + 校验")}
 `);
 }
 
 /* ----------------------------------------------------------------- main */
 
 function parseArgs(argv) {
-  const flags = { force: false, dryRun: false, skipBuild: false, keepOld: false, lines: 0 };
+  const flags = { force: false, dryRun: false, skipBuild: false, fromGithub: false, keep: 2, lines: 0 };
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--force" || a === "-f") flags.force = true;
     else if (a === "--dry-run") flags.dryRun = true;
     else if (a === "--skip-build") flags.skipBuild = true;
-    else if (a === "--keep-old") flags.keepOld = true;
+    else if (a === "--from-github") flags.fromGithub = true;
+    else if (a === "--keep") flags.keep = Number(argv[++i]) || 2;
+    else if (a.startsWith("--keep=")) flags.keep = Number(a.split("=")[1]) || 2;
     else if (a === "--lines") flags.lines = Number(argv[++i]) || 0;
     else if (a.startsWith("--lines=")) flags.lines = Number(a.split("=")[1]) || 0;
     else if (a === "--help" || a === "-h") flags.help = true;
@@ -569,6 +781,7 @@ async function main() {
   const { flags, positional } = parseArgs(process.argv.slice(2));
   const cmd = positional[0] || "help";
   const arg = positional[1];
+  const arg2 = positional[2];
 
   if (flags.help || cmd === "help" || cmd === "--help") return cmdHelp();
 
@@ -584,6 +797,14 @@ async function main() {
       return cmdShip(arg, flags);
     case "deploy":
       return cmdDeploy(flags);
+    case "oss": {
+      const sub = arg || "ls";
+      if (sub === "push") return cmdOssPush(arg2, flags);
+      if (sub === "upload") return cmdOssUpload(arg2, positional[3], flags);
+      if (sub === "ls" || sub === "list") return cmdOssLs();
+      die(`用法：pnpm ed oss push [x.y.z] | oss upload <x.y.z> <目录> | oss ls`);
+      break;
+    }
     case "sync":
       return cmdSync(arg, flags);
     case "logs":

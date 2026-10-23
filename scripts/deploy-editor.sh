@@ -24,6 +24,9 @@ REMOTE_DIR="${EDITOR_REMOTE_DIR:-/opt/apps/editor}"
 EDITOR_PORT="${EDITOR_LOCAL_PORT:-5174}"
 REMOTE_PORT="${EDITOR_REMOTE_PORT:-8082}"
 GATEWAY="${GATEWAY_BASE_URL:-https://api.championsea.online}"
+# 安装包不落在这台机器上：/version.json 里的下载链接直接指向 OSS。
+# 绑了自定义域名/CDN 就改成那个域名（结尾不带斜杠）。
+DOWNLOAD_BASE="${EDITOR_DOWNLOAD_BASE:-https://championsea.oss-cn-shanghai.aliyuncs.com/wiki-agent}"
 
 BUILD=1
 if [[ "${1:-}" == "--skip-build" ]]; then
@@ -74,6 +77,7 @@ module.exports = {
         NODE_ENV: 'production',
         EDITOR_PORT: '${EDITOR_PORT}',
         GATEWAY_BASE_URL: '${GATEWAY}',
+        EDITOR_DOWNLOAD_BASE: '${DOWNLOAD_BASE}',
       },
       out_file: '${REMOTE_DIR}/logs/editor-out.log',
       error_file: '${REMOTE_DIR}/logs/editor-error.log',
@@ -93,7 +97,7 @@ scp "${SSH_OPTS[@]}" -P "$SSH_PORT" "$TARBALL_PATH" "$SSH_USER@$SSH_HOST:/tmp/$T
 
 echo "▶ 服务器安装 / 重启服务"
 ssh "${SSH_OPTS[@]}" -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
-  "bash -s '$REMOTE_DIR' '$EDITOR_PORT' '$REMOTE_PORT' '$GATEWAY' '$TARBALL'" <<'REMOTE'
+  "bash -s '$REMOTE_DIR' '$EDITOR_PORT' '$REMOTE_PORT' '$GATEWAY' '$TARBALL' '$DOWNLOAD_BASE'" <<'REMOTE'
 set -e
 
 REMOTE_DIR="$1"
@@ -101,6 +105,7 @@ EDITOR_PORT="$2"
 REMOTE_PORT="$3"
 GATEWAY="$4"
 TARBALL="$5"
+DOWNLOAD_BASE="$6"
 
 mkdir -p "$REMOTE_DIR/logs"
 rm -rf "$REMOTE_DIR/current"

@@ -31,14 +31,16 @@ const MIME: Record<string, string> = {
  * 路由约定（按优先级）：
  *
  *   1. /auth /docs /agents /upload /teams   → 反代到网关
- *   2. /downloads/<file>                    → downloadDir 里的安装包（支持 Range）
- *   3. /version.json                        → 版本号 + 实际存在的安装包（下载页据此渲染）
+ *   2. /version.json                        → 版本号 + 安装包清单（链接指向 OSS 直链）
+ *   3. /downloads/*                         → 410 Gone（安装包已迁到 OSS，不再由本机托管）
  *   4. 别名 308 跳转                         → /download、/download.html、/downloads
  *   5. /                                     → dist/download.html（下载宣传页 = 站点首页）
  *   6. /app、/app/*                          → index.html（编辑器 SPA，含深链回落）
  *   7. dist 里真实存在的文件                  → 直接返回（带缓存头）
  *   8. 其他                                  → 404
  *
+ * 安装包不再落在这台机器上：92MB 的 dmg 走 OSS + CDN 才有像样的下载速度，
+ * 服务器只负责发页面和 /version.json，机器上不存大文件。
  * 编辑器不再占用根路径：根是给人的落地页，工具在 /app 下面。
  * 桌面版 WebView 也加载 /app（见 src-tauri/src/lib.rs）。
  */
@@ -66,10 +68,14 @@ function resolveGatewayBase(): string {
   return (fromBake || fromEnv || "https://api.championsea.online").replace(/\/$/, "");
 }
 
-/** 安装包目录：默认在部署目录（dist 的上一级的上一级），桌面版一般没有，404 即可 */
-function resolveDownloadsDir(distRoot: string): string {
-  const fromEnv = (process.env.EDITOR_DOWNLOADS_DIR || "").trim();
-  return fromEnv ? path.resolve(fromEnv) : path.resolve(distRoot, "..", "..", "downloads");
+/**
+ * 安装包对外基地址，形如 `https://championsea.oss-cn-shanghai.aliyuncs.com/wiki-agent`
+ * （绑了自定义域名/CDN 就换成那个域名）。末尾不带斜杠。
+ * 没配就说明这个部署还没接 OSS：/version.json 里所有文件标成不可用，页面显示「构建中」，
+ * 而不是给一个点进去 404 的链接。
+ */
+function resolveDownloadBase(): string {
+  return (process.env.EDITOR_DOWNLOAD_BASE || process.env.PUBLIC_DOWNLOAD_BASE || "").trim().replace(/\/+$/, "");
 }
 
 function shouldProxy(pathname: string): boolean {
@@ -126,80 +132,45 @@ function sendFile(req: IncomingMessage, res: ServerResponse, file: string): void
   fs.createReadStream(file).pipe(res);
 }
 
-/** 安装包：附 attachment、支持 Range（92MB 的 dmg 断点续传 / 暂停恢复都靠它） */
-function sendDownload(req: IncomingMessage, res: ServerResponse, file: string): void {
-  const stat = fs.statSync(file);
-  const name = encodeURIComponent(path.basename(file));
-  res.setHeader("Content-Type", MIME[path.extname(file).toLowerCase()] ?? "application/octet-stream");
-  res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${name}`);
-  res.setHeader("Accept-Ranges", "bytes");
-  res.setHeader("Cache-Control", "public, max-age=86400");
+/**
+ * 探测 OSS 上某个安装包是否存在。结果缓存 60s：
+ * 页面每次刷新都打一次 HEAD 也扛得住，发版后最多 1 分钟就看到新包。
+ */
+type Probe = { size: number | null; available: boolean };
+const probeCache = new Map<string, { at: number; value: Promise<Probe> }>();
+const PROBE_TTL = 60_000;
 
-  const range = req.headers.range?.match(/^bytes=(\d*)-(\d*)$/);
-  if (range) {
-    const start = range[1] ? Number(range[1]) : 0;
-    const end = range[2] ? Math.min(Number(range[2]), stat.size - 1) : stat.size - 1;
-    if (start > end || start >= stat.size) {
-      res.statusCode = 416;
-      res.setHeader("Content-Range", `bytes */${stat.size}`);
-      res.end();
-      return;
+function probeObject(url: string): Promise<Probe> {
+  const now = Date.now();
+  const hit = probeCache.get(url);
+  if (hit && now - hit.at < PROBE_TTL) return hit.value;
+
+  const value = (async (): Promise<Probe> => {
+    try {
+      const res = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(2000) });
+      if (!res.ok) return { size: null, available: false };
+      const size = Number(res.headers.get("content-length") ?? 0);
+      return { size: size > 0 ? size : null, available: true };
+    } catch {
+      // 探测超时/网络抖动：不武断判死，按「可用但大小未知」处理，免得页面闪一下「构建中」
+      return { size: null, available: true };
     }
-    res.statusCode = 206;
-    res.setHeader("Content-Range", `bytes ${start}-${end}/${stat.size}`);
-    res.setHeader("Content-Length", String(end - start + 1));
-    if (req.method === "HEAD") {
-      res.end();
-      return;
-    }
-    fs.createReadStream(file, { start, end }).pipe(res);
-    return;
-  }
+  })();
 
-  res.statusCode = 200;
-  res.setHeader("Content-Length", String(stat.size));
-  if (req.method === "HEAD") {
-    res.end();
-    return;
-  }
-  fs.createReadStream(file).pipe(res);
-}
-
-/** 安装包文件名 → 平台；version.json 缺失时靠它反推 */
-const FILE_OS: Record<string, string> = {
-  ".dmg": "mac",
-  ".pkg": "mac",
-  ".zip": "win",
-  ".exe": "win",
-  ".msi": "win",
-};
-
-function versionOf(name: string): string | null {
-  const match = name.match(/(\d+)\.(\d+)\.(\d+)/);
-  return match ? match[0] : null;
-}
-
-function compareVersion(a: string, b: string): number {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  for (let i = 0; i < 3; i += 1) {
-    if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) - (pb[i] ?? 0);
-  }
-  return 0;
+  probeCache.set(url, { at: now, value });
+  return value;
 }
 
 /**
  * /version.json：下载页唯一的数据源。
- * 以 dist/version.json（构建时生成）声明的版本和文件名为准，
- * 再用下载目录里真实存在的文件补上大小与 available —— 没上传就是没上传，页面显示「构建中」，
- * 而不是给一个 404 的链接。
+ * 版本与文件名以 dist/version.json（构建时生成）为准，链接指向 OSS 直链，
+ * 再用一次 HEAD 探测确认对象真的在 —— 没上传就显示「构建中」，不给 404 链接。
  */
-function serveVersionJson(distRoot: string, req: IncomingMessage, res: ServerResponse): boolean {
+async function serveVersionJson(distRoot: string, req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const pathname = decodeURIComponent(new URL(req.url ?? "/", "http://127.0.0.1").pathname);
   if (pathname !== VERSION_PATH) {
     return false;
   }
-  const dir = resolveDownloadsDir(distRoot);
 
   let version = "";
   let builtAt: string | null = null;
@@ -210,35 +181,25 @@ function serveVersionJson(distRoot: string, req: IncomingMessage, res: ServerRes
     builtAt = typeof manifest.builtAt === "string" ? manifest.builtAt : null;
     declared = Array.isArray(manifest.files) ? manifest.files : [];
   } catch {
-    // 没有 manifest 就按下载目录里最大版本反推
-    if (fs.existsSync(dir)) {
-      for (const name of fs.readdirSync(dir)) {
-        const found = versionOf(name);
-        if (found && (!version || compareVersion(found, version) > 0)) {
-          version = found;
-        }
-      }
-      declared = fs
-        .readdirSync(dir)
-        .map((name) => ({ os: FILE_OS[path.extname(name).toLowerCase()] ?? "other", name }))
-        .filter((file) => file.os !== "other");
-    }
+    // 没有 manifest 就没有可信的清单；返回空列表，页面保留 HTML 里的兜底文案
   }
 
-  const files = declared.map((file) => {
-    const target = path.resolve(dir, file.name);
-    const inside = target.startsWith(`${dir}${path.sep}`);
-    const stat = inside && fs.existsSync(target) && fs.statSync(target).isFile() ? fs.statSync(target) : null;
-    return {
-      os: file.os,
-      name: file.name,
-      label: file.label ?? "",
-      url: `/downloads/${encodeURIComponent(file.name)}`,
-      size: stat ? stat.size : null,
-      available: Boolean(stat),
-      optional: Boolean(file.optional),
-    };
-  });
+  const base = resolveDownloadBase();
+  const files = await Promise.all(
+    declared.map(async (file) => {
+      const url = base ? `${base}/${encodeURIComponent(version)}/${encodeURIComponent(file.name)}` : "";
+      const probe = url ? await probeObject(url) : { size: null, available: false };
+      return {
+        os: file.os,
+        name: file.name,
+        label: file.label ?? "",
+        url,
+        size: probe.size,
+        available: probe.available,
+        optional: Boolean(file.optional),
+      };
+    }),
+  );
 
   const body = JSON.stringify({ version, builtAt, files }, null, 2);
   res.statusCode = 200;
@@ -252,21 +213,15 @@ function serveVersionJson(distRoot: string, req: IncomingMessage, res: ServerRes
   return true;
 }
 
-function serveDownload(distRoot: string, req: IncomingMessage, res: ServerResponse): boolean {
+/** 安装包已迁到 OSS：这里只说明去哪拿，别再让旧链接默默 404 */
+function serveLegacyDownload(req: IncomingMessage, res: ServerResponse): boolean {
   const pathname = decodeURIComponent(new URL(req.url ?? "/", "http://127.0.0.1").pathname);
-  // 只接 /downloads/<file>；/downloads 本身交给 REDIRECTS 去跳转
   if (!pathname.startsWith("/downloads/")) {
     return false;
   }
-  const dir = resolveDownloadsDir(distRoot);
-  const file = path.resolve(dir, pathname.slice("/downloads/".length));
-  if (!file.startsWith(`${dir}${path.sep}`) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
-    res.statusCode = 404;
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.end("Not found");
-    return true;
-  }
-  sendDownload(req, res, file);
+  res.statusCode = 410;
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.end("Gone：安装包已迁到对象存储，请用 /version.json 里的直链。\n");
   return true;
 }
 
@@ -350,13 +305,21 @@ export function startDesktopServer(distDir: string): Promise<number> {
       proxyToGateway(req, res, gatewayBase);
       return;
     }
-    if (serveDownload(root, req, res)) {
+    if (serveLegacyDownload(req, res)) {
       return;
     }
-    if (serveVersionJson(root, req, res)) {
-      return;
-    }
-    serveStatic(root, req, res);
+    // /version.json 要探一次 OSS，是异步的；其余路由都是同步的
+    void serveVersionJson(root, req, res)
+      .then((handled) => {
+        if (!handled) serveStatic(root, req, res);
+      })
+      .catch(() => {
+        if (!res.headersSent) {
+          res.statusCode = 500;
+          res.setHeader("Content-Type", "application/json; charset=utf-8");
+          res.end(JSON.stringify({ version: "", files: [] }));
+        }
+      });
   });
 
   const listen = (port: number): Promise<number> =>

@@ -319,7 +319,7 @@
               </div>
               <div class="desc">Apple 芯片与 Intel 通用包</div>
               <div class="file js-name">wiki-agent_0.0.2_universal.dmg · 87 MB</div>
-              <a class="btn btn-primary" href="/downloads/wiki-agent_0.0.2_universal.dmg" download>下载 .dmg</a>
+              <a class="btn btn-primary" href="https://championsea.oss-cn-shanghai.aliyuncs.com/wiki-agent/0.0.2/wiki-agent_0.0.2_universal.dmg" download>下载 .dmg</a>
             </div>
             <div class="dl" data-os="win">
               <span class="badge" hidden>当前系统</span>
@@ -329,7 +329,7 @@
               </div>
               <div class="desc">Windows 10 / 11，解压后运行</div>
               <div class="file js-name">wiki-agent-0.0.2-windows.zip · 40 MB</div>
-              <a class="btn btn-primary" href="/downloads/wiki-agent-0.0.2-windows.zip" download>下载 .zip</a>
+              <a class="btn btn-primary" href="https://championsea.oss-cn-shanghai.aliyuncs.com/wiki-agent/0.0.2/wiki-agent-0.0.2-windows.zip" download>下载 .zip</a>
             </div>
             <div class="dl">
               <div class="os">
@@ -396,7 +396,7 @@
         if (badge) badge.hidden = false;
       })();
 
-      // 版本号与安装包以 /version.json 为准（服务端按下载目录里真实存在的文件生成）。
+      // 版本号与安装包以 /version.json 为准（服务端读 OSS 上的对象生成，链接是 OSS 直链）。
       // HTML 里写的是上一次发布的兜底值，取不到接口就照原样显示，不给 404 链接。
       (function () {
         function mb(size) {
