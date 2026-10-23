@@ -171,6 +171,30 @@ export async function deleteObject(client, key) {
   await client.delete(key);
 }
 
+/** 写 JSON 对象（版本索引这类会变的东西给短缓存，别跟着安装包走 immutable） */
+export async function putJson(client, key, value, cacheControl = "public, max-age=60") {
+  const body = Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8");
+  return client.put(key, body, {
+    mime: "application/json; charset=utf-8",
+    headers: { "x-oss-object-acl": "public-read", "Cache-Control": cacheControl },
+  });
+}
+
+export async function getJson(client, key) {
+  try {
+    const res = await client.get(key);
+    return JSON.parse(res.content.toString("utf8"));
+  } catch (err) {
+    if (err?.status === 404 || String(err?.code || "").includes("NoSuchKey")) return null;
+    throw err;
+  }
+}
+
+/** 安装包清单在 OSS 上的固定位置：<prefix>/index.json */
+export function indexKey(cfg) {
+  return `${cfg.prefix}/index.json`;
+}
+
 /** 列出所有版本目录（<prefix>/0.0.2/ 这种） */
 export async function listVersions(client, cfg = ossConfig()) {
   const versions = new Set();

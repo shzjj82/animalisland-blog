@@ -22,7 +22,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   deleteObject,
+  getJson,
   headObject,
+  indexKey,
   listObjects,
   listVersions,
   loadEnvFiles,
@@ -34,6 +36,7 @@ import {
   publicBase,
   publicUrl,
   putFile,
+  putJson,
 } from "./lib/oss.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -534,13 +537,43 @@ async function uploadMany(cfg, version, items, flags) {
     ok(`清理旧版本 ${old}`);
   }
 
+  // 版本索引：页面靠它列出可下载的历史版本，服务端只读这一个对象，不需要 OSS 凭据
+  const remaining = (await listVersions(client, cfg)).sort(compareDesc);
+  await writeIndex(client, cfg, version, remaining);
+
   step("当前 OSS 上的版本");
-  for (const v of (await listVersions(client, cfg)).sort(compareDesc)) {
+  for (const v of remaining) {
     const objs = await listObjects(client, `${cfg.prefix}/${v}/`);
     const total = objs.reduce((sum, o) => sum + o.size, 0);
     info(`${v === version ? green("→") : " "} ${v.padEnd(10)} ${String(objs.length).padStart(2)} 个文件  ${fmtSize(total)}`);
   }
   return uploaded;
+}
+
+/**
+ * 维护 <prefix>/index.json：{ versions: [{ version, uploadedAt, files: [{ name, size, os, optional }] }] }
+ * 每次都按 OSS 上真实存在的版本重写，避免索引和对象不同步。
+ */
+async function writeIndex(client, cfg, currentVersion, versions) {
+  const entries = [];
+  for (const v of versions) {
+    const objs = (await listObjects(client, `${cfg.prefix}/${v}/`)).filter((o) => /\.(dmg|zip|exe)$/i.test(o.name));
+    if (!objs.length) continue;
+    entries.push({
+      version: v,
+      uploadedAt: new Date().toISOString(),
+      files: objs.map((o) => ({
+        name: o.name.split("/").pop(),
+        size: o.size,
+        os: /\.(dmg|pkg)$/i.test(o.name) ? "mac" : "win",
+        // 和 gen-version.mjs 的约定一致：NSIS 安装版是可选项，便携 zip 才是主推
+        optional: /setup\.exe$/i.test(o.name),
+      })),
+    });
+  }
+  entries.sort((a, b) => compareDesc(a.version, b.version));
+  await putJson(client, indexKey(cfg), { updatedAt: new Date().toISOString(), current: currentVersion, versions: entries });
+  ok(`版本索引已更新（${entries.length} 个版本）`);
 }
 
 /** 从 GitHub Release 取包再上传（本机补传用） */
@@ -589,6 +622,15 @@ async function cmdOssLs() {
     info(`${v.padEnd(10)} ${String(objs.length).padStart(2)} 个文件  ${fmtSize(total).padStart(8)}`);
     for (const o of objs) info(`  ${dim(fmtSize(o.size).padStart(8))}  ${o.name.split("/").pop()}`);
   }
+
+  const index = await getJson(client, indexKey(cfg)).catch(() => null);
+  if (!index) {
+    warn("OSS 上没有版本索引（index.json），页面列不出历史版本；跑一次 oss push / upload 会补上");
+    return;
+  }
+  const indexed = (index.versions || []).map((x) => x.version);
+  const drift = versions.filter((v) => !indexed.includes(v));
+  info(`索引：${indexed.join(", ") || "(空)"}${drift.length ? yellow(`，缺 ${drift.join(", ")}`) : ""}`);
 }
 
 function cmdSync(ver, flags) {

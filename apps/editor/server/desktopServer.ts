@@ -162,9 +162,60 @@ function probeObject(url: string): Promise<Probe> {
 }
 
 /**
+ * 历史版本索引：上传脚本会把 `<base>/index.json` 写好（见 scripts/lib/oss.mjs）。
+ * 服务端只读这个对象，不持有 OSS 密钥 —— 页面要列历史版本时全靠它。
+ * 同样缓存 60s，避免每个页面请求都打一次 OSS。
+ */
+type IndexFile = { name: string; size?: number; os?: string; optional?: boolean };
+type IndexVersion = { version: string; uploadedAt?: string; files?: IndexFile[] };
+
+let indexAt = 0;
+let indexValue: IndexVersion[] = [];
+let indexPending: Promise<IndexVersion[]> | null = null;
+
+async function readVersionIndex(): Promise<IndexVersion[]> {
+  const base = resolveDownloadBase();
+  if (!base) return [];
+  if (Date.now() - indexAt < 60_000 && indexValue.length) return indexValue;
+  if (indexPending) return indexPending;
+
+  indexPending = (async () => {
+    try {
+      const res = await fetch(`${base}/index.json`, { signal: AbortSignal.timeout(2500) });
+      if (!res.ok) return [];
+      const body = (await res.json()) as { versions?: IndexVersion[] };
+      return Array.isArray(body.versions) ? body.versions : [];
+    } catch {
+      return [];
+    }
+  })();
+
+  try {
+    const value = await indexPending;
+    indexValue = value;
+    indexAt = Date.now();
+    return value;
+  } finally {
+    indexPending = null;
+  }
+}
+
+const osOfName = (name: string): string => (/\.(dmg|pkg)$/i.test(name) ? "mac" : "win");
+
+const compareVersions = (a: string, b: string): number => {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i += 1) {
+    if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pb[i] ?? 0) - (pa[i] ?? 0);
+  }
+  return 0;
+};
+
+/**
  * /version.json：下载页唯一的数据源。
  * 版本与文件名以 dist/version.json（构建时生成）为准，链接指向 OSS 直链，
  * 再用一次 HEAD 探测确认对象真的在 —— 没上传就显示「构建中」，不给 404 链接。
+ * 另带 versions：当前版本 + OSS 索引里的历史版本，页面用它渲染版本下拉。
  */
 async function serveVersionJson(distRoot: string, req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const pathname = decodeURIComponent(new URL(req.url ?? "/", "http://127.0.0.1").pathname);
@@ -185,9 +236,11 @@ async function serveVersionJson(distRoot: string, req: IncomingMessage, res: Ser
   }
 
   const base = resolveDownloadBase();
+  const urlOf = (ver: string, name: string) => (base ? `${base}/${encodeURIComponent(ver)}/${encodeURIComponent(name)}` : "");
+
   const files = await Promise.all(
     declared.map(async (file) => {
-      const url = base ? `${base}/${encodeURIComponent(version)}/${encodeURIComponent(file.name)}` : "";
+      const url = urlOf(version, file.name);
       const probe = url ? await probeObject(url) : { size: null, available: false };
       return {
         os: file.os,
@@ -201,7 +254,33 @@ async function serveVersionJson(distRoot: string, req: IncomingMessage, res: Ser
     }),
   );
 
-  const body = JSON.stringify({ version, builtAt, files }, null, 2);
+  // 历史版本：索引优先，当前版本用上面探测过的结果覆盖（那是唯一确定真实的）
+  const index = await readVersionIndex();
+  const versions = index
+    .filter((entry) => entry.version && Array.isArray(entry.files))
+    .map((entry) => ({
+      version: entry.version,
+      files: (entry.files ?? []).map((file) => ({
+        os: file.os || osOfName(file.name),
+        name: file.name,
+        label: "",
+        url: urlOf(entry.version, file.name),
+        size: typeof file.size === "number" ? file.size : null,
+        available: true,
+        optional: Boolean(file.optional),
+      })),
+    }));
+
+  const currentEntry = {
+    version,
+    files: files.map((f) => ({ ...f })),
+  };
+  const withCurrent = versions.some((v) => v.version === version)
+    ? versions.map((v) => (v.version === version ? currentEntry : v))
+    : [currentEntry, ...versions].filter((v) => v.version);
+  withCurrent.sort((a, b) => compareVersions(a.version, b.version));
+
+  const body = JSON.stringify({ version, builtAt, files, versions: withCurrent }, null, 2);
   res.statusCode = 200;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache");

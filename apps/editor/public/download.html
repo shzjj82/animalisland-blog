@@ -131,6 +131,24 @@
       .sec-head h2 { margin: 0; font-size: clamp(25px, 3.4vw, 34px); letter-spacing: -0.015em; }
       .sec-head p { margin: 12px auto 0; color: var(--ink-2); font-size: 15.5px; }
 
+      /* —— 版本下拉：默认跟随最新版，选历史版本会同步换掉下面三张卡的链接 —— */
+      .ver-row { display: flex; justify-content: center; margin: -24px 0 32px; }
+      .ver-row[hidden] { display: none; }
+      .ver-pick { display: inline-flex; align-items: center; gap: 10px; }
+      .ver-cap { font-size: 13px; color: var(--ink-2); }
+      .ver-field { position: relative; display: inline-flex; align-items: center; }
+      .ver-field select {
+        appearance: none; -webkit-appearance: none;
+        height: 38px; padding: 0 34px 0 14px;
+        border: 1px solid var(--line); border-radius: 10px;
+        background: #fff; color: var(--ink);
+        font: inherit; font-size: 14px; font-weight: 500; line-height: 1;
+        cursor: pointer;
+      }
+      .ver-field select:hover { border-color: #d6d6d3; }
+      .ver-field select:focus-visible { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(35, 131, 226, 0.12); }
+      .ver-field .chev { position: absolute; right: 12px; width: 14px; height: 14px; color: var(--ink-2); pointer-events: none; }
+
       .features { background: var(--bg-soft); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
       .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
       .card { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 22px 22px 24px; }
@@ -204,7 +222,7 @@
 
     <main>
       <section class="hero wrap">
-        <span class="eyebrow js-hero-ver">v0.0.2 · macOS / Windows / 网页版</span>
+        <span class="eyebrow">macOS / Windows / 网页版</span>
         <h1>下载 wiki-agent</h1>
         <p class="sub">
           本地优先的知识库编辑器。块编辑、页面树、待办和 AI 助手在同一个页面里，
@@ -310,6 +328,15 @@
             <h2>选择版本</h2>
             <p>桌面端与网页版功能一致，桌面端可离线使用。</p>
           </div>
+          <div class="ver-row" hidden>
+            <label class="ver-pick">
+              <span class="ver-cap">版本</span>
+              <span class="ver-field">
+                <select class="js-ver" aria-label="选择要下载的版本"></select>
+                <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+              </span>
+            </label>
+          </div>
           <div class="dl-grid">
             <div class="dl" data-os="mac">
               <span class="badge" hidden>当前系统</span>
@@ -396,7 +423,7 @@
         if (badge) badge.hidden = false;
       })();
 
-      // 版本号与安装包以 /version.json 为准（服务端读 OSS 上的对象生成，链接是 OSS 直链）。
+      // 版本与安装包以 /version.json 为准（服务端读 OSS 上的对象与索引生成，链接是 OSS 直链）。
       // HTML 里写的是上一次发布的兜底值，取不到接口就照原样显示，不给 404 链接。
       (function () {
         function mb(size) {
@@ -405,38 +432,68 @@
           return (m >= 10 ? Math.round(m) : m.toFixed(1)) + " MB";
         }
 
-        function apply(data) {
-          if (!data || !data.version) return;
-          var v = "v" + data.version;
-
-          var hero = document.querySelector(".js-hero-ver");
-          if (hero) hero.textContent = v + " · macOS / Windows / 网页版";
+        function setFoot(version) {
           var foot = document.querySelector(".foot-ver");
-          if (foot) foot.textContent = v + " · online.championsea.wiki-agent";
+          if (foot) foot.textContent = "v" + version + " · online.championsea.wiki-agent";
+        }
 
-          (data.files || []).forEach(function (file) {
-            if (!file.name) return;
-            var card = document.querySelector('.dl[data-os="' + file.os + '"]');
+        function render(files) {
+          // 同一平台可能有多条（便携 zip + NSIS 安装版）：必选优先，其余忽略
+          var byOs = {};
+          (files || []).forEach(function (file) {
+            if (!file || !file.name) return;
+            var current = byOs[file.os];
+            if (!current || (current.optional && !file.optional)) byOs[file.os] = file;
+          });
+
+          ["mac", "win"].forEach(function (os) {
+            var card = document.querySelector('.dl[data-os="' + os + '"]');
             if (!card) return;
-            // 同一个平台按「必选优先」选一条：优先展示已上传的便携包
-            var current = card.querySelector(".js-name");
+            var nameEl = card.querySelector(".js-name");
             var btn = card.querySelector(".btn");
-            if (!current || !btn) return;
-            if (file.optional && btn.getAttribute("href")) return;
+            if (!nameEl || !btn) return;
 
-            if (!file.available) {
-              current.textContent = file.name + " · 构建中";
+            var file = byOs[os];
+            if (!file || !file.available) {
+              nameEl.textContent = (file ? file.name : "该版本没有这个平台的包") + " · 构建中";
               btn.textContent = "构建中";
               btn.removeAttribute("href");
               btn.removeAttribute("download");
               btn.classList.add("is-off");
               return;
             }
-            current.textContent = file.name + " · " + mb(file.size);
-            btn.textContent = file.os === "mac" ? "下载 .dmg" : "下载 .zip";
+
+            nameEl.textContent = file.name + " · " + mb(file.size);
+            btn.textContent = /\.exe$/i.test(file.name) ? "下载 .exe" : file.os === "mac" ? "下载 .dmg" : "下载 .zip";
             btn.setAttribute("href", file.url);
             btn.setAttribute("download", "");
             btn.classList.remove("is-off");
+          });
+        }
+
+        function initPicker(versions) {
+          var row = document.querySelector(".ver-row");
+          var select = document.querySelector(".js-ver");
+          if (!row || !select) return;
+          // 只有一个版本时不摆这个控件，省得点了没反应
+          if (versions.length <= 1) return;
+
+          versions.forEach(function (item, index) {
+            var option = document.createElement("option");
+            option.value = item.version;
+            option.textContent = "v" + item.version + (index === 0 ? "（最新）" : "");
+            select.appendChild(option);
+          });
+          row.hidden = false;
+
+          select.addEventListener("change", function () {
+            var picked = null;
+            versions.forEach(function (item) {
+              if (item.version === select.value) picked = item;
+            });
+            if (!picked) return;
+            render(picked.files);
+            setFoot(picked.version);
           });
         }
 
@@ -444,7 +501,16 @@
           .then(function (res) {
             return res.ok ? res.json() : null;
           })
-          .then(apply)
+          .then(function (data) {
+            if (!data || !data.version) return;
+            var versions =
+              data.versions && data.versions.length
+                ? data.versions
+                : [{ version: data.version, files: data.files }];
+            setFoot(data.version);
+            render(versions[0].files);
+            initPicker(versions);
+          })
           .catch(function () {});
       })();
     </script>
