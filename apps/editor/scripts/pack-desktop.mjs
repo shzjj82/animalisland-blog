@@ -69,7 +69,20 @@ function packMacos() {
   }
   if (!signed) {
     process.env.APPLE_SIGNING_IDENTITY = "-";
-    console.warn("未配置 Developer ID 证书：使用临时签名，安装包只能自己用，不能分发。见 .env.signing.example");
+    // 说明清楚「为什么本地能打开、发给别人打不开」：本地产物不带隔离标记，Gatekeeper 不检查；
+    // 谁从网上下载下来都会被拦，且放行要管理员密码。
+    console.warn(
+      [
+        "",
+        "未配置 Developer ID 证书：本次使用临时签名（ad-hoc），只能自己用。",
+        "  本地能直接打开，是因为 target 里的 .app 没有 com.apple.quarantine 隔离标记，",
+        "  Gatekeeper 压根不做检查；一旦被人下载，macOS 就会以「无法验证开发者」拦下，",
+        "  放行要走 系统设置 → 隐私与安全性 → 仍要打开，且需要管理员密码。",
+        "  对外分发请配证书与公证，见 .env.signing.example；临时绕过：",
+        "  xattr -dr com.apple.quarantine /Applications/wiki-agent.app",
+        "",
+      ].join("\n"),
+    );
   }
 
   run(process.execPath, ["scripts/copy-node.mjs", "darwin"]);
@@ -100,6 +113,16 @@ function packMacos() {
     }
   }
   copyInto(app);
+  // 不管有没有证书都评估一次：ad-hoc 的包这里一定是 rejected，
+  // 提前讲明白「发给别人打不开」的原因，别等到用户来问
+  const assess = spawnSync("spctl", ["--assess", "--type", "execute", path.join(releaseDir, "wiki-agent.app")], {
+    encoding: "utf8",
+  });
+  if (assess.status === 0) {
+    console.log("✓ Gatekeeper 评估通过：下载安装后不会被拦截");
+  } else {
+    console.warn("⚠ Gatekeeper 评估未通过（临时签名）：下载安装后会被拦截，需要用户在系统设置里放行并输入密码。");
+  }
   if (signed) {
     run("spctl", ["--assess", "--type", "execute", "--verbose", path.join(releaseDir, "wiki-agent.app")]);
   }
