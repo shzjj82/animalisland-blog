@@ -698,10 +698,9 @@ async function cmdDoctor() {
     row("安装包前缀", cfg.prefix);
     row("对外域名", cfg.publicBase || dim(`未设 OSS_PUBLIC_BASE，用 ${cfg.bucket}.${cfg.region}.aliyuncs.com`));
     try {
-      const probeObj = `${cfg.prefix}/`;
-      const url = `${publicBase(cfg)}/${encodeURIComponent(probeObj)}`;
-      const res = await fetch(url, { method: "HEAD" });
-      info(res.status < 500 ? green(`公共域名可达（${res.status}）`) : red(`公共域名异常（${res.status}）`));
+      // 探 bucket 根：403（不许列举）也算通，只要不是 5xx/超时
+      const res = await fetch(`${publicBase(cfg)}/`, { method: "HEAD" });
+      info(res.status < 500 ? green(`公共域名可达（HTTP ${res.status}）`) : red(`公共域名异常（HTTP ${res.status}）`));
     } catch (err) {
       info(red(`公共域名不可达：${err.message}`));
     }
