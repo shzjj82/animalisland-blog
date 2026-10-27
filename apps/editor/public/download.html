@@ -360,10 +360,10 @@
                 <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.5l7.5-1v7H3v-6zm8.5-1.2L21 3v8.5h-9.5V4.3zM3 12.5h7.5v7L3 18.5v-6zm8.5 0H21V21l-9.5-1.3v-7.2z"/></svg>
                 Windows
               </div>
-              <div class="desc">Windows 10 / 11，一键安装</div>
-              <div class="file js-name">wiki-agent_0.0.3_x64-setup.exe · 30 MB</div>
-              <a class="btn btn-primary" href="https://championsea.oss-cn-shanghai.aliyuncs.com/wiki-agent/0.0.3/wiki-agent_0.0.3_x64-setup.exe" download>下载 .exe</a>
-              <a class="alt js-alt" href="https://championsea.oss-cn-shanghai.aliyuncs.com/wiki-agent/0.0.3/wiki-agent-0.0.3-windows.zip" download>或下载免安装版（zip，解压即用）</a>
+              <div class="desc">Windows 10 / 11，解压即用</div>
+              <div class="file js-name">wiki-agent-0.0.3-windows.zip · 40 MB</div>
+              <a class="btn btn-primary" href="https://championsea.oss-cn-shanghai.aliyuncs.com/wiki-agent/0.0.3/wiki-agent-0.0.3-windows.zip" download>下载 .zip</a>
+              <a class="alt js-alt" href="https://championsea.oss-cn-shanghai.aliyuncs.com/wiki-agent/0.0.3/wiki-agent_0.0.3_x64-setup.exe" download>或下载安装版（exe，一键安装）</a>
             </div>
             <div class="dl">
               <div class="os">
@@ -474,8 +474,12 @@
             var alt = altByOs[os];
             if (altEl) {
               if (alt && alt.available) {
-                altEl.textContent =
-                  (/windows\.zip$/i.test(alt.name) ? "或下载免安装版（zip，解压即用）" : alt.name) + " · " + mb(alt.size);
+                var altLabel = /windows\.zip$/i.test(alt.name)
+                  ? "或下载免安装版（zip，解压即用）"
+                  : /setup\.exe$/i.test(alt.name)
+                    ? "或下载安装版（exe，一键安装）"
+                    : alt.name;
+                altEl.textContent = altLabel + " · " + mb(alt.size);
                 altEl.setAttribute("href", alt.url);
                 altEl.setAttribute("download", "");
                 altEl.hidden = false;

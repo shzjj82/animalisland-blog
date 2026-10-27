@@ -566,8 +566,8 @@ async function writeIndex(client, cfg, currentVersion, versions) {
         name: o.name.split("/").pop(),
         size: o.size,
         os: /\.(dmg|pkg)$/i.test(o.name) ? "mac" : "win",
-        // 和 gen-version.mjs 的约定一致：NSIS 安装版是主推，便携 zip 是备选
-        optional: /-windows\.zip$/i.test(o.name),
+        // 和 gen-version.mjs 的约定一致：便携 zip 解压即用是主推，NSIS 安装版是备选
+        optional: /setup\.exe$/i.test(o.name),
       })),
     });
   }
