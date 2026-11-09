@@ -6,5 +6,11 @@ if (!distDir) {
   process.exit(1);
 }
 
-const port = await startDesktopServer(distDir);
-console.log(`PORT ${port}`);
+try {
+  const port = await startDesktopServer(distDir);
+  // 必须是 stdout 首行有效内容：宿主进程靠它跳转 WebView
+  console.log(`PORT ${port}`);
+} catch (err) {
+  console.error(err instanceof Error ? err.stack || err.message : String(err));
+  process.exit(1);
+}

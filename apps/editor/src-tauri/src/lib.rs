@@ -1,4 +1,5 @@
-use std::io::{BufRead, BufReader};
+use std::fs::OpenOptions;
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{mpsc, Mutex};
@@ -19,60 +20,164 @@ const NODE_NAME: &str = "node";
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-fn bundled_path(app: &tauri::App, name: &str) -> Option<PathBuf> {
+fn exe_dir() -> Option<PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.to_path_buf()))
+}
+
+fn append_log(message: &str) {
+    let Some(dir) = exe_dir() else {
+        eprintln!("{message}");
+        return;
+    };
+    let path = dir.join("wiki-agent-desktop.log");
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(file, "{message}");
+    }
+    eprintln!("{message}");
+}
+
+fn show_startup_error(title: &str, message: &str) {
+    append_log(&format!("ERROR {title}: {message}"));
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Error)
+            .set_title(title)
+            .set_description(message)
+            .set_buttons(rfd::MessageButtons::Ok)
+            .show();
+    }
+}
+
+fn candidate_paths(app: &tauri::App, name: &str) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if let Ok(resources) = app.path().resource_dir() {
         candidates.push(resources.join("runtime").join(name));
         candidates.push(resources.join(name));
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            candidates.push(dir.join("runtime").join(name));
-            candidates.push(dir.join(name));
-            candidates.push(dir.join("resources").join(name));
-        }
+    if let Some(dir) = exe_dir() {
+        candidates.push(dir.join("runtime").join(name));
+        candidates.push(dir.join(name));
+        candidates.push(dir.join("resources").join(name));
     }
-    candidates.into_iter().find(|path| path.exists())
+    candidates
+}
+
+fn bundled_path(app: &tauri::App, name: &str) -> Option<PathBuf> {
+    candidate_paths(app, name)
+        .into_iter()
+        .find(|path| path.exists())
+}
+
+fn missing_resource_hint(app: &tauri::App, name: &str) -> String {
+    let tried = candidate_paths(app, name)
+        .into_iter()
+        .map(|path| format!("  - {}", path.display()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "找不到「{name}」。\n\n\
+便携 zip 请整包解压后使用，目录应类似：\n\
+  wiki-agent-windows/\n\
+    wiki-agent.exe\n\
+    runtime/\n\
+      wiki-agent-service.exe\n\
+      desktop-server.mjs\n\
+      dist/\n\n\
+已查找：\n{tried}\n\n\
+若文件都在，请检查杀软是否隔离了 wiki-agent-service.exe。\n\
+详情见同目录 wiki-agent-desktop.log"
+    )
 }
 
 fn start_desktop_server(app: &tauri::App) -> Result<u16, String> {
-    let node = bundled_path(app, NODE_NAME).ok_or_else(|| "缺少本机 Node".to_string())?;
-    let script = bundled_path(app, "desktop-server.mjs").ok_or_else(|| "缺少写作服务".to_string())?;
-    let dist = bundled_path(app, "dist").ok_or_else(|| "缺少页面目录".to_string())?;
+    let node = bundled_path(app, NODE_NAME)
+        .ok_or_else(|| missing_resource_hint(app, NODE_NAME))?;
+    let script = bundled_path(app, "desktop-server.mjs")
+        .ok_or_else(|| missing_resource_hint(app, "desktop-server.mjs"))?;
+    let dist = bundled_path(app, "dist").ok_or_else(|| missing_resource_hint(app, "dist"))?;
     if !node.is_file() || !script.is_file() || !dist.is_dir() {
-        return Err("桌面资源不完整".to_string());
+        return Err(missing_resource_hint(app, "runtime 资源"));
     }
+
+    append_log(&format!(
+        "starting service node={} script={} dist={}",
+        node.display(),
+        script.display(),
+        dist.display()
+    ));
+
+    let log_path = exe_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("wiki-agent-service.log");
+    let stderr_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|err| format!("无法写入日志 {}: {err}", log_path.display()))?;
 
     let mut cmd = Command::new(&node);
     cmd.arg(&script)
         .arg(&dist)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
+        .stderr(Stdio::from(stderr_file));
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let mut child = cmd.spawn().map_err(|err| err.to_string())?;
+    let mut child = cmd.spawn().map_err(|err| {
+        format!(
+            "无法启动本机服务（{err}）。\n\
+请确认 runtime/wiki-agent-service.exe 未被杀软隔离，并允许其联网。\n\
+日志：{}",
+            log_path.display()
+        )
+    })?;
     let stdout = child.stdout.take().ok_or("无法读取本机服务输出")?;
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let mut lines = BufReader::new(stdout).lines();
-        if let Some(Ok(line)) = lines.next() {
-            if let Some(rest) = line.strip_prefix("PORT ") {
+        while let Some(Ok(line)) = lines.next() {
+            let trimmed = line.trim_start_matches('\u{feff}').trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if let Some(rest) = trimmed.strip_prefix("PORT ") {
                 if let Ok(port) = rest.trim().parse::<u16>() {
                     let _ = tx.send(port);
+                    break;
                 }
             }
+            // 仍继续读，兼容偶发前置输出
         }
         for _ in lines {}
     });
-    let port = rx
-        .recv_timeout(Duration::from_secs(15))
-        .map_err(|_| "本机服务没有在限定时间内启动".to_string())?;
+
+    let port = match rx.recv_timeout(Duration::from_secs(20)) {
+        Ok(port) => port,
+        Err(_) => {
+            let status = child.try_wait().ok().flatten();
+            let _ = child.kill();
+            return Err(format!(
+                "本机服务没有在限定时间内就绪。\n\
+常见原因：缺少 runtime 目录、杀软拦截、或 47321 端口异常。\n\
+子进程状态：{status:?}\n\
+请查看：\n  {}\n  {}",
+                log_path.display(),
+                exe_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("wiki-agent-desktop.log")
+                    .display()
+            ));
+        }
+    };
     app.manage(DesktopServer(Mutex::new(Some(child))));
+    append_log(&format!("desktop server ready on 127.0.0.1:{port}"));
     Ok(port)
 }
 
@@ -86,6 +191,13 @@ fn stop_desktop_server(app: &tauri::AppHandle) {
     if let Some(mut child) = guard.take() {
         let _ = child.kill();
     }
+}
+
+fn open_local_app(window: &tauri::WebviewWindow, port: u16) -> Result<(), String> {
+    let url = format!("http://127.0.0.1:{port}/app")
+        .parse::<tauri::Url>()
+        .map_err(|err| err.to_string())?;
+    window.navigate(url).map_err(|err| err.to_string())
 }
 
 #[cfg(not(debug_assertions))]
@@ -111,17 +223,25 @@ pub fn run() {
                 return Ok(());
             };
             #[cfg(not(debug_assertions))]
-            match start_desktop_server(app) {
-                // 根路径是下载宣传页，编辑器在 /app 下（与 Web 部署保持一致）
-                Ok(port) => match format!("http://127.0.0.1:{port}/app").parse::<tauri::Url>() {
-                    Ok(url) => {
-                        if let Err(err) = window.navigate(url) {
-                            eprintln!("{err}");
+            {
+                match start_desktop_server(app) {
+                    Ok(port) => {
+                        if let Err(err) = open_local_app(&window, port) {
+                            show_startup_error(
+                                "wiki-agent 无法打开页面",
+                                &format!("{err}\n\n本机服务已启动（端口 {port}），但窗口跳转失败。"),
+                            );
+                            app.handle().exit(1);
+                            return Ok(());
                         }
                     }
-                    Err(err) => eprintln!("{err}"),
-                },
-                Err(err) => eprintln!("{err}"),
+                    Err(err) => {
+                        show_startup_error("wiki-agent 无法联网启动", &err);
+                        // 不要展示没有代理的空白壳，避免「能开但不能联网」的假象
+                        app.handle().exit(1);
+                        return Ok(());
+                    }
+                }
             }
             let _ = window.show();
             Ok(())

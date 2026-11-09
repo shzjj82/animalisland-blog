@@ -103,6 +103,13 @@ jobs:
             echo "未配置签名证书：临时签名，不公证"
           fi
 
+      # 桌面包必须烤进公网网关；避免本机 .env 的 127.0.0.1:3000 混进安装包
+      - name: 固定桌面网关
+        shell: bash
+        run: |
+          echo "GATEWAY_BASE_URL=https://api.championsea.online" >> "$GITHUB_ENV"
+          echo "DESKTOP_GATEWAY_BASE=https://api.championsea.online" >> "$GITHUB_ENV"
+
       # macOS：通用二进制（Apple 芯片 + Intel），只打 app，dmg 下一步自己生成
       - name: 打包 macOS
         if: matrix.name == 'macos'

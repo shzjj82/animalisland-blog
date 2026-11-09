@@ -65,7 +65,19 @@ const PROXY_ROOTS = ["/auth", "/docs", "/agents", "/upload", "/teams"] as const;
 function resolveGatewayBase(): string {
   const fromBake = (process.env.DESKTOP_GATEWAY_BASE || "").trim();
   const fromEnv = (process.env.GATEWAY_BASE_URL || process.env.NEST_BASE_URL || "").trim();
-  return (fromBake || fromEnv || "https://api.championsea.online").replace(/\/$/, "");
+  const base = (fromBake || fromEnv || "https://api.championsea.online").replace(/\/$/, "");
+  // 误烤本机地址时只告警：真正拦截在 bundle-server / pack-windows（避免本地联调被强制改公网）
+  try {
+    const host = new URL(base).hostname.toLowerCase();
+    if (host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "::1") {
+      console.error(
+        `[desktop-server] 警告：当前网关是本机地址 ${base}。安装包应使用公网网关，否则用户端会无法联网。`,
+      );
+    }
+  } catch {
+    // ignore
+  }
+  return base;
 }
 
 /**
@@ -371,6 +383,7 @@ const DESKTOP_PORT = Number(process.env.EDITOR_PORT || 47321);
 export function startDesktopServer(distDir: string): Promise<number> {
   const root = path.resolve(distDir);
   const gatewayBase = resolveGatewayBase();
+  console.error(`[desktop-server] gateway=${gatewayBase} dist=${root}`);
   const server = http.createServer((req, res) => {
     const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
 
