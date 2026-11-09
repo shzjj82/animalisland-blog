@@ -35,7 +35,7 @@ const MIME: Record<string, string> = {
  *   3. /downloads/*                         → 410 Gone（安装包已迁到 OSS，不再由本机托管）
  *   4. 别名 308 跳转                         → /download、/download.html、/downloads
  *   5. /                                     → dist/download.html（下载宣传页 = 站点首页）
- *   6. /app、/app/*                          → index.html（编辑器 SPA，含深链回落）
+ *   6. /app、/app/*、/markdown、/markdown/*  → index.html（编辑器 SPA，含深链回落）
  *   7. dist 里真实存在的文件                  → 直接返回（带缓存头）
  *   8. 其他                                  → 404
  *
@@ -43,9 +43,11 @@ const MIME: Record<string, string> = {
  * 服务器只负责发页面和 /version.json，机器上不存大文件。
  * 编辑器不再占用根路径：根是给人的落地页，工具在 /app 下面。
  * 桌面版 WebView 也加载 /app（见 src-tauri/src/lib.rs）。
+ * /markdown 与 /app/markdown 打开 Markdown 导入页。
  */
 const HOME_PAGE = "download.html";
 const APP_PREFIX = "/app";
+const MARKDOWN_PREFIX = "/markdown";
 const VERSION_PATH = "/version.json";
 
 /** 旧地址 / 常见手误 → canonical 路径 */
@@ -57,10 +59,19 @@ const REDIRECTS: Record<string, string> = {
   "/downloads/": "/#download",
 };
 
+function isSpaPath(pathname: string): boolean {
+  return (
+    pathname === APP_PREFIX ||
+    pathname.startsWith(`${APP_PREFIX}/`) ||
+    pathname === MARKDOWN_PREFIX ||
+    pathname.startsWith(`${MARKDOWN_PREFIX}/`)
+  );
+}
+
 /** 打包后的资源名里带 hash，可以长缓存；其余给短缓存 */
 const HASHED_ASSET = /\/assets\/.+-[A-Za-z0-9_-]{8,}\.(?:js|css|woff2?|ttf|png|jpe?g|svg|webp)$/;
 
-const PROXY_ROOTS = ["/auth", "/docs", "/agents", "/upload", "/teams"] as const;
+const PROXY_ROOTS = ["/auth", "/docs", "/agents", "/upload", "/teams", "/notifications", "/todos"] as const;
 
 function resolveGatewayBase(): string {
   const fromBake = (process.env.DESKTOP_GATEWAY_BASE || "").trim();
@@ -359,8 +370,8 @@ function serveStatic(distRoot: string, req: IncomingMessage, res: ServerResponse
     return;
   }
 
-  // 3) 编辑器 SPA：/app 与 /app/... 一律回到入口，前端自己的深链刷新也能用
-  if (pathname === APP_PREFIX || pathname.startsWith(`${APP_PREFIX}/`)) {
+  // 3) 编辑器 SPA：/app、/markdown 及子路径一律回到入口，前端自己的深链刷新也能用
+  if (isSpaPath(pathname)) {
     const app = pick("/index.html");
     if (app) {
       sendFile(req, res, app);

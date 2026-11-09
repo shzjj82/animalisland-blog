@@ -20,6 +20,8 @@ function gatewayProxy(target: string): Record<string, ProxyOptions> {
     "/agents": common,
     "/upload": common,
     "/teams": common,
+    "/notifications": common,
+    "/todos": common,
   };
 }
 

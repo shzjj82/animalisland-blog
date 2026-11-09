@@ -400,16 +400,18 @@ export async function createRemote(
   session: RemoteSession,
   parentId: string | null,
   teamId?: string | null,
+  seed?: { title?: string; body?: EditorJsDocument; props?: Record<string, unknown> },
 ): Promise<EditorPage> {
-  const body = starterArticleDocument();
+  const body = seed?.body ?? starterArticleDocument();
+  const title = seed?.title?.trim() || titleFromBody(body) || t("common.untitled");
   const data = await request<{ post?: unknown; document?: unknown }>(session, "POST", "/docs/documents", {
-    title: t("common.untitled"),
+    title,
     type: "life",
     kind: "article",
     parentId,
     summary: "",
     coverUrl: "",
-    props: {},
+    props: seed?.props ?? {},
     body,
     visibility: "private",
     ...(teamId ? { teamId } : {}),
@@ -418,7 +420,7 @@ export async function createRemote(
   if (!page) {
     throw new Error(t("store.failedToCreatePage"));
   }
-  return { ...page, body: page.body.blocks.length > 0 ? page.body : body };
+  return { ...page, title, body: page.body.blocks.length > 0 ? page.body : body };
 }
 
 export async function saveRemote(

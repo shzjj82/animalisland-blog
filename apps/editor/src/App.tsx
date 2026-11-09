@@ -14,6 +14,7 @@ import { FileViewer } from "@/components/file-viewer";
 import { WikiChat } from "@/components/wiki-chat";
 import { ImportDialog, type ImportChoice } from "@/components/import-dialog";
 import { LanguageSwitch } from "@/components/language-switch";
+import { NotifyBell } from "@/components/notify-bell";
 import { PageTree } from "@/components/page-tree";
 import { SettingsMenu } from "@/components/settings-menu";
 import { TeamDialog } from "@/components/team-dialog";
@@ -50,6 +51,12 @@ import {
   syncPlanSize,
   type SyncPlan,
 } from "@/store/localSync";
+import {
+  documentFromTodo,
+  readTodoPageMap,
+  rememberTodoPage,
+  type NotifyTodo,
+} from "@/store/notifyStore";
 import {
   changePasswordRemote,
   createRemote,
@@ -89,6 +96,7 @@ import {
   saveAttachment,
   type AttachmentData,
 } from "@/store/fileStore";
+import { takePendingPageId } from "@/lib/route";
 
 const iconProps = { theme: "outline" as const, strokeWidth: 3, size: 16 };
 const SIDEBAR_WIDTH_KEY = "editor:sidebar-width";
@@ -404,7 +412,7 @@ export function App() {
       setTeams([]);
       setTeamsReady(false);
       ensureLocalPages();
-      refreshLocal(null);
+      refreshLocal(takePendingPageId());
       return;
     }
     const settings = readSyncSettings();
@@ -413,7 +421,7 @@ export function App() {
       setSyncPlan(plan);
       setSyncStep("summary");
     }
-    void refreshRemote(session, null)
+    void refreshRemote(session, takePendingPageId())
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : t("app.failedToLoadRemotePages"));
       })
@@ -684,6 +692,28 @@ export function App() {
     } catch (err) {
       setError(err instanceof Error ? err.message : t("app.failedToCreatePage"));
     }
+  }
+
+  /** 从远程待办打开/新建 wiki 页，带入标题与说明，继续填写内容 */
+  async function writeTodoPage(todo: NotifyTodo) {
+    if (!session) {
+      throw new Error(t("notify.actionFailed"));
+    }
+    setError("");
+    const mappedId = readTodoPageMap()[todo.id];
+    if (mappedId && nodes.some((node) => node.id === mappedId)) {
+      await refreshRemote(session, mappedId);
+      return;
+    }
+    const writingTeam = activeTeamId && canWriteTeam(teams.find((team) => team.id === activeTeamId)?.role) ? activeTeamId : null;
+    const body = documentFromTodo(todo);
+    const created = await createRemote(session, null, writingTeam, {
+      title: todo.title.trim() || t("notify.untitled"),
+      body,
+      props: { sourceTodoId: todo.id },
+    });
+    rememberTodoPage(todo.id, created.id);
+    await refreshRemote(session, created.id);
   }
 
   async function readImport(file: File) {
@@ -1416,6 +1446,7 @@ export function App() {
               <Delete {...iconProps} />
               {t("common.delete")}
             </Button>
+            <NotifyBell session={session} onWriteTodo={(todo) => writeTodoPage(todo)} />
             <Button type="button" variant="outline" size="icon" aria-label={t("wikiAsk.title")} onClick={openWiki}>
               <Robot {...iconProps} />
             </Button>
@@ -1492,6 +1523,7 @@ export function App() {
                 </div>
               </PopoverContent>
             </Popover>
+            <NotifyBell session={session} onWriteTodo={(todo) => writeTodoPage(todo)} />
             <Button type="button" variant="outline" size="icon" aria-label={t("wikiAsk.title")} onClick={openWiki}>
               <Robot {...iconProps} />
             </Button>

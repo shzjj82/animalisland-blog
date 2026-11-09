@@ -148,13 +148,17 @@ export function loadLocal(id: string): EditorPage | undefined {
   return ensureLocalPages().find((page) => page.id === id);
 }
 
-export function createLocal(parentId: string | null): EditorPage {
+export function createLocal(
+  parentId: string | null,
+  seed?: { title?: string; body?: EditorJsDocument },
+): EditorPage {
   const pages = ensureLocalPages();
+  const body = seed?.body ?? starterArticleDocument();
   const page: EditorPage = {
     id: crypto.randomUUID(),
-    title: t("common.untitled"),
+    title: seed?.title?.trim() || titleFromBody(body) || t("common.untitled"),
     parentId,
-    body: starterArticleDocument(),
+    body,
     updatedAt: new Date().toISOString(),
   };
   writePages([page, ...pages]);
