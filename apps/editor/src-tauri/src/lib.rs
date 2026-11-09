@@ -26,6 +26,26 @@ fn exe_dir() -> Option<PathBuf> {
         .and_then(|exe| exe.parent().map(|dir| dir.to_path_buf()))
 }
 
+/// Windows 扩展路径前缀 `\\?\` 传给 Node 会把入口脚本解析坏（报 EISDIR lstat 'D:'）。
+/// 启动子进程前剥掉，改回普通盘符/UNC 路径。
+fn for_child_path(path: &std::path::Path) -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        let raw = path.to_string_lossy();
+        if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{rest}"));
+        }
+        if let Some(rest) = raw.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest);
+        }
+        return path.to_path_buf();
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        path.to_path_buf()
+    }
+}
+
 fn append_log(message: &str) {
     let Some(dir) = exe_dir() else {
         eprintln!("{message}");
@@ -133,14 +153,17 @@ fn read_port_marker(path: &PathBuf) -> Option<u16> {
 }
 
 fn start_desktop_server(app: &tauri::App) -> Result<u16, String> {
-    let node = bundled_node(app).ok_or_else(|| missing_resource_hint(app, NODE_NAME))?;
-    let script = bundled_path(app, "desktop-server.mjs")
+    let node_raw = bundled_node(app).ok_or_else(|| missing_resource_hint(app, NODE_NAME))?;
+    let script_raw = bundled_path(app, "desktop-server.mjs")
         .ok_or_else(|| missing_resource_hint(app, "desktop-server.mjs"))?;
-    let dist = bundled_path(app, "dist").ok_or_else(|| missing_resource_hint(app, "dist"))?;
-    if !node.is_file() || !script.is_file() || !dist.is_dir() {
+    let dist_raw = bundled_path(app, "dist").ok_or_else(|| missing_resource_hint(app, "dist"))?;
+    if !node_raw.is_file() || !script_raw.is_file() || !dist_raw.is_dir() {
         return Err(missing_resource_hint(app, "runtime 资源"));
     }
 
+    let node = for_child_path(&node_raw);
+    let script = for_child_path(&script_raw);
+    let dist = for_child_path(&dist_raw);
     let runtime_dir = script
         .parent()
         .map(|dir| dir.to_path_buf())
