@@ -1,6 +1,16 @@
 import type { EditorJsDocument } from "@myblog/shared";
 import { request, type RemoteSession } from "@/store/remoteStore";
 
+export type NotifyNotice = {
+  id: string;
+  title: string;
+  content: string;
+  category: string;
+  source: string;
+  readAt: string | null;
+  createdAt: string;
+};
+
 export type NotifyTodo = {
   id: string;
   title: string;
@@ -12,6 +22,7 @@ export type NotifyTodo = {
   finishedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  data?: Record<string, unknown> | null;
 };
 
 type Page<T> = {
@@ -23,24 +34,68 @@ type Page<T> = {
 
 export type NotifySnapshot = {
   openTodoCount: number;
+  unreadNoticeCount: number;
   todos: NotifyTodo[];
+  notices: NotifyNotice[];
+};
+
+export type UpsertTodoInput = {
+  title: string;
+  content: string;
+  category?: string;
+  source?: string;
+  dueAt?: string | null;
+  data?: Record<string, unknown> | null;
 };
 
 const TODO_PAGE_KEY = "editor:todo-pages";
 
 export async function fetchNotifySnapshot(session: RemoteSession): Promise<NotifySnapshot> {
-  const [openTodo, todos] = await Promise.all([
+  const [openTodo, unreadNotice, todos, notices] = await Promise.all([
     request<{ count: number }>(session, "GET", "/todos/open-count"),
+    request<{ count: number }>(session, "GET", "/notifications/unread-count"),
     request<Page<NotifyTodo>>(session, "GET", "/todos?status=open&page=1&pageSize=30"),
+    request<Page<NotifyNotice>>(session, "GET", "/notifications?unread=1&page=1&pageSize=20"),
   ]);
   return {
     openTodoCount: openTodo.count ?? todos.total ?? todos.items?.length ?? 0,
+    unreadNoticeCount: unreadNotice.count ?? notices.total ?? notices.items?.length ?? 0,
     todos: todos.items ?? [],
+    notices: notices.items ?? [],
   };
+}
+
+export function createTodo(session: RemoteSession, input: UpsertTodoInput): Promise<NotifyTodo> {
+  return request<NotifyTodo>(session, "POST", "/todos", {
+    title: input.title,
+    content: input.content,
+    category: input.category ?? "wiki",
+    source: input.source ?? "wiki",
+    dueAt: input.dueAt ?? null,
+    data: input.data ?? null,
+  });
+}
+
+export function updateTodo(session: RemoteSession, id: string, input: UpsertTodoInput): Promise<NotifyTodo> {
+  return request<NotifyTodo>(session, "PATCH", `/todos/${id}`, {
+    title: input.title,
+    content: input.content,
+    category: input.category ?? "wiki",
+    dueAt: input.dueAt ?? null,
+    data: input.data ?? null,
+  });
 }
 
 export function markTodoDone(session: RemoteSession, id: string): Promise<NotifyTodo> {
   return request<NotifyTodo>(session, "POST", `/todos/${id}/done`);
+}
+
+export function markNoticeRead(session: RemoteSession, id: string): Promise<NotifyNotice> {
+  return request<NotifyNotice>(session, "POST", `/notifications/${id}/read`);
+}
+
+export function markAllNoticesRead(session: RemoteSession): Promise<{ updated: number }> {
+  return request<{ updated: number }>(session, "POST", "/notifications/read-all");
 }
 
 /** 把远程待办转成 wiki 页初始正文：标题 + 任务说明，方便继续填写 */

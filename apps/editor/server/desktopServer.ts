@@ -3,6 +3,7 @@ import http from "node:http";
 import https from "node:https";
 import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { Duplex } from "node:stream";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -131,6 +132,67 @@ function proxyToGateway(req: IncomingMessage, res: ServerResponse, gatewayBase: 
     }
   });
   req.pipe(upstream);
+}
+
+/** 把 /notifications/socket 的 WebSocket upgrade 转到网关 */
+function proxyWsUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer, gatewayBase: string): void {
+  const incoming = new URL(req.url ?? "/", "http://127.0.0.1");
+  if (incoming.pathname !== "/notifications/socket") {
+    socket.destroy();
+    return;
+  }
+  const target = new URL(`${incoming.pathname}${incoming.search}`, `${gatewayBase}/`);
+  const transport = target.protocol === "https:" ? https : http;
+  const headers: http.OutgoingHttpHeaders = { ...req.headers, host: target.host };
+  delete headers["origin"];
+  delete headers["referer"];
+  const upstream = transport.request({
+    protocol: target.protocol,
+    hostname: target.hostname,
+    port: target.port || (target.protocol === "https:" ? 443 : 80),
+    path: `${target.pathname}${target.search}`,
+    method: "GET",
+    headers,
+  });
+  upstream.on("upgrade", (upRes, upSocket, upHead) => {
+    const lines = [`HTTP/1.1 ${upRes.statusCode ?? 101} Switching Protocols`];
+    for (const [key, value] of Object.entries(upRes.headers)) {
+      if (value == null) continue;
+      if (Array.isArray(value)) {
+        for (const item of value) lines.push(`${key}: ${item}`);
+      } else {
+        lines.push(`${key}: ${value}`);
+      }
+    }
+    socket.write(`${lines.join("\r\n")}\r\n\r\n`);
+    if (upHead.length) upSocket.write(upHead);
+    if (head.length) socket.write(head);
+    upSocket.pipe(socket);
+    socket.pipe(upSocket);
+  });
+  upstream.on("response", (upRes) => {
+    const bodyChunks: Buffer[] = [];
+    upRes.on("data", (chunk) => bodyChunks.push(Buffer.from(chunk)));
+    upRes.on("end", () => {
+      const body = Buffer.concat(bodyChunks);
+      socket.write(
+        `HTTP/1.1 ${upRes.statusCode ?? 502} Bad Gateway\r\n` +
+          "Connection: close\r\n" +
+          `Content-Length: ${body.length}\r\n\r\n`,
+      );
+      socket.write(body);
+      socket.destroy();
+    });
+  });
+  upstream.on("error", () => {
+    try {
+      socket.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
+    } catch {
+      // ignore
+    }
+    socket.destroy();
+  });
+  upstream.end();
 }
 
 function cacheControlFor(file: string): string {
@@ -423,6 +485,9 @@ export function startDesktopServer(distDir: string): Promise<number> {
           res.end(JSON.stringify({ version: "", files: [] }));
         }
       });
+  });
+  server.on("upgrade", (req, socket, head) => {
+    proxyWsUpgrade(req, socket, head, gatewayBase);
   });
 
   const listen = (port: number): Promise<number> =>

@@ -1,5 +1,7 @@
 import type { API, BlockAPI, BlockTool, BlockToolConstructorOptions } from "@editorjs/editorjs";
 import { appLocale, t } from "@/i18n";
+import { createTodo, markTodoDone, updateTodo, type UpsertTodoInput } from "@/store/notifyStore";
+import { loadSession } from "@/store/remoteStore";
 import { menuIcons } from "../menuIcons";
 
 export type TodoItem = {
@@ -9,6 +11,8 @@ export type TodoItem = {
   /** YYYY-MM-DD，空字符串表示未选 */
   start: string;
   end: string;
+  /** 已同步到 notify 服务的远程待办 id */
+  remoteId?: string;
 };
 
 export type TodoData = {
@@ -96,12 +100,42 @@ function normalizeItem(raw: unknown): TodoItem | null {
     return null;
   }
   const item = raw as Partial<TodoItem>;
+  const remoteId = typeof item.remoteId === "string" && item.remoteId.trim() ? item.remoteId.trim() : undefined;
   return {
     id: typeof item.id === "string" && item.id ? item.id : uid(),
     text: String(item.text ?? ""),
     done: Boolean(item.done),
     start: asDate(item.start),
     end: asDate(item.end),
+    ...(remoteId ? { remoteId } : {}),
+  };
+}
+
+function dueAtFromItem(item: TodoItem): string | null {
+  if (!item.end) return null;
+  const date = new Date(`${item.end}T23:59:59.000Z`);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function upsertPayload(item: TodoItem): UpsertTodoInput | null {
+  const title = item.text.trim().slice(0, 120);
+  if (!title) return null;
+  const range =
+    item.start || item.end
+      ? `时间：${item.start || "—"}${item.end ? ` → ${item.end}` : ""}`
+      : "";
+  const content = [range, `本地待办：${item.id}`].filter(Boolean).join("\n") || title;
+  return {
+    title,
+    content: content.slice(0, 4000),
+    category: "wiki",
+    source: "wiki",
+    dueAt: dueAtFromItem(item),
+    data: {
+      localItemId: item.id,
+      start: item.start || null,
+      end: item.end || null,
+    },
   };
 }
 
@@ -223,6 +257,7 @@ export class TodoBlockTool implements BlockTool {
   private calendarAnchor: HTMLElement | null = null;
   private leaveTimers: number[] = [];
   private heightFrame = 0;
+  private syncing = false;
 
   constructor({ data, readOnly, block, api }: BlockToolConstructorOptions<TodoData>) {
     this.data = normalize(data);
@@ -258,8 +293,9 @@ export class TodoBlockTool implements BlockTool {
           done: item.done,
           start: item.start,
           end: item.end,
+          ...(item.remoteId ? { remoteId: item.remoteId } : {}),
         }))
-        .filter((item) => item.text || item.start || item.end || item.done),
+        .filter((item) => item.text || item.start || item.end || item.done || item.remoteId),
     };
   }
 
@@ -277,6 +313,50 @@ export class TodoBlockTool implements BlockTool {
 
   private commit() {
     this.block?.dispatchChange?.();
+  }
+
+  /** 通知开启时：未同步则创建远程待办，已同步则更新；已完成则标远程完成 */
+  private async syncRemoteTodos() {
+    if (this.readOnly || !this.data.notify || this.syncing) {
+      return;
+    }
+    const session = loadSession();
+    if (!session) {
+      return;
+    }
+    this.syncing = true;
+    let changed = false;
+    try {
+      for (const item of this.data.items) {
+        if (item.done) {
+          if (!item.remoteId) continue;
+          try {
+            await markTodoDone(session, item.remoteId);
+          } catch {
+            // 可能已经是完成态，忽略
+          }
+          continue;
+        }
+        const payload = upsertPayload(item);
+        if (!payload) continue;
+        try {
+          if (item.remoteId) {
+            await updateTodo(session, item.remoteId, payload);
+          } else {
+            const created = await createTodo(session, payload);
+            item.remoteId = created.id;
+            changed = true;
+          }
+        } catch (err) {
+          console.warn("[todo-sync]", err);
+        }
+      }
+    } finally {
+      this.syncing = false;
+      if (changed) {
+        this.commit();
+      }
+    }
   }
 
   private visibleItems(): TodoItem[] {
@@ -391,6 +471,7 @@ export class TodoBlockTool implements BlockTool {
     button.addEventListener("click", () => {
       this.tab = tab;
       this.paint();
+      void this.syncRemoteTodos();
     });
     return button;
   }
@@ -412,6 +493,9 @@ export class TodoBlockTool implements BlockTool {
       this.data.notify = !this.data.notify;
       this.commit();
       this.paint();
+      if (this.data.notify) {
+        void this.syncRemoteTodos();
+      }
     });
     return button;
   }
@@ -519,6 +603,7 @@ export class TodoBlockTool implements BlockTool {
   private finishItem(item: TodoItem, row: HTMLElement, check: HTMLButtonElement) {
     item.done = true;
     this.commit();
+    void this.syncRemoteTodos();
     check.classList.add("is-checked");
     check.setAttribute("aria-pressed", "true");
     check.disabled = true;

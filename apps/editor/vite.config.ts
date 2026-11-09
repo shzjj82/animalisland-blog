@@ -14,13 +14,14 @@ function gatewayProxy(target: string): Record<string, ProxyOptions> {
     changeOrigin: true,
     secure: true,
   };
+  const withWs: ProxyOptions = { ...common, ws: true };
   return {
     "/auth": common,
     "/docs": common,
     "/agents": common,
     "/upload": common,
     "/teams": common,
-    "/notifications": common,
+    "/notifications": withWs,
     "/todos": common,
   };
 }
