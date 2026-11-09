@@ -56,10 +56,13 @@ fn candidate_paths(app: &tauri::App, name: &str) -> Vec<PathBuf> {
     if let Ok(resources) = app.path().resource_dir() {
         candidates.push(resources.join("runtime").join(name));
         candidates.push(resources.join(name));
+        // NSIS 偶发把资源摊到 resources 根或 _up_ 旁
+        candidates.push(resources.join("resources").join("runtime").join(name));
     }
     if let Some(dir) = exe_dir() {
         candidates.push(dir.join("runtime").join(name));
         candidates.push(dir.join(name));
+        candidates.push(dir.join("resources").join("runtime").join(name));
         candidates.push(dir.join("resources").join(name));
     }
     candidates
@@ -71,6 +74,24 @@ fn bundled_path(app: &tauri::App, name: &str) -> Option<PathBuf> {
         .find(|path| path.exists())
 }
 
+fn bundled_node(app: &tauri::App) -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        for name in [NODE_NAME, "node.exe"] {
+            if let Some(path) = bundled_path(app, name) {
+                if path.is_file() {
+                    return Some(path);
+                }
+            }
+        }
+        None
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        bundled_path(app, NODE_NAME).filter(|path| path.is_file())
+    }
+}
+
 fn missing_resource_hint(app: &tauri::App, name: &str) -> String {
     let tried = candidate_paths(app, name)
         .into_iter()
@@ -79,7 +100,7 @@ fn missing_resource_hint(app: &tauri::App, name: &str) -> String {
         .join("\n");
     format!(
         "找不到「{name}」。\n\n\
-便携 zip 请整包解压后使用，目录应类似：\n\
+便携 zip 请整包解压后再双击 exe，不要只拷贝单个文件。目录应类似：\n\
   wiki-agent-windows/\n\
     wiki-agent.exe\n\
     runtime/\n\
@@ -92,9 +113,27 @@ fn missing_resource_hint(app: &tauri::App, name: &str) -> String {
     )
 }
 
+fn tail_log(path: &PathBuf, max_chars: usize) -> String {
+    match std::fs::read_to_string(path) {
+        Ok(text) if !text.trim().is_empty() => {
+            let trimmed = text.trim();
+            if trimmed.len() <= max_chars {
+                trimmed.to_string()
+            } else {
+                trimmed[trimmed.len() - max_chars..].to_string()
+            }
+        }
+        _ => String::new(),
+    }
+}
+
+fn read_port_marker(path: &PathBuf) -> Option<u16> {
+    let text = std::fs::read_to_string(path).ok()?;
+    text.trim().parse::<u16>().ok()
+}
+
 fn start_desktop_server(app: &tauri::App) -> Result<u16, String> {
-    let node = bundled_path(app, NODE_NAME)
-        .ok_or_else(|| missing_resource_hint(app, NODE_NAME))?;
+    let node = bundled_node(app).ok_or_else(|| missing_resource_hint(app, NODE_NAME))?;
     let script = bundled_path(app, "desktop-server.mjs")
         .ok_or_else(|| missing_resource_hint(app, "desktop-server.mjs"))?;
     let dist = bundled_path(app, "dist").ok_or_else(|| missing_resource_hint(app, "dist"))?;
@@ -102,11 +141,19 @@ fn start_desktop_server(app: &tauri::App) -> Result<u16, String> {
         return Err(missing_resource_hint(app, "runtime 资源"));
     }
 
+    let runtime_dir = script
+        .parent()
+        .map(|dir| dir.to_path_buf())
+        .unwrap_or_else(|| dist.parent().unwrap_or(dist.as_path()).to_path_buf());
+    let port_marker = runtime_dir.join(".desktop-port");
+    let _ = std::fs::remove_file(&port_marker);
+
     append_log(&format!(
-        "starting service node={} script={} dist={}",
+        "starting service node={} script={} dist={} cwd={}",
         node.display(),
         script.display(),
-        dist.display()
+        dist.display(),
+        runtime_dir.display()
     ));
 
     let log_path = exe_dir()
@@ -121,6 +168,7 @@ fn start_desktop_server(app: &tauri::App) -> Result<u16, String> {
     let mut cmd = Command::new(&node);
     cmd.arg(&script)
         .arg(&dist)
+        .current_dir(&runtime_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::from(stderr_file));
@@ -133,7 +181,7 @@ fn start_desktop_server(app: &tauri::App) -> Result<u16, String> {
     let mut child = cmd.spawn().map_err(|err| {
         format!(
             "无法启动本机服务（{err}）。\n\
-请确认 runtime/wiki-agent-service.exe 未被杀软隔离，并允许其联网。\n\
+请确认 runtime 里的服务程序未被杀软隔离，并允许其联网。\n\
 日志：{}",
             log_path.display()
         )
@@ -153,21 +201,30 @@ fn start_desktop_server(app: &tauri::App) -> Result<u16, String> {
                     break;
                 }
             }
-            // 仍继续读，兼容偶发前置输出
         }
         for _ in lines {}
     });
 
-    let port = match rx.recv_timeout(Duration::from_secs(20)) {
-        Ok(port) => port,
-        Err(_) => {
+    // 同时轮询端口标记文件，避免 Windows 管道缓冲导致永远读不到 stdout
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let port = loop {
+        if let Some(port) = read_port_marker(&port_marker) {
+            break port;
+        }
+        if std::time::Instant::now() >= deadline {
             let status = child.try_wait().ok().flatten();
             let _ = child.kill();
+            let log_tail = tail_log(&log_path, 600);
+            let log_hint = if log_tail.is_empty() {
+                String::new()
+            } else {
+                format!("\n\n服务日志末尾：\n{log_tail}")
+            };
             return Err(format!(
                 "本机服务没有在限定时间内就绪。\n\
-常见原因：缺少 runtime 目录、杀软拦截、或 47321 端口异常。\n\
+常见原因：zip 未整包解压、杀软隔离 runtime 服务、或本机服务启动失败。\n\
 子进程状态：{status:?}\n\
-请查看：\n  {}\n  {}",
+请查看：\n  {}\n  {}{log_hint}",
                 log_path.display(),
                 exe_dir()
                     .unwrap_or_else(|| PathBuf::from("."))
@@ -175,7 +232,15 @@ fn start_desktop_server(app: &tauri::App) -> Result<u16, String> {
                     .display()
             ));
         }
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(port) => break port,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
     };
+    let _ = std::fs::remove_file(&port_marker);
     app.manage(DesktopServer(Mutex::new(Some(child))));
     append_log(&format!("desktop server ready on 127.0.0.1:{port}"));
     Ok(port)

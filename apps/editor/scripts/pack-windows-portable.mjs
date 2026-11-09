@@ -54,6 +54,8 @@ fs.copyFileSync(exe, path.join(out, "wiki-agent.exe"));
 const runtime = path.join(out, "runtime");
 fs.mkdirSync(runtime, { recursive: true });
 fs.copyFileSync(nodeSrc, path.join(runtime, "wiki-agent-service.exe"));
+// 保留 node.exe 别名：部分杀软对「改名后的 node」更敏感
+fs.copyFileSync(nodeSrc, path.join(runtime, "node.exe"));
 fs.copyFileSync(serverSrc, path.join(runtime, "desktop-server.mjs"));
 fs.cpSync(distSrc, path.join(runtime, "dist"), { recursive: true });
 
@@ -62,18 +64,19 @@ fs.writeFileSync(
   [
     "wiki-agent 便携版使用说明",
     "",
-    "1. 请解压整个文件夹后再使用，不要只拷贝 wiki-agent.exe。",
+    "1. 必须「解压整个文件夹」后再使用，不要在压缩包里直接双击，也不要只拷贝 wiki-agent.exe。",
     "2. 正确结构：",
     "   wiki-agent-windows/",
     "     wiki-agent.exe",
     "     runtime/",
     "       wiki-agent-service.exe",
+    "       node.exe",
     "       desktop-server.mjs",
     "       dist/",
     "3. 双击 wiki-agent.exe 启动。联网依赖 runtime 里的本机服务。",
     "4. 若提示无法启动 / 无法联网：",
-    "   - 确认 runtime 目录完整",
-    "   - 把 wiki-agent-service.exe 加入杀软白名单并允许联网",
+    "   - 确认 runtime 目录完整（尤其是 dist/）",
+    "   - 把 runtime 里的 exe 加入杀软白名单并允许联网",
     "   - 查看同目录 wiki-agent-desktop.log / wiki-agent-service.log",
     "",
   ].join("\r\n"),
