@@ -16,7 +16,7 @@ import { ImportDialog, type ImportChoice } from "@/components/import-dialog";
 import { LanguageSwitch } from "@/components/language-switch";
 import { NotifyBell } from "@/components/notify-bell";
 import { PageTree } from "@/components/page-tree";
-import { AppUpdate } from "@/components/app-update";
+import { AppUpdateProvider } from "@/components/app-update";
 import { SettingsMenu } from "@/components/settings-menu";
 import { TeamDialog } from "@/components/team-dialog";
 import { SyncChecklistDialog, SyncSummaryDialog } from "@/components/sync-dialogs";
@@ -1181,6 +1181,7 @@ export function App() {
   }
 
   return (
+    <AppUpdateProvider>
     <div
       /* 整个外壳钉在“可视视口”上（top 跟随 offsetTop、height = 可视高度）：
          键盘弹出 / iOS 平移可视视口露光标时，外壳始终精确覆盖用户看到的那块区域，
@@ -1327,7 +1328,6 @@ export function App() {
             />
           ) : null}
           </div>
-          <AppUpdate />
         </div>
         <div
           role="separator"
@@ -1743,5 +1743,6 @@ export function App() {
         onConfirm={() => void confirmSync()}
       />
     </div>
+    </AppUpdateProvider>
   );
 }

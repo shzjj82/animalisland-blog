@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -27,15 +27,59 @@ async function lookForUpdate(): Promise<UpdateHandle | null> {
   return check();
 }
 
-/** 桌面安装包里检查 OSS 上的 latest.json，下载签名包并安装 */
-export function AppUpdate() {
+const CheckContext = createContext<(() => void) | null>(null);
+
+/**
+ * 桌面安装包里检查 OSS 上的 latest.json。
+ * 入口不画在页面上，由菜单栏和用户菜单调用 check。发现新版本时才弹出安装对话框。
+ */
+export function AppUpdateProvider({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
   const desktop = isDesktopApp();
   const [open, setOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [update, setUpdate] = useState<UpdateHandle | null>(null);
+  const updateRef = useRef<UpdateHandle | null>(null);
   const [percent, setPercent] = useState(0);
   const [message, setMessage] = useState("");
+
+  const remember = useCallback((next: UpdateHandle | null) => {
+    updateRef.current = next;
+    setUpdate(next);
+  }, []);
+
+  const closeUpdate = useCallback(async () => {
+    const current = updateRef.current;
+    remember(null);
+    setOpen(false);
+    setPhase("idle");
+    if (current) {
+      await current.close().catch(() => undefined);
+    }
+  }, [remember]);
+
+  const checkNow = useCallback(async () => {
+    setMessage("");
+    setPhase("checking");
+    setOpen(true);
+    const previous = updateRef.current;
+    remember(null);
+    if (previous) {
+      await previous.close().catch(() => undefined);
+    }
+    try {
+      const found = await lookForUpdate();
+      if (!found) {
+        setPhase("current");
+        return;
+      }
+      remember(found);
+      setPhase("ready");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : t("appUpdate.failed"));
+      setPhase("error");
+    }
+  }, [remember, t]);
 
   useEffect(() => {
     if (!desktop) {
@@ -47,7 +91,7 @@ export function AppUpdate() {
         if (cancelled || !found) {
           return;
         }
-        setUpdate(found);
+        remember(found);
         setPhase("ready");
         setOpen(true);
       })
@@ -57,43 +101,29 @@ export function AppUpdate() {
     return () => {
       cancelled = true;
     };
-  }, [desktop]);
+  }, [desktop, remember]);
 
-  if (!desktop) {
-    return null;
-  }
-
-  const closeUpdate = async () => {
-    const current = update;
-    setUpdate(null);
-    setOpen(false);
-    setPhase("idle");
-    if (current) {
-      await current.close().catch(() => undefined);
+  useEffect(() => {
+    if (!desktop) {
+      return;
     }
-  };
-
-  const checkNow = async () => {
-    setMessage("");
-    setPhase("checking");
-    setOpen(true);
-    try {
-      if (update) {
-        await update.close().catch(() => undefined);
-        setUpdate(null);
-      }
-      const found = await lookForUpdate();
-      if (!found) {
-        setPhase("current");
-        return;
-      }
-      setUpdate(found);
-      setPhase("ready");
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : t("appUpdate.failed"));
-      setPhase("error");
-    }
-  };
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) => listen("app-update-check", () => void checkNow()))
+      .then((stop) => {
+        if (cancelled) {
+          void stop();
+          return;
+        }
+        unlisten = stop;
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [checkNow, desktop]);
 
   const install = async () => {
     if (!update) {
@@ -125,53 +155,62 @@ export function AppUpdate() {
   };
 
   return (
-    <>
-      <Button type="button" variant="ghost" size="sm" className="h-7 w-full justify-start px-2 text-xs" onClick={() => void checkNow()}>
-        {t("appUpdate.check")}
-      </Button>
-      <Dialog
-        open={open}
-        onOpenChange={(next) => {
-          if (!next && phase !== "downloading" && phase !== "installing") {
-            void closeUpdate();
-          }
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {phase === "checking" ? t("appUpdate.checking") : null}
-              {phase === "current" ? t("appUpdate.upToDate") : null}
-              {phase === "ready" && update ? t("appUpdate.available", { version: update.version }) : null}
-              {phase === "downloading" ? t("appUpdate.downloading", { percent }) : null}
-              {phase === "installing" ? t("appUpdate.installing") : null}
-              {phase === "error" ? t("appUpdate.failedTitle") : null}
-            </DialogTitle>
-            <DialogDescription>
-              {phase === "ready" ? update?.body || t("appUpdate.notes") : null}
-              {phase === "error" ? message : null}
-              {phase === "current" ? t("appUpdate.upToDateHint") : null}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            {phase === "ready" ? (
-              <>
-                <Button type="button" variant="outline" onClick={() => void closeUpdate()}>
-                  {t("appUpdate.later")}
+    <CheckContext.Provider value={desktop ? () => void checkNow() : null}>
+      {children}
+      {desktop ? (
+        <Dialog
+          open={open}
+          onOpenChange={(next) => {
+            if (!next && phase !== "downloading" && phase !== "installing") {
+              void closeUpdate();
+            }
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                {phase === "checking" ? t("appUpdate.checking") : null}
+                {phase === "current" ? t("appUpdate.upToDate") : null}
+                {phase === "ready" && update ? t("appUpdate.available", { version: update.version }) : null}
+                {phase === "downloading" ? t("appUpdate.downloading", { percent }) : null}
+                {phase === "installing" ? t("appUpdate.installing") : null}
+                {phase === "error" ? t("appUpdate.failedTitle") : null}
+              </DialogTitle>
+              <DialogDescription>
+                {phase === "ready" ? update?.body || t("appUpdate.notes") : null}
+                {phase === "error" ? message : null}
+                {phase === "current" ? t("appUpdate.upToDateHint") : null}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              {phase === "ready" ? (
+                <>
+                  <Button type="button" variant="outline" onClick={() => void closeUpdate()}>
+                    {t("appUpdate.later")}
+                  </Button>
+                  <Button type="button" onClick={() => void install()}>
+                    {t("appUpdate.install")}
+                  </Button>
+                </>
+              ) : null}
+              {phase === "current" || phase === "error" ? (
+                <Button type="button" onClick={() => void closeUpdate()}>
+                  {t("appUpdate.close")}
                 </Button>
-                <Button type="button" onClick={() => void install()}>
-                  {t("appUpdate.install")}
-                </Button>
-              </>
-            ) : null}
-            {phase === "current" || phase === "error" ? (
-              <Button type="button" onClick={() => void closeUpdate()}>
-                {t("appUpdate.close")}
-              </Button>
-            ) : null}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+              ) : null}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+    </CheckContext.Provider>
   );
+}
+
+/** 网页版没有更新通道，调用处什么都不渲染 */
+export function CheckUpdateSlot({ children }: { children: (check: () => void) => ReactNode }) {
+  const check = useContext(CheckContext);
+  if (!check) {
+    return null;
+  }
+  return children(check);
 }

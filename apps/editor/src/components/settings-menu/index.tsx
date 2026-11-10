@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Lock, Logout, More } from "@icon-park/react";
+import { Lock, Logout, More, Refresh } from "@icon-park/react";
+import { CheckUpdateSlot } from "@/components/app-update";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverSeparator, PopoverTrigger } from "@/components/ui/popover";
@@ -97,6 +98,21 @@ export function SettingsMenu({
           </button>
         ) : null}
         <PopoverSeparator />
+        <CheckUpdateSlot>
+          {(check) => (
+            <button
+              type="button"
+              className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-muted"
+              onClick={() => {
+                setOpen(false);
+                check();
+              }}
+            >
+              <Refresh {...iconProps} size={14} />
+              {t("appUpdate.check")}
+            </button>
+          )}
+        </CheckUpdateSlot>
         <button
           type="button"
           className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-muted"

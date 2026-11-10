@@ -9,6 +9,36 @@ mod export_cmd;
 
 use tauri::Manager;
 
+const CHECK_UPDATE_MENU_ID: &str = "check-update";
+
+/// macOS 应用菜单（About / Services / Hide / Quit）里加「检查更新」，其余默认菜单保留。
+#[cfg(target_os = "macos")]
+fn install_check_update_menu(app: &tauri::App) {
+    use tauri::Emitter;
+    use tauri::menu::{Menu, MenuItem, MenuItemKind};
+
+    let Ok(menu) = Menu::default(app.handle()) else {
+        return;
+    };
+    let Ok(items) = menu.items() else {
+        return;
+    };
+    let Some(MenuItemKind::Submenu(app_menu)) = items.into_iter().next() else {
+        return;
+    };
+    let Ok(check) = MenuItem::with_id(app, CHECK_UPDATE_MENU_ID, "检查更新", true, None::<&str>) else {
+        return;
+    };
+    if app_menu.insert(&check, 1).is_err() || app.set_menu(menu).is_err() {
+        return;
+    }
+    app.on_menu_event(|app, event| {
+        if event.id().as_ref() == CHECK_UPDATE_MENU_ID {
+            let _ = app.emit("app-update-check", ());
+        }
+    });
+}
+
 struct DesktopServer(Mutex<Option<Child>>);
 
 #[cfg(target_os = "windows")]
@@ -309,6 +339,8 @@ pub fn run() {
             export_cmd::export_pdf,
         ])
         .setup(|app| -> Result<(), Box<dyn std::error::Error>> {
+            #[cfg(target_os = "macos")]
+            install_check_update_menu(app);
             let Some(window) = app.get_webview_window("main") else {
                 return Ok(());
             };
