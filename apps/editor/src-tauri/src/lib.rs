@@ -1,8 +1,8 @@
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::{mpsc, Mutex};
+use std::sync::{mpsc, Mutex, OnceLock};
 use std::time::Duration;
 
 mod export_cmd;
@@ -56,6 +56,43 @@ fn exe_dir() -> Option<PathBuf> {
         .and_then(|exe| exe.parent().map(|dir| dir.to_path_buf()))
 }
 
+/// 可写目录：macOS 从 dmg / Downloads 直接打开会走 App Translocation，
+/// `.app` 在只读临时路径里，不能把日志写到 exe 旁边。
+static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+fn dir_is_writable(dir: &Path) -> bool {
+    let probe = dir.join(".wiki-agent-write-test");
+    match OpenOptions::new().create(true).write(true).truncate(true).open(&probe) {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+fn resolve_data_dir(app: &tauri::App) -> PathBuf {
+    if let Ok(dir) = app.path().app_log_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        if dir_is_writable(&dir) {
+            return dir;
+        }
+    }
+    if let Ok(dir) = app.path().app_data_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        if dir_is_writable(&dir) {
+            return dir;
+        }
+    }
+    let tmp = std::env::temp_dir().join("wiki-agent");
+    let _ = std::fs::create_dir_all(&tmp);
+    tmp
+}
+
+fn data_dir(app: &tauri::App) -> PathBuf {
+    DATA_DIR.get_or_init(|| resolve_data_dir(app)).clone()
+}
+
 /// Windows 扩展路径前缀 `\\?\` 传给 Node 会把入口脚本解析坏（报 EISDIR lstat 'D:'）。
 /// 启动子进程前剥掉，改回普通盘符/UNC 路径。
 fn for_child_path(path: &std::path::Path) -> PathBuf {
@@ -77,13 +114,12 @@ fn for_child_path(path: &std::path::Path) -> PathBuf {
 }
 
 fn append_log(message: &str) {
-    let Some(dir) = exe_dir() else {
-        eprintln!("{message}");
-        return;
-    };
-    let path = dir.join("wiki-agent-desktop.log");
-    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
-        let _ = writeln!(file, "{message}");
+    let dir = DATA_DIR.get().cloned().or_else(exe_dir);
+    if let Some(dir) = dir {
+        let path = dir.join("wiki-agent-desktop.log");
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
+            let _ = writeln!(file, "{message}");
+        }
     }
     eprintln!("{message}");
 }
@@ -159,7 +195,7 @@ fn missing_resource_hint(app: &tauri::App, name: &str) -> String {
       dist/\n\n\
 已查找：\n{tried}\n\n\
 若文件都在，请检查杀软是否隔离了 wiki-agent-service.exe。\n\
-详情见同目录 wiki-agent-desktop.log"
+详情见日志目录里的 wiki-agent-desktop.log"
     )
 }
 
@@ -183,6 +219,7 @@ fn read_port_marker(path: &PathBuf) -> Option<u16> {
 }
 
 fn start_desktop_server(app: &tauri::App) -> Result<u16, String> {
+    let data_dir = data_dir(app);
     let node_raw = bundled_node(app).ok_or_else(|| missing_resource_hint(app, NODE_NAME))?;
     let script_raw = bundled_path(app, "desktop-server.mjs")
         .ok_or_else(|| missing_resource_hint(app, "desktop-server.mjs"))?;
@@ -198,20 +235,19 @@ fn start_desktop_server(app: &tauri::App) -> Result<u16, String> {
         .parent()
         .map(|dir| dir.to_path_buf())
         .unwrap_or_else(|| dist.parent().unwrap_or(dist.as_path()).to_path_buf());
-    let port_marker = runtime_dir.join(".desktop-port");
+    let port_marker = data_dir.join(".desktop-port");
     let _ = std::fs::remove_file(&port_marker);
 
     append_log(&format!(
-        "starting service node={} script={} dist={} cwd={}",
+        "starting service node={} script={} dist={} cwd={} data={}",
         node.display(),
         script.display(),
         dist.display(),
-        runtime_dir.display()
+        runtime_dir.display(),
+        data_dir.display()
     ));
 
-    let log_path = exe_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("wiki-agent-service.log");
+    let log_path = data_dir.join("wiki-agent-service.log");
     let stderr_file = OpenOptions::new()
         .create(true)
         .append(true)
@@ -222,6 +258,7 @@ fn start_desktop_server(app: &tauri::App) -> Result<u16, String> {
     cmd.arg(&script)
         .arg(&dist)
         .current_dir(&runtime_dir)
+        .env("EDITOR_DATA_DIR", &data_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::from(stderr_file));
@@ -279,10 +316,7 @@ fn start_desktop_server(app: &tauri::App) -> Result<u16, String> {
 子进程状态：{status:?}\n\
 请查看：\n  {}\n  {}{log_hint}",
                 log_path.display(),
-                exe_dir()
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join("wiki-agent-desktop.log")
-                    .display()
+                data_dir.join("wiki-agent-desktop.log").display()
             ));
         }
         match rx.recv_timeout(Duration::from_millis(100)) {

@@ -19,7 +19,9 @@ try {
     // ignore
   }
   try {
-    const marker = path.join(path.dirname(path.resolve(distDir)), ".desktop-port");
+    const dataDir = process.env.EDITOR_DATA_DIR?.trim() || path.dirname(path.resolve(distDir));
+    fs.mkdirSync(dataDir, { recursive: true });
+    const marker = path.join(dataDir, ".desktop-port");
     fs.writeFileSync(marker, String(port), "utf8");
   } catch (err) {
     console.error(`[desktop-server] 写端口标记失败: ${err instanceof Error ? err.message : err}`);
