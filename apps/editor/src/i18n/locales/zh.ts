@@ -433,6 +433,7 @@ export const zh = {
     history: "历史记录",
     newChat: "新对话",
     historyEmpty: "还没有保存的对话。",
+    historyLoadFailed: "加载会话失败。",
     historyNoMatch: "没有匹配的对话。",
     historySearch: "搜索对话",
     historyToday: "今天",

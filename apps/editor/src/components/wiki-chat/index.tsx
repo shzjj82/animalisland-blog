@@ -5,7 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { ChatMarkdown } from "@/components/editor-spotlight/ChatMarkdown";
 import { PendingAttachments } from "@/components/editor-spotlight/ChatAttachments";
-import { aiChat } from "@/lib/ai/client";
+import {
+  aiChat,
+  deleteAgentConversation,
+  getAgentConversation,
+  listAgentConversations,
+} from "@/lib/ai/client";
 import {
   AI_FILE_ACCEPT,
   aiErrorMessage,
@@ -33,12 +38,10 @@ import { fileExtension } from "@/lib/document/fileKinds";
 import { pageTodos, retrieveWiki, type SearchDoc } from "@/lib/document/search";
 import { copyText } from "@/lib/clipboard";
 import {
-  deleteThread,
-  findThread,
+  detailToThread,
   loadActiveThreadId,
-  loadThreads,
   saveActiveThreadId,
-  upsertThread,
+  summaryToThread,
   type WikiThread,
 } from "@/lib/ai/wikiChatHistory";
 import { iconParkOutline } from "@/lib/iconPark";
@@ -227,13 +230,10 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
   const [frame, setFrame] = useState<Frame>(() => (typeof window === "undefined" ? { x: 24, y: 24, w: 400, h: DEFAULT_H } : loadFrame()));
   const [prompt, setPrompt] = useState("");
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
-  const [threadId, setThreadId] = useState<string | null>(() => loadActiveThreadId());
-  const [threads, setThreads] = useState<WikiThread[]>(() => loadThreads());
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const [threads, setThreads] = useState<WikiThread[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [bubbles, setBubbles] = useState<ChatBubble[]>(() => {
-    const active = loadActiveThreadId();
-    return active ? findThread(active)?.bubbles ?? [] : [];
-  });
+  const [bubbles, setBubbles] = useState<ChatBubble[]>([]);
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
@@ -248,6 +248,8 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
   const abortRef = useRef<AbortController | null>(null);
   const copiedTimer = useRef(0);
   const dragRef = useRef<{ pointer: number; x: number; y: number; start: Frame; mode: DragMode } | null>(null);
+  const sendingRef = useRef(false);
+  sendingRef.current = sending;
 
   useEffect(() => {
     if (!open) {
@@ -296,15 +298,65 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
   }, [frame, open]);
 
   useEffect(() => {
-    if (sending) {
+    if (!open || !loggedIn) {
+      if (!loggedIn) {
+        setThreads([]);
+        setThreadId(null);
+        setBubbles([]);
+      }
       return;
     }
-    const id = upsertThread(threadId, bubbles, tr("wikiAsk.untitledChat"));
-    if (id && id !== threadId) {
-      setThreadId(id);
+    const untitled = tr("wikiAsk.untitledChat");
+    let cancelled = false;
+    void (async () => {
+      try {
+        const list = await listAgentConversations(untitled);
+        if (cancelled) {
+          return;
+        }
+        setThreads(list.map(summaryToThread));
+        const active = loadActiveThreadId();
+        if (!active || sendingRef.current) {
+          return;
+        }
+        if (!list.some((item) => item.id === active)) {
+          return;
+        }
+        const detail = await getAgentConversation(active, untitled);
+        if (cancelled || sendingRef.current) {
+          return;
+        }
+        const thread = detailToThread(detail);
+        setThreadId(thread.id);
+        setBubbles(thread.bubbles);
+      } catch {
+        if (!cancelled) {
+          setError((prev) => prev || tr("wikiAsk.historyLoadFailed"));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, loggedIn, tr]);
+
+  useEffect(() => {
+    if (!open || !loggedIn || !historyOpen) {
+      return;
     }
-    setThreads(loadThreads());
-  }, [bubbles, sending, threadId, tr]);
+    const untitled = tr("wikiAsk.untitledChat");
+    let cancelled = false;
+    void listAgentConversations(untitled)
+      .then((list) => {
+        if (!cancelled) {
+          setThreads(list.map(summaryToThread));
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [open, loggedIn, historyOpen, tr]);
 
   if (!open) {
     return null;
@@ -313,6 +365,19 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
   const persistGrants = (next: SkillGrants) => {
     setGrants(next);
     saveSkillGrants(next);
+  };
+
+  const rememberConversation = (id: string | null | undefined) => {
+    if (!id) {
+      return;
+    }
+    setThreadId(id);
+    saveActiveThreadId(id);
+  };
+
+  const refreshThreads = async () => {
+    const list = await listAgentConversations(tr("wikiAsk.untitledChat"));
+    setThreads(list.map(summaryToThread));
   };
 
   const startNewChat = () => {
@@ -329,36 +394,49 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
   };
 
   const openThread = (id: string) => {
-    const thread = findThread(id);
-    if (!thread) {
-      return;
-    }
     abortRef.current?.abort();
     setSending(false);
     setPendingSkills([]);
     setError("");
     setPrompt("");
     setAttachments([]);
-    setBubbles(thread.bubbles);
-    setThreadId(thread.id);
-    saveActiveThreadId(thread.id);
+    rememberConversation(id);
+    void (async () => {
+      try {
+        const detail = await getAgentConversation(id, tr("wikiAsk.untitledChat"));
+        const thread = detailToThread(detail);
+        setBubbles(thread.bubbles);
+        setThreads((prev) => {
+          const rest = prev.filter((item) => item.id !== thread.id);
+          return [thread, ...rest];
+        });
+      } catch {
+        setError(tr("wikiAsk.historyLoadFailed"));
+      }
+    })();
   };
 
   const removeThread = (id: string) => {
-    deleteThread(id);
-    setThreads(loadThreads());
-    if (threadId !== id) {
-      return;
-    }
-    abortRef.current?.abort();
-    setSending(false);
-    setPendingSkills([]);
-    setError("");
-    setPrompt("");
-    setAttachments([]);
-    setBubbles([]);
-    setThreadId(null);
-    saveActiveThreadId(null);
+    void (async () => {
+      try {
+        await deleteAgentConversation(id);
+        setThreads((prev) => prev.filter((item) => item.id !== id));
+        if (threadId !== id) {
+          return;
+        }
+        abortRef.current?.abort();
+        setSending(false);
+        setPendingSkills([]);
+        setError("");
+        setPrompt("");
+        setAttachments([]);
+        setBubbles([]);
+        setThreadId(null);
+        saveActiveThreadId(null);
+      } catch {
+        setError(tr("wikiAsk.historyLoadFailed"));
+      }
+    })();
   };
 
   const beginDrag = (event: React.PointerEvent, mode: DragMode) => {
@@ -467,11 +545,13 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
           }
         }
       }
+      const lastUser = [...messages].reverse().find((item) => item.role === "user");
       const result = await aiChat(
         {
-          messages,
+          messages: lastUser ? [lastUser] : messages.slice(-1),
           attachments: capImages(uploadedFiles),
           system: desktop ? `${t("wikiAsk.system")}\n${SKILL_SYSTEM}` : t("wikiAsk.system"),
+          conversationId: threadId,
           rag: !aboutTodos,
         },
         controller.signal,
@@ -488,6 +568,8 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
       if (desktop && parsed.skills.length) {
         setPendingSkills(parsed.skills);
       }
+      rememberConversation(result.conversationId);
+      void refreshThreads().catch(() => undefined);
     } catch (err) {
       if (controller.signal.aborted) {
         return;

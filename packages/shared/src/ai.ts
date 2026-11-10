@@ -19,6 +19,7 @@ export type AiChatInput = {
 
 export type AiChatResult = {
   reply: string;
+  conversationId?: string;
 };
 
 export type AiToEditorInput = {

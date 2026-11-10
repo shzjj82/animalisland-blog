@@ -435,6 +435,7 @@ export const en: Messages = {
     history: "History",
     newChat: "New chat",
     historyEmpty: "No saved chats yet.",
+    historyLoadFailed: "Couldn't load chats.",
     historyNoMatch: "No matching chats.",
     historySearch: "Search chats",
     historyToday: "Today",
