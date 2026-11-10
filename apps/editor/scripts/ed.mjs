@@ -476,15 +476,22 @@ async function ensureLocalAsset(version, asset, flags) {
   return dest;
 }
 
-/** 传完立刻用公共域名验一次：HEAD 拿大小、Range 拿前 1KB，确认真的能下 */
+/**
+ * 传完立刻用公共域名验一次：HEAD 拿大小、Range 拿一段，确认真的能下。
+ * 阿里云 OSS 在 Range 右端超出对象长度时回 200 整包而不是 206，
+ * 签名文件只有几百字节，固定请求 0-1023 会被当成越界。
+ */
 async function verifyPublic(url, expect) {
   const head = await fetch(url, { method: "HEAD" });
   if (!head.ok) return { ok: false, why: `HEAD ${head.status}` };
   const size = Number(head.headers.get("content-length") || 0);
   if (expect && size !== expect) return { ok: false, why: `大小 ${size} ≠ ${expect}` };
-  const range = await fetch(url, { headers: { range: "bytes=0-1023" } });
+  if (size < 1) return { ok: false, why: "空文件" };
+  const end = Math.min(1023, size - 1);
+  const range = await fetch(url, { headers: { range: `bytes=0-${end}` } });
   if (range.status !== 206) return { ok: false, why: `Range ${range.status}（不支持断点续传）` };
-  await range.arrayBuffer();
+  const got = (await range.arrayBuffer()).byteLength;
+  if (got !== end + 1) return { ok: false, why: `Range 长度 ${got} ≠ ${end + 1}` };
   return { ok: true, size };
 }
 
