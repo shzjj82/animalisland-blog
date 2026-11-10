@@ -24,8 +24,25 @@ const GROUP_KEY = {
   older: "wikiAsk.historyOlder",
 } as const;
 
+function formatCardTime(value: number, locale: string, group: HistoryGroupId): string {
+  if (!value) {
+    return "";
+  }
+  try {
+    if (group === "today" || group === "yesterday") {
+      return new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }).format(value);
+    }
+    if (group === "week") {
+      return new Intl.DateTimeFormat(locale, { weekday: "short", hour: "2-digit", minute: "2-digit" }).format(value);
+    }
+    return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }).format(value);
+  } catch {
+    return "";
+  }
+}
+
 export function HistoryPanel({ threads, activeId, onNew, onOpen, onDelete }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [query, setQuery] = useState("");
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -63,22 +80,26 @@ export function HistoryPanel({ threads, activeId, onNew, onOpen, onDelete }: Pro
           groups.map((group) => (
             <section key={group.id} className="mt-2">
               <h2 className="text-muted-foreground px-2 pb-0.5 text-[10px] font-medium tracking-wide">{t(GROUP_KEY[group.id])}</h2>
-              <ul>
+              <ul className="space-y-1">
                 {group.items.map((thread) => {
                   const preview = threadPreview(thread);
                   const current = thread.id === activeId;
+                  const when = formatCardTime(thread.updatedAt, i18n.language, group.id);
                   return (
                     <li key={thread.id}>
-                      <div className={`group flex items-stretch rounded-lg ${current ? "bg-background shadow-sm" : "hover:bg-background/70"}`}>
-                        <button type="button" className="min-w-0 flex-1 px-2 py-1.5 text-left" onClick={() => onOpen(thread.id)}>
-                          <span className="block truncate text-[13px] font-medium">{thread.title}</span>
-                          {preview ? <span className="text-muted-foreground mt-0.5 block truncate text-[11px] leading-4">{preview}</span> : null}
+                      <div className={`group flex items-stretch rounded-xl ${current ? "bg-background shadow-sm" : "hover:bg-background/70"}`}>
+                        <button type="button" className="min-w-0 flex-1 px-2.5 py-2.5 text-left" onClick={() => onOpen(thread.id)}>
+                          <span className="flex items-baseline justify-between gap-2">
+                            <span className="min-w-0 truncate text-[13px] font-medium">{thread.title}</span>
+                            {when ? <span className="text-muted-foreground shrink-0 text-[10px] tabular-nums">{when}</span> : null}
+                          </span>
+                          {preview ? <span className="text-muted-foreground mt-1 line-clamp-2 text-[11px] leading-4">{preview}</span> : <span className="mt-1 block h-4" />}
                         </button>
                         <Button
                           type="button"
                           variant="ghost"
                           size="icon-xs"
-                          className="text-muted-foreground mr-0.5 self-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                          className="text-muted-foreground mr-1 self-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
                           aria-label={t("wikiAsk.deleteChat")}
                           onClick={() => onDelete(thread.id)}
                         >

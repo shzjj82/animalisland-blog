@@ -92,6 +92,7 @@ export const zh = {
     loadFailed: "无法加载通知",
     actionFailed: "操作失败",
     liveOn: "实时通知已连接",
+    pageMissing: "找不到这条待办所在的页面。",
     liveOff: "实时通知未连接",
   },
   fileDrop: {

@@ -66,7 +66,6 @@ export function NotifyBell({ session, className, onWriteTodo }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<NotifySnapshot | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [live, setLive] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!session) {
@@ -84,18 +83,15 @@ export function NotifyBell({ session, className, onWriteTodo }: Props) {
   useEffect(() => {
     if (!session) {
       setSnapshot(null);
-      setLive(false);
       return;
     }
     void refresh();
     const stopSocket = connectNotifySocket(session, (event) => {
       if (event.type === "ready") {
-        setLive(true);
         void refresh();
         return;
       }
       if (event.type === "error") {
-        setLive(false);
         return;
       }
       if (event.type === "event") {
@@ -110,7 +106,6 @@ export function NotifyBell({ session, className, onWriteTodo }: Props) {
     });
     return () => {
       stopSocket();
-      setLive(false);
     };
   }, [session, refresh]);
 
@@ -187,8 +182,7 @@ export function NotifyBell({ session, className, onWriteTodo }: Props) {
           aria-label={t("notify.title")}
         >
           <Remind {...iconParkOutline} size={16} />
-          {badge > 0 ? <span className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-red-500" /> : null}
-          {live ? <span className="absolute right-0.5 bottom-0.5 size-1.5 rounded-full bg-emerald-500" title={t("notify.liveOn")} /> : null}
+          {badge > 0 ? <span className="absolute top-1 right-1 size-1.5 rounded-full bg-red-500" /> : null}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-[min(20rem,calc(100vw-1.5rem))] overflow-hidden p-0">

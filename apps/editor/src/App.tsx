@@ -53,8 +53,7 @@ import {
   type SyncPlan,
 } from "@/store/localSync";
 import {
-  documentFromTodo,
-  readTodoPageMap,
+  pageIdFromTodo,
   rememberTodoPage,
   type NotifyTodo,
 } from "@/store/notifyStore";
@@ -701,20 +700,12 @@ export function App() {
       throw new Error(t("notify.actionFailed"));
     }
     setError("");
-    const mappedId = readTodoPageMap()[todo.id];
-    if (mappedId && nodes.some((node) => node.id === mappedId)) {
-      await refreshRemote(session, mappedId);
-      return;
+    const pageId = pageIdFromTodo(todo);
+    if (!pageId) {
+      throw new Error(t("notify.pageMissing"));
     }
-    const writingTeam = activeTeamId && canWriteTeam(teams.find((team) => team.id === activeTeamId)?.role) ? activeTeamId : null;
-    const body = documentFromTodo(todo);
-    const created = await createRemote(session, null, writingTeam, {
-      title: todo.title.trim() || t("notify.untitled"),
-      body,
-      props: { sourceTodoId: todo.id },
-    });
-    rememberTodoPage(todo.id, created.id);
-    await refreshRemote(session, created.id);
+    rememberTodoPage(todo.id, pageId);
+    await openPage(pageId);
   }
 
   async function readImport(file: File) {
@@ -1542,6 +1533,7 @@ export function App() {
             <BlockEditor
               key={`${remote ? "remote" : "local"}:${page.id}:${editorEpoch}:${i18n.language}:${pageReadOnly ? "ro" : "rw"}`}
               doc={page.body}
+              pageId={page.id}
               readOnly={pageReadOnly}
               onChange={onEdit}
               onOpenPage={(id) => void openPage(id)}

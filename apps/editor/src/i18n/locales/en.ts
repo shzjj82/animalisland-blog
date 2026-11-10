@@ -94,6 +94,7 @@ export const en: Messages = {
     loadFailed: "Couldn't load notifications",
     actionFailed: "Action failed",
     liveOn: "Live notifications connected",
+    pageMissing: "Couldn't find the page for this todo.",
     liveOff: "Live notifications offline",
   },
   fileDrop: {

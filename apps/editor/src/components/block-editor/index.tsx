@@ -109,6 +109,7 @@ async function insertPastedImages(
 
 type Props = {
   doc: EditorJsDocument;
+  pageId?: string;
   onChange: (document: EditorJsDocument) => void;
   onOpenPage?: (pageId: string) => void;
   onCreateChild?: () => Promise<PageLinkData>;
@@ -129,7 +130,7 @@ type Props = {
   barSlot?: HTMLElement | null;
 };
 
-export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolvePageTitle, onReady, onAi, onAskSelection, onUploadFile, onUploadError, onOpenFile, onConfirmDeleteFile, reveal, readOnly = false, onHistory, barSlot }: Props) {
+export function BlockEditor({ doc, pageId, onChange, onOpenPage, onCreateChild, resolvePageTitle, onReady, onAi, onAskSelection, onUploadFile, onUploadError, onOpenFile, onConfirmDeleteFile, reveal, readOnly = false, onHistory, barSlot }: Props) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const viewport = useVisualViewport();
@@ -168,6 +169,8 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
   onOpenFileRef.current = onOpenFile;
   const onConfirmDeleteRef = useRef(onConfirmDeleteFile);
   onConfirmDeleteRef.current = onConfirmDeleteFile;
+  const pageIdRef = useRef(pageId);
+  pageIdRef.current = pageId;
   const readOnlyRef = useRef(readOnly);
   readOnlyRef.current = readOnly;
   const initialRef = useRef(doc);
@@ -223,6 +226,9 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
         },
         todo: {
           class: TodoBlockTool as unknown as typeof Header,
+          config: {
+            getPageId: () => pageIdRef.current ?? "",
+          },
         },
         quote: {
           class: Quote,

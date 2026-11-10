@@ -141,3 +141,11 @@ export function rememberTodoPage(todoId: string, pageId: string): void {
   const next = { ...readTodoPageMap(), [todoId]: pageId };
   localStorage.setItem(TODO_PAGE_KEY, JSON.stringify(next));
 }
+
+export function pageIdFromTodo(todo: NotifyTodo): string | null {
+  const fromData = todo.data?.pageId;
+  if (typeof fromData === "string" && fromData.trim()) {
+    return fromData.trim();
+  }
+  return readTodoPageMap()[todo.id] ?? null;
+}

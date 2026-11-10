@@ -1,6 +1,6 @@
 import type { API, BlockAPI, BlockTool, BlockToolConstructorOptions } from "@editorjs/editorjs";
 import { appLocale, t } from "@/i18n";
-import { createTodo, markTodoDone, updateTodo, type UpsertTodoInput } from "@/store/notifyStore";
+import { createTodo, markTodoDone, rememberTodoPage, updateTodo, type UpsertTodoInput } from "@/store/notifyStore";
 import { loadSession } from "@/store/remoteStore";
 import { menuIcons } from "../menuIcons";
 
@@ -117,7 +117,7 @@ function dueAtFromItem(item: TodoItem): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-function upsertPayload(item: TodoItem): UpsertTodoInput | null {
+function upsertPayload(item: TodoItem, pageId: string): UpsertTodoInput | null {
   const title = item.text.trim().slice(0, 120);
   if (!title) return null;
   return {
@@ -128,6 +128,7 @@ function upsertPayload(item: TodoItem): UpsertTodoInput | null {
     dueAt: dueAtFromItem(item),
     data: {
       localItemId: item.id,
+      pageId: pageId || null,
       start: item.start || null,
       end: item.end || null,
     },
@@ -253,12 +254,15 @@ export class TodoBlockTool implements BlockTool {
   private leaveTimers: number[] = [];
   private heightFrame = 0;
   private syncing = false;
+  private getPageId: () => string;
 
-  constructor({ data, readOnly, block, api }: BlockToolConstructorOptions<TodoData>) {
+  constructor({ data, readOnly, block, api, config }: BlockToolConstructorOptions<TodoData>) {
     this.data = normalize(data);
     this.readOnly = Boolean(readOnly);
     this.block = block;
     this.api = api;
+    const getPageId = (config as { getPageId?: () => string } | undefined)?.getPageId;
+    this.getPageId = typeof getPageId === "function" ? getPageId : () => "";
     this.wrapper.className = "cdx-todo";
     this.wrapper.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === "Backspace") {
@@ -332,14 +336,21 @@ export class TodoBlockTool implements BlockTool {
           }
           continue;
         }
-        const payload = upsertPayload(item);
+        const pageId = this.getPageId().trim();
+        const payload = upsertPayload(item, pageId);
         if (!payload) continue;
         try {
           if (item.remoteId) {
             await updateTodo(session, item.remoteId, payload);
+            if (pageId) {
+              rememberTodoPage(item.remoteId, pageId);
+            }
           } else {
             const created = await createTodo(session, payload);
             item.remoteId = created.id;
+            if (pageId) {
+              rememberTodoPage(created.id, pageId);
+            }
             changed = true;
           }
         } catch (err) {
