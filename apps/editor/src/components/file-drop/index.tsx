@@ -1,6 +1,7 @@
 import { useRef, useState, type DragEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Upload } from "@icon-park/react";
+import { SoftScrollbar } from "@/components/soft-scrollbar";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -66,7 +67,9 @@ export function FileDropZone({ hasPage, className, children, onDrop }: Props) {
         }
       }}
     >
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain">{children}</div>
+      <SoftScrollbar className="min-h-0 flex-1" jumpToBottomLabel={t("common.scrollToBottom")}>
+        {children}
+      </SoftScrollbar>
       {active ? (
         <div className="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-xl border-2 border-dashed border-foreground/30 bg-background/85">
           <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">

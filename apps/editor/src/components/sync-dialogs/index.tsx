@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { SoftScrollbar } from "@/components/soft-scrollbar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -122,7 +123,8 @@ export function SyncChecklistDialog({
           <Checkbox checked={allOn} disabled={syncing} onCheckedChange={(value) => onToggleAll(value === true)} />
           {t("syncDialogs.selectAll")}
         </Label>
-        <ul className="grid max-h-72 gap-1 overflow-y-auto rounded-md border border-border p-1">
+        <SoftScrollbar className="max-h-72 rounded-md border border-border" contentClassName="grid gap-1 p-1">
+        <ul>
           {items.map((item) => {
             const forced = required.has(item.key);
             const on = forced || picked.has(item.key);
@@ -144,6 +146,7 @@ export function SyncChecklistDialog({
             );
           })}
         </ul>
+        </SoftScrollbar>
         {error ? (
           <p className="text-sm text-destructive">
             {t("syncDialogs.retryHint", { error })}

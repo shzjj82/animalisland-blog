@@ -44,6 +44,7 @@ import {
 import { iconParkOutline } from "@/lib/iconPark";
 import { t } from "@/i18n";
 import { useTranslation } from "react-i18next";
+import { SoftScrollbar } from "@/components/soft-scrollbar";
 import { HistoryPanel, HISTORY_SIDEBAR_W } from "./HistoryPanel";
 
 type Props = {
@@ -117,6 +118,24 @@ function clampFrame(frame: Frame): Frame {
     x: Math.min(Math.max(8, frame.x), Math.max(8, window.innerWidth - w - 8)),
     y: Math.min(Math.max(8, frame.y), Math.max(8, window.innerHeight - h - 8)),
   };
+}
+
+type ResizeCorner = "nw" | "ne" | "sw" | "se";
+type DragMode = "move" | ResizeCorner;
+
+function resizeFrame(start: Frame, dx: number, dy: number, corner: ResizeCorner): Frame {
+  const maxW = Math.max(MIN_W, window.innerWidth - 16);
+  const maxH = Math.max(MIN_H, window.innerHeight - 16);
+  const east = corner === "ne" || corner === "se";
+  const south = corner === "sw" || corner === "se";
+  const w = Math.min(Math.max(east ? start.w + dx : start.w - dx, MIN_W), maxW);
+  const h = Math.min(Math.max(south ? start.h + dy : start.h - dy, MIN_H), maxH);
+  return clampFrame({
+    w,
+    h,
+    x: east ? start.x : start.x + start.w - w,
+    y: south ? start.y : start.y + start.h - h,
+  });
 }
 
 function capImages(list: AiAttachment[]): AiAttachment[] {
@@ -228,7 +247,7 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
   const listRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const copiedTimer = useRef(0);
-  const dragRef = useRef<{ pointer: number; x: number; y: number; start: Frame; mode: "move" | "resize" } | null>(null);
+  const dragRef = useRef<{ pointer: number; x: number; y: number; start: Frame; mode: DragMode } | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -240,12 +259,6 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
     return () => window.clearTimeout(timer);
   }, [open, focusToken]);
 
-  useEffect(() => {
-    const el = listRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [bubbles, sending, pendingSkills]);
 
   useEffect(() => {
     if (!open) {
@@ -348,7 +361,7 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
     saveActiveThreadId(null);
   };
 
-  const beginDrag = (event: React.PointerEvent, mode: "move" | "resize") => {
+  const beginDrag = (event: React.PointerEvent, mode: DragMode) => {
     if (event.button !== 0) {
       return;
     }
@@ -368,7 +381,7 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
       setFrame(clampFrame({ ...drag.start, x: drag.start.x + dx, y: drag.start.y + dy }));
       return;
     }
-    setFrame(clampFrame({ ...drag.start, w: drag.start.w + dx, h: drag.start.h + dy }));
+    setFrame(resizeFrame(drag.start, dx, dy, drag.mode));
   };
 
   const endDrag = (event: React.PointerEvent) => {
@@ -458,7 +471,7 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
         {
           messages,
           attachments: capImages(uploadedFiles),
-          system: `${t("wikiAsk.system")}\n${SKILL_SYSTEM}`,
+          system: desktop ? `${t("wikiAsk.system")}\n${SKILL_SYSTEM}` : t("wikiAsk.system"),
           rag: !aboutTodos,
         },
         controller.signal,
@@ -472,7 +485,7 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
       );
       const parsed = extractSkills(result.reply.trim() || tr("spotlight.emptyReply"));
       setBubbles((prev) => prev.map((item) => (item.id === assistantId ? { ...item, content: parsed.text || item.content } : item)));
-      if (parsed.skills.length) {
+      if (desktop && parsed.skills.length) {
         setPendingSkills(parsed.skills);
       }
     } catch (err) {
@@ -556,10 +569,6 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
     if (remember) {
       persistGrants({ ...grants, [scope]: true });
     }
-    if (!desktop) {
-      setError(tr("wikiAsk.skillDesktopOnly"));
-      return;
-    }
     try {
       const output = await runSkill(call);
       const notice: ChatBubble = {
@@ -605,9 +614,11 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
         <Button type="button" variant={historyOpen ? "secondary" : "ghost"} size="icon" aria-label={tr("wikiAsk.history")} onClick={() => setHistoryOpen((open) => !open)}>
           <Time {...iconParkOutline} size={16} />
         </Button>
-        <Button type="button" variant={permOpen ? "secondary" : "ghost"} size="icon" aria-label={tr("wikiAsk.permissions")} onClick={() => setPermOpen((open) => !open)}>
-          <SettingTwo {...iconParkOutline} size={16} />
-        </Button>
+        {desktop ? (
+          <Button type="button" variant={permOpen ? "secondary" : "ghost"} size="icon" aria-label={tr("wikiAsk.permissions")} onClick={() => setPermOpen((open) => !open)}>
+            <SettingTwo {...iconParkOutline} size={16} />
+          </Button>
+        ) : null}
         <Button type="button" variant="ghost" size="icon" aria-label={tr("wikiAsk.close")} onClick={onClose}>
           <Close {...iconParkOutline} size={16} />
         </Button>
@@ -624,7 +635,7 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
         />
       ) : null}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {permOpen ? (
+      {desktop && permOpen ? (
         <div className="shrink-0 space-y-3 border-b border-border/40 px-4 py-3 text-sm">
           <p className="text-muted-foreground text-xs">{tr("wikiAsk.permHint")}</p>
           {(["files", "open", "shell"] as SkillScope[]).map((scope) => (
@@ -635,16 +646,14 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
               </span>
               <Switch
                 checked={grants[scope]}
-                disabled={!desktop}
                 onCheckedChange={(checked) => persistGrants({ ...grants, [scope]: checked })}
               />
             </label>
           ))}
-          {!desktop ? <p className="text-muted-foreground text-xs">{tr("wikiAsk.skillDesktopOnly")}</p> : null}
         </div>
       ) : null}
 
-      <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-4">
+      <SoftScrollbar ref={listRef} className="min-h-0 flex-1" contentClassName="space-y-3 px-3 py-4" stickToBottom jumpToBottomLabel={tr("common.scrollToBottom")}>
         {bubbles.length === 0 ? (
           <AssistantBubble>
             <p className="leading-5">{tr("wikiAsk.emptyHint")}</p>
@@ -683,9 +692,9 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
             ),
           )
         )}
-      </div>
+      </SoftScrollbar>
 
-      {pendingSkills.length ? (
+      {desktop && pendingSkills.length ? (
         <div className="shrink-0 space-y-2 border-t border-border/40 px-4 py-3">
           {pendingSkills.map((call, index) => (
             <div key={`${call.name}-${index}`} className="rounded-xl border border-border bg-muted/40 p-3 text-sm">
@@ -777,13 +786,37 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
       </form>
       </div>
       </div>
-      <button
-        type="button"
-        aria-label={tr("wikiAsk.resize")}
-        className="absolute right-1 bottom-1 size-3 cursor-nwse-resize rounded-sm border-r-2 border-b-2 border-border/80"
-        onPointerDown={(event) => beginDrag(event, "resize")}
-      />
+      <ResizeHandle corner="nw" label={tr("wikiAsk.resize")} onPointerDown={(event) => beginDrag(event, "nw")} />
+      <ResizeHandle corner="ne" label={tr("wikiAsk.resize")} onPointerDown={(event) => beginDrag(event, "ne")} />
+      <ResizeHandle corner="sw" label={tr("wikiAsk.resize")} onPointerDown={(event) => beginDrag(event, "sw")} />
+      <ResizeHandle corner="se" label={tr("wikiAsk.resize")} onPointerDown={(event) => beginDrag(event, "se")} />
     </aside>
+  );
+}
+
+const RESIZE_POS: Record<ResizeCorner, string> = {
+  nw: "top-0 left-0 cursor-nwse-resize border-t-2 border-l-2",
+  ne: "top-0 right-0 cursor-nesw-resize border-t-2 border-r-2",
+  sw: "bottom-0 left-0 cursor-nesw-resize border-b-2 border-l-2",
+  se: "bottom-0 right-0 cursor-nwse-resize border-b-2 border-r-2",
+};
+
+function ResizeHandle({
+  corner,
+  label,
+  onPointerDown,
+}: {
+  corner: ResizeCorner;
+  label: string;
+  onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      className={`absolute z-20 size-4 rounded-sm border-border/80 ${RESIZE_POS[corner]}`}
+      onPointerDown={onPointerDown}
+    />
   );
 }
 

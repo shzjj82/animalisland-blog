@@ -84,7 +84,6 @@ import {
 } from "@/store/teamStore";
 import { TeamManageSidebar } from "@/components/team-manage-sidebar";
 import { pageTitle, setAppLocale, type AppLocale } from "@/i18n";
-import { AiRobotIcon } from "@/components/ai-robot-icon";
 import { exportDocument, type ExportFormat } from "@/lib/document/export";
 import { fileKind, isImageFile } from "@/lib/document/fileKinds";
 import { importSpreadsheet, importVideo, importWord, mergeImported, readInsertable, WORD_ACCEPT } from "@/lib/document/import";
@@ -1453,7 +1452,7 @@ export function App() {
             </Button>
             <NotifyBell session={session} onWriteTodo={(todo) => writeTodoPage(todo)} />
             <Button type="button" variant="outline" size="icon" aria-label={t("wikiAsk.title")} onClick={openWiki}>
-              <AiRobotIcon size={16} />
+              <span className="text-[11px] font-semibold leading-none tracking-wide">AI</span>
             </Button>
             <LanguageSwitch onChange={(locale) => void switchLocale(locale)} />
           </span>
@@ -1530,7 +1529,7 @@ export function App() {
             </Popover>
             <NotifyBell session={session} onWriteTodo={(todo) => writeTodoPage(todo)} />
             <Button type="button" variant="outline" size="icon" aria-label={t("wikiAsk.title")} onClick={openWiki}>
-              <AiRobotIcon size={16} />
+              <span className="text-[11px] font-semibold leading-none tracking-wide">AI</span>
             </Button>
           </span>
         </header>

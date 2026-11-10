@@ -74,6 +74,7 @@ export const en: Messages = {
     aiServiceUnavailable: "Can't reach the AI gateway. Check your network.",
     requestFailed: "Request failed ({{status}})",
     listSeparator: ", ",
+    scrollToBottom: "Jump to bottom",
   },
   notify: {
     title: "Notifications & todos",

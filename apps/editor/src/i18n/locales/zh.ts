@@ -72,6 +72,7 @@ export const zh = {
     aiServiceUnavailable: "连不上智能体服务，请检查网络或网关。",
     requestFailed: "请求失败 {{status}}",
     listSeparator: "、",
+    scrollToBottom: "回到底部",
   },
   notify: {
     title: "通知与待办",

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Delete, Plus, Search } from "@icon-park/react";
 import { Button } from "@/components/ui/button";
+import { SoftScrollbar } from "@/components/soft-scrollbar";
 import { historyGroup, threadPreview, type HistoryGroupId, type WikiThread } from "@/lib/ai/wikiChatHistory";
 import { iconParkOutline } from "@/lib/iconPark";
 import { useTranslation } from "react-i18next";
@@ -53,7 +54,7 @@ export function HistoryPanel({ threads, activeId, onNew, onOpen, onDelete }: Pro
           <Plus {...iconParkOutline} size={14} />
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
+      <SoftScrollbar className="min-h-0 flex-1" contentClassName="px-1.5 pb-2">
         {groups.length === 0 ? (
           <p className="text-muted-foreground px-2 py-8 text-center text-xs">
             {t(query.trim() ? "wikiAsk.historyNoMatch" : "wikiAsk.historyEmpty")}
@@ -91,7 +92,7 @@ export function HistoryPanel({ threads, activeId, onNew, onOpen, onDelete }: Pro
             </section>
           ))
         )}
-      </div>
+      </SoftScrollbar>
     </aside>
   );
 }

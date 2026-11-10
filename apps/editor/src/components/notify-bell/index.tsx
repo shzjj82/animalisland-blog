@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { CheckOne, Edit, Remind } from "@icon-park/react";
+import { CheckOne, Remind, Time } from "@icon-park/react";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverSeparator, PopoverTrigger } from "@/components/ui/popover";
+import { SoftScrollbar } from "@/components/soft-scrollbar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import {
   fetchNotifySnapshot,
@@ -14,10 +15,8 @@ import {
   type NotifyTodo,
 } from "@/store/notifyStore";
 import { connectNotifySocket } from "@/store/notifySocket";
+import { iconParkOutline } from "@/lib/iconPark";
 import type { RemoteSession } from "@/store/remoteStore";
-
-const iconProps = { theme: "outline" as const, strokeWidth: 3, size: 16 };
-const POLL_MS = 60_000;
 
 type Tab = "todos" | "notices";
 
@@ -27,40 +26,58 @@ type Props = {
   onWriteTodo?: (todo: NotifyTodo) => void | Promise<void>;
 };
 
-function formatTime(value: string | null, locale: string): string {
-  if (!value) return "";
+function formatDay(value: string, locale: string): string {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T12:00:00`) : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return date.toLocaleDateString(locale, { month: "short", day: "numeric" });
+}
+
+function formatWhen(value: string | null, locale: string): string {
+  if (!value) {
+    return "";
+  }
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
   return date.toLocaleString(locale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function todoDue(todo: NotifyTodo, locale: string): string {
+  const start = typeof todo.data?.start === "string" ? todo.data.start : "";
+  const end = typeof todo.data?.end === "string" ? todo.data.end : "";
+  if (start && end && start !== end) {
+    const a = formatDay(start, locale);
+    const b = formatDay(end, locale);
+    return a && b ? `${a} – ${b}` : a || b;
+  }
+  if (end) {
+    return formatDay(end, locale);
+  }
+  return formatWhen(todo.dueAt, locale);
 }
 
 export function NotifyBell({ session, className, onWriteTodo }: Props) {
   const { t, i18n } = useTranslation();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("todos");
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<NotifySnapshot | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [live, setLive] = useState(false);
 
-  const refresh = useCallback(async (quiet = false) => {
+  const refresh = useCallback(async () => {
     if (!session) {
       setSnapshot(null);
       return;
     }
-    if (!quiet) {
-      setLoading(true);
-      setError(null);
-    }
     try {
       setSnapshot(await fetchNotifySnapshot(session));
+      setError(null);
     } catch (err) {
-      if (!quiet) {
-        setError(err instanceof Error ? err.message : t("notify.loadFailed"));
-      }
-    } finally {
-      if (!quiet) setLoading(false);
+      setError(err instanceof Error ? err.message : t("notify.loadFailed"));
     }
   }, [session, t]);
 
@@ -71,11 +88,10 @@ export function NotifyBell({ session, className, onWriteTodo }: Props) {
       return;
     }
     void refresh();
-    const timer = window.setInterval(() => void refresh(true), POLL_MS);
     const stopSocket = connectNotifySocket(session, (event) => {
       if (event.type === "ready") {
         setLive(true);
-        void refresh(true);
+        void refresh();
         return;
       }
       if (event.type === "error") {
@@ -89,21 +105,14 @@ export function NotifyBell({ session, className, onWriteTodo }: Props) {
         if (event.kind === "todo" && event.action === "created") {
           setTab("todos");
         }
-        void refresh(true);
+        void refresh();
       }
     });
     return () => {
-      window.clearInterval(timer);
       stopSocket();
       setLive(false);
     };
   }, [session, refresh]);
-
-  useEffect(() => {
-    if (open && session) {
-      void refresh();
-    }
-  }, [open, session, refresh]);
 
   if (!session) {
     return null;
@@ -129,7 +138,9 @@ export function NotifyBell({ session, className, onWriteTodo }: Props) {
   }
 
   async function onWrite(todo: NotifyTodo) {
-    if (!onWriteTodo) return;
+    if (!onWriteTodo) {
+      return;
+    }
     setBusyId(`write:${todo.id}`);
     try {
       await onWriteTodo(todo);
@@ -175,101 +186,59 @@ export function NotifyBell({ session, className, onWriteTodo }: Props) {
           className={cn("relative", className)}
           aria-label={t("notify.title")}
         >
-          <Remind {...iconProps} />
-          {badge > 0 ? (
-            <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] leading-none font-semibold text-destructive-foreground">
-              {badge > 99 ? "99+" : badge}
-            </span>
-          ) : null}
+          <Remind {...iconParkOutline} size={16} />
+          {badge > 0 ? <span className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-red-500" /> : null}
+          {live ? <span className="absolute right-0.5 bottom-0.5 size-1.5 rounded-full bg-emerald-500" title={t("notify.liveOn")} /> : null}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[min(22rem,calc(100vw-1.5rem))] p-0">
-        <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <div className="truncate text-sm font-medium text-foreground">{t("notify.title")}</div>
-              <span
-                className={cn(
-                  "size-1.5 shrink-0 rounded-full",
-                  live ? "bg-emerald-500" : "bg-muted-foreground/40",
-                )}
-                title={live ? t("notify.liveOn") : t("notify.liveOff")}
-              />
-            </div>
-            <div className="truncate text-xs text-muted-foreground">
-              {t("notify.progress", { open: openTodos, unread })}
-            </div>
-          </div>
-          <Button type="button" variant="ghost" size="sm" disabled={loading} onClick={() => void refresh()}>
-            {loading ? t("notify.refreshing") : t("notify.refresh")}
-          </Button>
-        </div>
-        <div className="flex gap-1 border-b border-border px-2 py-1">
-          <TabButton active={tab === "todos"} onClick={() => setTab("todos")} count={openTodos}>
+      <PopoverContent align="end" className="w-[min(20rem,calc(100vw-1.5rem))] overflow-hidden p-0">
+        <div className="grid grid-cols-2 border-b border-border/50">
+          <TabButton active={tab === "todos"} count={openTodos} onClick={() => setTab("todos")}>
+            <CheckOne {...iconParkOutline} size={14} />
             {t("notify.todos")}
           </TabButton>
-          <TabButton active={tab === "notices"} onClick={() => setTab("notices")} count={unread}>
+          <TabButton active={tab === "notices"} count={unread} onClick={() => setTab("notices")}>
+            <Remind {...iconParkOutline} size={14} />
             {t("notify.notices")}
           </TabButton>
         </div>
         {error ? <div className="px-3 py-2 text-xs text-destructive">{error}</div> : null}
-        <div className="max-h-80 overflow-y-auto p-1">
+        <SoftScrollbar className="max-h-80" contentClassName="p-1.5">
           {tab === "todos" ? (
             todos.length === 0 ? (
               <Empty>{t("notify.emptyTodos")}</Empty>
             ) : (
               todos.map((todo) => {
+                const due = todoDue(todo, i18n.language);
                 const writing = busyId === `write:${todo.id}`;
                 const finishing = busyId === todo.id;
                 return (
-                  <div key={todo.id} className="flex items-start gap-1 rounded-md px-2 py-2 hover:bg-muted">
+                  <div key={todo.id} className="group flex items-center gap-1 rounded-xl px-2 py-2 hover:bg-muted/70">
                     <button
                       type="button"
-                      className="min-w-0 flex-1 rounded-sm text-left disabled:opacity-50"
+                      className="min-w-0 flex-1 text-left disabled:opacity-50"
                       disabled={writing || !onWriteTodo}
                       onClick={() => void onWrite(todo)}
                     >
-                      <div className="truncate text-sm text-foreground">{todo.title || t("notify.untitled")}</div>
-                      {todo.content ? (
-                        <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{todo.content}</div>
-                      ) : (
-                        <div className="mt-0.5 text-xs text-muted-foreground">{t("notify.writeHint")}</div>
-                      )}
-                      <div className="mt-1 text-[11px] text-muted-foreground">
-                        {[
-                          todo.dueAt ? t("notify.due", { time: formatTime(todo.dueAt, i18n.language) }) : null,
-                          formatTime(todo.createdAt, i18n.language),
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </div>
+                      <span className="block truncate text-sm font-medium">{todo.title.trim() || t("notify.untitled")}</span>
+                      {due ? (
+                        <span className="text-muted-foreground mt-0.5 flex items-center gap-1 text-[11px]">
+                          <Time {...iconParkOutline} size={12} />
+                          {due}
+                        </span>
+                      ) : null}
                     </button>
-                    <div className="flex shrink-0 flex-col gap-0.5">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="size-7"
-                        disabled={writing || !onWriteTodo}
-                        aria-label={t("notify.write")}
-                        title={t("notify.write")}
-                        onClick={() => void onWrite(todo)}
-                      >
-                        <Edit {...iconProps} />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="size-7"
-                        disabled={finishing}
-                        aria-label={t("notify.markDone")}
-                        title={t("notify.markDone")}
-                        onClick={() => void onDone(todo)}
-                      >
-                        <CheckOne {...iconProps} />
-                      </Button>
-                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      className="text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                      disabled={finishing}
+                      aria-label={t("notify.markDone")}
+                      onClick={() => void onDone(todo)}
+                    >
+                      <CheckOne {...iconParkOutline} size={16} />
+                    </Button>
                   </div>
                 );
               })
@@ -278,35 +247,44 @@ export function NotifyBell({ session, className, onWriteTodo }: Props) {
             <Empty>{t("notify.emptyNotices")}</Empty>
           ) : (
             <>
-              <div className="flex justify-end px-2 py-1">
-                <button
-                  type="button"
-                  className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-40"
-                  disabled={busyId === "all" || unread === 0}
-                  onClick={() => void onReadAll()}
-                >
-                  {t("notify.readAll")}
-                </button>
-              </div>
-              <PopoverSeparator />
+              {unread > 0 ? (
+                <div className="flex justify-end px-1 pb-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="text-muted-foreground"
+                    disabled={busyId === "all"}
+                    aria-label={t("notify.readAll")}
+                    onClick={() => void onReadAll()}
+                  >
+                    <CheckOne {...iconParkOutline} size={14} />
+                  </Button>
+                </div>
+              ) : null}
               {notices.map((notice) => (
                 <button
                   key={notice.id}
                   type="button"
-                  className="flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-2 text-left hover:bg-muted disabled:opacity-50"
+                  className="flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left hover:bg-muted/70 disabled:opacity-50"
                   disabled={busyId === notice.id}
                   onClick={() => void onRead(notice)}
                 >
-                  <div className="w-full truncate text-sm text-foreground">{notice.title}</div>
-                  {notice.content ? (
-                    <div className="line-clamp-2 text-xs text-muted-foreground">{notice.content}</div>
-                  ) : null}
-                  <div className="text-[11px] text-muted-foreground">{formatTime(notice.createdAt, i18n.language)}</div>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">{notice.title}</span>
+                    {notice.content.trim() ? (
+                      <span className="text-muted-foreground mt-0.5 line-clamp-2 block text-xs">{notice.content}</span>
+                    ) : null}
+                    <span className="text-muted-foreground mt-0.5 flex items-center gap-1 text-[11px]">
+                      <Time {...iconParkOutline} size={12} />
+                      {formatWhen(notice.createdAt, i18n.language)}
+                    </span>
+                  </span>
                 </button>
               ))}
             </>
           )}
-        </div>
+        </SoftScrollbar>
       </PopoverContent>
     </Popover>
   );
@@ -327,17 +305,17 @@ function TabButton({
     <button
       type="button"
       className={cn(
-        "flex h-8 flex-1 items-center justify-center gap-1 rounded-md text-xs",
-        active ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:bg-muted/60",
+        "flex h-10 items-center justify-center gap-1.5 text-xs",
+        active ? "border-b-2 border-foreground font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
       )}
       onClick={onClick}
     >
-      <span>{children}</span>
-      {count > 0 ? <span className="rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px]">{count}</span> : null}
+      {children}
+      {count > 0 ? <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none">{count}</span> : null}
     </button>
   );
 }
 
 function Empty({ children }: { children: ReactNode }) {
-  return <div className="px-3 py-8 text-center text-xs text-muted-foreground">{children}</div>;
+  return <div className="text-muted-foreground px-3 py-10 text-center text-xs">{children}</div>;
 }

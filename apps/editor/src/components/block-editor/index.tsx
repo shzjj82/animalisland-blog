@@ -23,7 +23,6 @@ import { VideoBlockTool } from "./tools/VideoBlockTool";
 import type { AttachmentData } from "@/store/fileStore";
 import { htmlToBlocks } from "@/lib/document/htmlToBlocks";
 import { isImageFile } from "@/lib/document/fileKinds";
-import { AiRobotIcon } from "@/components/ai-robot-icon";
 import { bindEditingGuards } from "./editingGuards";
 import { menuIcons } from "./menuIcons";
 import { bindToolbarAnchor, blockIconKey } from "./toolbarAnchor";
@@ -762,7 +761,7 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
                 ))}
               </div>
               <button type="button" aria-label={t("app.aiChatTitle")} className={barButtonClass} onPointerDown={keepEditorFocus} onMouseDown={keepEditorFocus} onClick={openAi}>
-                <AiRobotIcon size={20} />
+                <span className="text-[11px] font-semibold leading-none tracking-wide">AI</span>
               </button>
               <button type="button" aria-label={t("app.blockActions")} className={barButtonClass} onPointerDown={keepEditorFocus} onMouseDown={keepEditorFocus} onClick={openBlockSettings}>
                 <More {...barIconProps} />

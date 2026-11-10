@@ -328,10 +328,11 @@
   flex: 1 1 auto;
   min-height: 160px;
   min-width: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
+  padding: 0;
+}
+
+.editor-spotlight-chat .ws-scrollbar__view,
+.editor-spotlight-chat-inner {
   padding: 12px 14px;
 }
 

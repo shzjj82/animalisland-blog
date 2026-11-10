@@ -4,6 +4,7 @@ import { Check, Close, Paperclip } from "@icon-park/react";
 import { BubbleAttachments, PendingAttachments } from "./ChatAttachments";
 import type { DraftInsert } from "./useSpotlightChat";
 import { Button } from "@/components/ui/button";
+import { SoftScrollbar } from "@/components/soft-scrollbar";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { AI_FILE_ACCEPT, type ChatBubble, type LocalAttachment } from "@/lib/ai/chat";
 import { iconParkOutline } from "@/lib/iconPark";
@@ -98,8 +99,7 @@ export function SpotlightChatPane({
 
   return (
     <>
-      <div ref={listRef as RefObject<HTMLDivElement>} className="editor-spotlight-chat">
-        <div className="editor-spotlight-chat-inner">
+      <SoftScrollbar ref={listRef as RefObject<HTMLDivElement>} className="editor-spotlight-chat" contentClassName="editor-spotlight-chat-inner" stickToBottom jumpToBottomLabel={t("common.scrollToBottom")}>
           {bubbles.length === 0 ? (
             <div className="editor-spotlight-chat-empty">
               <p>{t("spotlight.chatHint")}</p>
@@ -162,8 +162,7 @@ export function SpotlightChatPane({
               <span className="text-xs text-muted-foreground">{t("spotlight.thinking")}</span>
             </div>
           ) : null}
-        </div>
-      </div>
+      </SoftScrollbar>
 
       {draft ? (
         <div className="editor-spotlight-draft">

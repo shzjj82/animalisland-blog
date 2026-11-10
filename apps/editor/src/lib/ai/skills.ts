@@ -55,7 +55,11 @@ function desktopInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<
 }
 
 export function isDesktopApp(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const internals = (window as Window & { __TAURI_INTERNALS__?: TauriInternals }).__TAURI_INTERNALS__;
+  return Boolean(internals?.invoke);
 }
 
 /** 从模型回复里抽出 ```skill 代码块，正文里不再展示这段 JSON */
@@ -125,4 +129,4 @@ export const SKILL_SYSTEM = `若用户明确要求操作本机（打开链接/�
 {"name":"open","target":"https://example.com"}
 \`\`\`
 name 只能是 open（打开网址或本机路径）、read_file（读文本文件，path 为绝对路径）、shell（执行一条本机命令，command 为完整命令）。
-不要主动执行危险命令。用户没要求操作本机时不要输出 skill 块。网页版无法执行本机技能。`;
+不要主动执行危险命令。用户没要求操作本机时不要输出 skill 块。`;

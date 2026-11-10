@@ -171,12 +171,49 @@
   margin-right: 0;
 }
 
-.sidebar-scroll {
-  scrollbar-width: none;
+/* el-scrollbar 风格：悬停 / 滚动时显示细滚动条，仅容器内滚动 */
+.ws-scrollbar {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
 }
 
-.sidebar-scroll::-webkit-scrollbar {
-  display: none;
+.ws-scrollbar:hover,
+.ws-scrollbar:focus-within,
+.ws-scrollbar.is-scrolling {
+  scrollbar-color: color-mix(in oklab, var(--muted-foreground) 45%, transparent) transparent;
+}
+
+.ws-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.ws-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ws-scrollbar::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+.ws-scrollbar:hover::-webkit-scrollbar-thumb,
+.ws-scrollbar:focus-within::-webkit-scrollbar-thumb,
+.ws-scrollbar.is-scrolling::-webkit-scrollbar-thumb {
+  background-color: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
+}
+
+.ws-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklab, var(--muted-foreground) 65%, transparent);
+}
+
+.ws-scrollbar__view {
+  min-height: min-content;
 }
 
 .ce-toolbar__settings-btn {

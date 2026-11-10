@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { Delete, Down, More, Notes, Plus, Right, ToTop } from "@icon-park/react";
 import { FileTypeIcon } from "@/components/file-type-icon";
+import { SoftScrollbar } from "@/components/soft-scrollbar";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverSeparator, PopoverTrigger } from "@/components/ui/popover";
 import { pageTitle } from "@/i18n";
@@ -335,9 +336,9 @@ export function PageTree({ nodes, query = "", selectedId, onOpen, onCreateChild,
       {searching && tree.length === 0 ? (
         <p className="px-2 py-3 text-xs text-muted-foreground">{t("pageTree.noMatchingPages")}</p>
       ) : (
-        <ul className="sidebar-scroll flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overscroll-y-contain">
-          {renderNodes(tree, 0)}
-        </ul>
+        <SoftScrollbar className="min-h-0 flex-1" contentClassName="px-0">
+          <ul className="flex flex-col gap-0.5">{renderNodes(tree, 0)}</ul>
+        </SoftScrollbar>
       )}
     </div>
   );

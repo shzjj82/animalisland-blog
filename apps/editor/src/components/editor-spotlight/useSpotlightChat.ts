@@ -93,12 +93,6 @@ export function useSpotlightChat({ open, editor, insertIndex, loadPages, onInser
     return () => abortInFlight();
   }, [open]);
 
-  useEffect(() => {
-    const el = listRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [bubbles, sending, draft]);
 
   const resetChat = () => {
     abortInFlight();

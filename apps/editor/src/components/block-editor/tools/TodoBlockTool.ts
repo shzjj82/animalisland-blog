@@ -120,14 +120,9 @@ function dueAtFromItem(item: TodoItem): string | null {
 function upsertPayload(item: TodoItem): UpsertTodoInput | null {
   const title = item.text.trim().slice(0, 120);
   if (!title) return null;
-  const range =
-    item.start || item.end
-      ? `时间：${item.start || "—"}${item.end ? ` → ${item.end}` : ""}`
-      : "";
-  const content = [range, `本地待办：${item.id}`].filter(Boolean).join("\n") || title;
   return {
     title,
-    content: content.slice(0, 4000),
+    content: title,
     category: "wiki",
     source: "wiki",
     dueAt: dueAtFromItem(item),
