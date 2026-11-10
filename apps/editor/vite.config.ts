@@ -2,7 +2,8 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
-import { defineConfig, loadEnv, type ProxyOptions } from "vite";
+import { defineConfig, loadEnv, type Plugin, type ProxyOptions } from "vite";
+import { handleWorkBridge } from "./server/workBridge.ts";
 
 const editorRoot = path.dirname(fileURLToPath(import.meta.url));
 /** 与 blog server 共用仓库根 `.env`（GATEWAY_BASE_URL 等） */
@@ -44,7 +45,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     clearScreen: false,
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), workBridgePlugin()],
     resolve: {
       alias: {
         "@": fileURLToPath(new URL("./src", import.meta.url)),
@@ -72,3 +73,27 @@ export default defineConfig(({ mode }) => {
     },
   };
 });
+
+function workBridgePlugin(): Plugin {
+  return {
+    name: "wiki-work-bridge",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        void handleWorkBridge(req, res).then((hit) => {
+          if (!hit) {
+            next();
+          }
+        });
+      });
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use((req, res, next) => {
+        void handleWorkBridge(req, res).then((hit) => {
+          if (!hit) {
+            next();
+          }
+        });
+      });
+    },
+  };
+}

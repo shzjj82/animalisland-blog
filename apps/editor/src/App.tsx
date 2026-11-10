@@ -12,6 +12,7 @@ import { FileDropZone } from "@/components/file-drop";
 import { FileTypeIcon } from "@/components/file-type-icon";
 import { FileViewer } from "@/components/file-viewer";
 import { WikiChat } from "@/components/wiki-chat";
+import { WorkDesk } from "@/components/work-desk";
 import { ImportDialog, type ImportChoice } from "@/components/import-dialog";
 import { LanguageSwitch } from "@/components/language-switch";
 import { NotifyBell } from "@/components/notify-bell";
@@ -228,6 +229,8 @@ export function App() {
   const [spotlightOpen, setSpotlightOpen] = useState(false);
   const [wikiOpen, setWikiOpen] = useState(false);
   const [wikiFocus, setWikiFocus] = useState(0);
+  const [workOpen, setWorkOpen] = useState(false);
+  const [workFocus, setWorkFocus] = useState(0);
   const [spotlightLaunch, setSpotlightLaunch] = useState<{
     actionId?: string;
     insertIndex: number;
@@ -359,8 +362,22 @@ export function App() {
     setViewing(null);
     setSpotlightOpen(false);
     setSpotlightLaunch(null);
+    setWorkOpen(false);
     setWikiOpen(true);
     setWikiFocus((count) => count + 1);
+  }, [session]);
+
+  const openWork = useCallback(() => {
+    if (!session) {
+      setAuthOpen(true);
+      return;
+    }
+    setViewing(null);
+    setSpotlightOpen(false);
+    setSpotlightLaunch(null);
+    setWikiOpen(false);
+    setWorkOpen(true);
+    setWorkFocus((count) => count + 1);
   }, [session]);
 
   const loadAskPages = useCallback(async () => {
@@ -561,6 +578,7 @@ export function App() {
     void logoutRemote(session);
     setSession(null);
     setWikiOpen(false);
+    setWorkOpen(false);
     setAuthOpen(false);
     resetAuthFields();
   }
@@ -1445,6 +1463,9 @@ export function App() {
             <Button type="button" variant="outline" size="icon" aria-label={t("wikiAsk.title")} onClick={openWiki}>
               <span className="text-[11px] font-semibold leading-none tracking-wide">AI</span>
             </Button>
+            <Button type="button" variant="outline" size="sm" aria-label={t("work.title")} onClick={openWork}>
+              {t("work.title")}
+            </Button>
             <LanguageSwitch onChange={(locale) => void switchLocale(locale)} />
           </span>
           {/* 移动端：更多菜单 + AI */}
@@ -1522,6 +1543,9 @@ export function App() {
             <Button type="button" variant="outline" size="icon" aria-label={t("wikiAsk.title")} onClick={openWiki}>
               <span className="text-[11px] font-semibold leading-none tracking-wide">AI</span>
             </Button>
+            <Button type="button" variant="outline" size="sm" aria-label={t("work.title")} onClick={openWork}>
+              {t("work.title")}
+            </Button>
           </span>
         </header>
         <FileDropZone
@@ -1549,6 +1573,7 @@ export function App() {
               onUploadError={setError}
               onOpenFile={(data, replace) => {
                 setWikiOpen(false);
+                setWorkOpen(false);
                 setViewing({ data, replace });
               }}
               onConfirmDeleteFile={confirmDeleteFile}
@@ -1598,6 +1623,13 @@ export function App() {
               keywords: t("wikiAsk.keywords"),
               icon: "search",
             },
+            {
+              id: "work-desk",
+              title: t("work.title"),
+              subtitle: t("work.subtitle"),
+              keywords: t("work.keywords"),
+              icon: "search",
+            },
           ] satisfies SpotlightAction[]
         }
         editor={editorReady ? editorRef.current : null}
@@ -1607,6 +1639,7 @@ export function App() {
         loadPages={loadAskPages}
         onOpenPage={(id, query) => void revealPage(id, query)}
         onAskWiki={openWiki}
+        onAskWork={openWork}
       />
       <WikiChat
         open={wikiOpen}
@@ -1616,6 +1649,16 @@ export function App() {
         onClose={() => setWikiOpen(false)}
         onLogin={() => {
           setWikiOpen(false);
+          setAuthOpen(true);
+        }}
+      />
+      <WorkDesk
+        open={workOpen}
+        focusToken={workFocus}
+        loggedIn={Boolean(session)}
+        onClose={() => setWorkOpen(false)}
+        onLogin={() => {
+          setWorkOpen(false);
           setAuthOpen(true);
         }}
       />

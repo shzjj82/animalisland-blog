@@ -5,6 +5,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{mpsc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+mod browser_cmd;
 mod export_cmd;
 
 use serde::Deserialize;
@@ -700,6 +701,9 @@ pub fn run() {
             run_ai_command,
             open_ai_target,
             read_ai_file,
+            browser_cmd::list_installed_browsers,
+            browser_cmd::open_installed_browser,
+            browser_cmd::reveal_work_extension,
         ])
         .setup(|app| -> Result<(), Box<dyn std::error::Error>> {
             #[cfg(target_os = "macos")]

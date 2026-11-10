@@ -39,6 +39,8 @@ type Props = {
   onOpenPage?: (id: string, query: string) => void;
   /** 「问知识库」关掉命令面板，交给外侧栏 */
   onAskWiki?: () => void;
+  /** 「工作」交给工作台，不进入 Spotlight 聊天 */
+  onAskWork?: () => void;
 };
 
 function matchAction(action: SpotlightAction, query: string): boolean {
@@ -65,6 +67,7 @@ export function EditorSpotlight({
   loadPages,
   onOpenPage,
   onAskWiki,
+  onAskWork,
 }: Props) {
   const { t } = useTranslation();
   const viewport = useVisualViewport();
@@ -127,6 +130,11 @@ export function EditorSpotlight({
       onAskWiki?.();
       return;
     }
+    if (full?.id === "work-desk") {
+      closeAll();
+      onAskWork?.();
+      return;
+    }
     if (full) {
       enterAction(full);
     }
@@ -184,6 +192,11 @@ export function EditorSpotlight({
     if (launched?.id === "wiki-ask") {
       onOpenChange(false);
       onAskWiki?.();
+      return;
+    }
+    if (launched?.id === "work-desk") {
+      onOpenChange(false);
+      onAskWork?.();
       return;
     }
     if (launched) {

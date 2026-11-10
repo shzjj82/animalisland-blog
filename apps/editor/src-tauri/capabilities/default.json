@@ -13,7 +13,10 @@
     "allow-set-native-menu-locale",
     "allow-run-ai-command",
     "allow-open-ai-target",
-    "allow-read-ai-file"
+    "allow-read-ai-file",
+    "allow-list-installed-browsers",
+    "allow-open-installed-browser",
+    "allow-reveal-work-extension"
   ],
   "remote": {
     "urls": ["http://127.0.0.1:*", "http://localhost:*"]

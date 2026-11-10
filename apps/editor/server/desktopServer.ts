@@ -4,6 +4,7 @@ import https from "node:https";
 import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
+import { handleWorkBridge } from "./workBridge.ts";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -458,33 +459,7 @@ export function startDesktopServer(distDir: string): Promise<number> {
   const gatewayBase = resolveGatewayBase();
   console.error(`[desktop-server] gateway=${gatewayBase} dist=${root}`);
   const server = http.createServer((req, res) => {
-    const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
-
-    if (req.method !== "GET" && req.method !== "HEAD" && !shouldProxy(pathname)) {
-      res.statusCode = 405;
-      res.setHeader("Allow", "GET, HEAD");
-      res.end();
-      return;
-    }
-    if (shouldProxy(pathname)) {
-      proxyToGateway(req, res, gatewayBase);
-      return;
-    }
-    if (serveLegacyDownload(req, res)) {
-      return;
-    }
-    // /version.json 要探一次 OSS，是异步的；其余路由都是同步的
-    void serveVersionJson(root, req, res)
-      .then((handled) => {
-        if (!handled) serveStatic(root, req, res);
-      })
-      .catch(() => {
-        if (!res.headersSent) {
-          res.statusCode = 500;
-          res.setHeader("Content-Type", "application/json; charset=utf-8");
-          res.end(JSON.stringify({ version: "", files: [] }));
-        }
-      });
+    void handleRequest(root, gatewayBase, req, res);
   });
   server.on("upgrade", (req, socket, head) => {
     proxyWsUpgrade(req, socket, head, gatewayBase);
@@ -513,4 +488,41 @@ export function startDesktopServer(distDir: string): Promise<number> {
     });
 
   return listen(Number.isFinite(DESKTOP_PORT) && DESKTOP_PORT > 0 ? DESKTOP_PORT : 47321);
+}
+
+async function handleRequest(
+  root: string,
+  gatewayBase: string,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  if (await handleWorkBridge(req, res)) {
+    return;
+  }
+  const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
+  if (req.method !== "GET" && req.method !== "HEAD" && !shouldProxy(pathname)) {
+    res.statusCode = 405;
+    res.setHeader("Allow", "GET, HEAD");
+    res.end();
+    return;
+  }
+  if (shouldProxy(pathname)) {
+    proxyToGateway(req, res, gatewayBase);
+    return;
+  }
+  if (serveLegacyDownload(req, res)) {
+    return;
+  }
+  try {
+    const handled = await serveVersionJson(root, req, res);
+    if (!handled) {
+      serveStatic(root, req, res);
+    }
+  } catch {
+    if (!res.headersSent) {
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.end(JSON.stringify({ version: "", files: [] }));
+    }
+  }
 }
