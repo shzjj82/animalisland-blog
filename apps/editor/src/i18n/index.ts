@@ -31,6 +31,25 @@ function syncDocument() {
   document.title = i18n.t("app.title");
 }
 
+/** 桌面端系统菜单跟界面语言走同一套文案 */
+function syncNativeMenu() {
+  const internals = (window as Window & { __TAURI_INTERNALS__?: { invoke?: (cmd: string, args?: unknown) => Promise<unknown> } }).__TAURI_INTERNALS__;
+  if (!internals?.invoke) {
+    return;
+  }
+  const menu = i18n.getResourceBundle(appLocale(), "translation") as typeof zh | undefined;
+  const labels = menu?.nativeMenu;
+  if (!labels) {
+    return;
+  }
+  void internals.invoke("set_native_menu_locale", {
+    labels: {
+      checkUpdate: i18n.t("appUpdate.check"),
+      ...labels,
+    },
+  });
+}
+
 void i18n.use(initReactI18next).init({
   resources: { zh: { translation: zh }, en: { translation: en } },
   lng: initialLocale(),
@@ -39,7 +58,11 @@ void i18n.use(initReactI18next).init({
   initAsync: false,
 });
 syncDocument();
-i18n.on("languageChanged", syncDocument);
+syncNativeMenu();
+i18n.on("languageChanged", () => {
+  syncDocument();
+  syncNativeMenu();
+});
 
 export function appLocale(): AppLocale {
   return i18n.language === "en" ? "en" : "zh";

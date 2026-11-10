@@ -41,6 +41,8 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
   const [update, setUpdate] = useState<UpdateHandle | null>(null);
   const updateRef = useRef<UpdateHandle | null>(null);
   const [percent, setPercent] = useState(0);
+  const [gotBytes, setGotBytes] = useState(0);
+  const [totalBytes, setTotalBytes] = useState(0);
   const [message, setMessage] = useState("");
 
   const remember = useCallback((next: UpdateHandle | null) => {
@@ -131,19 +133,24 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
     }
     setPhase("downloading");
     setPercent(0);
+    setGotBytes(0);
+    setTotalBytes(0);
     try {
       let total = 0;
       let got = 0;
       await update.downloadAndInstall((event) => {
         if (event.event === "Started") {
           total = event.data?.contentLength ?? 0;
+          setTotalBytes(total);
         }
         if (event.event === "Progress") {
           got += event.data?.chunkLength ?? 0;
+          setGotBytes(got);
           setPercent(total > 0 ? Math.min(99, Math.round((got / total) * 100)) : 0);
         }
         if (event.event === "Finished") {
           setPercent(100);
+          if (total > 0) setGotBytes(total);
         }
       });
       setPhase("installing");
@@ -180,8 +187,31 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
                 {phase === "ready" ? update?.body || t("appUpdate.notes") : null}
                 {phase === "error" ? message : null}
                 {phase === "current" ? t("appUpdate.upToDateHint") : null}
+                {phase === "downloading"
+                  ? totalBytes > 0
+                    ? t("appUpdate.downloadingHint", { got: formatBytes(gotBytes), total: formatBytes(totalBytes) })
+                    : t("appUpdate.downloadingUnknown")
+                  : null}
               </DialogDescription>
             </DialogHeader>
+            {phase === "downloading" || phase === "installing" ? (
+              <div
+                className="bg-muted h-2 w-full overflow-hidden rounded-full"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={phase === "installing" ? 100 : percent}
+              >
+                {phase === "downloading" && totalBytes <= 0 && percent <= 0 ? (
+                  <div className="bg-primary h-full w-1/3 animate-pulse rounded-full" />
+                ) : (
+                  <div
+                    className="bg-primary h-full rounded-full transition-[width] duration-200"
+                    style={{ width: `${phase === "installing" ? 100 : Math.max(percent, 2)}%` }}
+                  />
+                )}
+              </div>
+            ) : null}
             <DialogFooter>
               {phase === "ready" ? (
                 <>
@@ -213,4 +243,19 @@ export function CheckUpdateSlot({ children }: { children: (check: () => void) =>
     return null;
   }
   return children(check);
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const digits = value >= 10 || unit === 0 ? 0 : 1;
+  return `${value.toFixed(digits)} ${units[unit]}`;
 }

@@ -7,36 +7,217 @@ use std::time::Duration;
 
 mod export_cmd;
 
+use serde::Deserialize;
 use tauri::Manager;
 
 const CHECK_UPDATE_MENU_ID: &str = "check-update";
 
-/// macOS 应用菜单（About / Services / Hide / Quit）里加「检查更新」，其余默认菜单保留。
-#[cfg(target_os = "macos")]
-fn install_check_update_menu(app: &tauri::App) {
-    use tauri::Emitter;
-    use tauri::menu::{Menu, MenuItem, MenuItemKind};
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeMenuLabels {
+    check_update: String,
+    about: String,
+    services: String,
+    hide: String,
+    hide_others: String,
+    show_all: String,
+    quit: String,
+    file: String,
+    close_window: String,
+    edit: String,
+    undo: String,
+    redo: String,
+    cut: String,
+    copy: String,
+    paste: String,
+    select_all: String,
+    view: String,
+    fullscreen: String,
+    window: String,
+    minimize: String,
+    zoom: String,
+    help: String,
+}
 
-    let Ok(menu) = Menu::default(app.handle()) else {
-        return;
-    };
-    let Ok(items) = menu.items() else {
-        return;
-    };
-    let Some(MenuItemKind::Submenu(app_menu)) = items.into_iter().next() else {
-        return;
-    };
-    let Ok(check) = MenuItem::with_id(app, CHECK_UPDATE_MENU_ID, "检查更新", true, None::<&str>) else {
-        return;
-    };
-    if app_menu.insert(&check, 1).is_err() || app.set_menu(menu).is_err() {
-        return;
+impl NativeMenuLabels {
+    fn zh() -> Self {
+        Self {
+            check_update: "检查更新".into(),
+            about: "关于 wiki-agent".into(),
+            services: "服务".into(),
+            hide: "隐藏 wiki-agent".into(),
+            hide_others: "隐藏其他".into(),
+            show_all: "全部显示".into(),
+            quit: "退出 wiki-agent".into(),
+            file: "文件".into(),
+            close_window: "关闭窗口".into(),
+            edit: "编辑".into(),
+            undo: "撤销".into(),
+            redo: "重做".into(),
+            cut: "剪切".into(),
+            copy: "复制".into(),
+            paste: "粘贴".into(),
+            select_all: "全选".into(),
+            view: "显示".into(),
+            fullscreen: "进入全屏".into(),
+            window: "窗口".into(),
+            minimize: "最小化".into(),
+            zoom: "缩放".into(),
+            help: "帮助".into(),
+        }
     }
+
+    fn en() -> Self {
+        Self {
+            check_update: "Check for updates".into(),
+            about: "About wiki-agent".into(),
+            services: "Services".into(),
+            hide: "Hide wiki-agent".into(),
+            hide_others: "Hide Others".into(),
+            show_all: "Show All".into(),
+            quit: "Quit wiki-agent".into(),
+            file: "File".into(),
+            close_window: "Close Window".into(),
+            edit: "Edit".into(),
+            undo: "Undo".into(),
+            redo: "Redo".into(),
+            cut: "Cut".into(),
+            copy: "Copy".into(),
+            paste: "Paste".into(),
+            select_all: "Select All".into(),
+            view: "View".into(),
+            fullscreen: "Enter Full Screen".into(),
+            window: "Window".into(),
+            minimize: "Minimize".into(),
+            zoom: "Zoom".into(),
+            help: "Help".into(),
+        }
+    }
+
+    fn from_system() -> Self {
+        let lang = std::env::var("LANG")
+            .or_else(|_| std::env::var("LC_ALL"))
+            .unwrap_or_default()
+            .to_lowercase();
+        if lang.starts_with("zh") {
+            Self::zh()
+        } else {
+            Self::en()
+        }
+    }
+}
+
+/// 用当前界面语言重建系统菜单（含检查更新），避免菜单栏一直是英文默认项。
+#[cfg(target_os = "macos")]
+fn apply_native_menu(app: &tauri::AppHandle, labels: &NativeMenuLabels) -> Result<(), String> {
+    use tauri::menu::{
+        AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu, HELP_SUBMENU_ID, WINDOW_SUBMENU_ID,
+    };
+
+    let pkg = app.package_info();
+    let about_meta = AboutMetadata {
+        name: Some(pkg.name.clone()),
+        version: Some(pkg.version.to_string()),
+        copyright: app.config().bundle.copyright.clone(),
+        authors: app.config().bundle.publisher.clone().map(|p| vec![p]),
+        ..Default::default()
+    };
+    let check = MenuItem::with_id(app, CHECK_UPDATE_MENU_ID, &labels.check_update, true, None::<&str>)
+        .map_err(|err| err.to_string())?;
+    let app_menu = Submenu::with_items(
+        app,
+        pkg.name.clone(),
+        true,
+        &[
+            &PredefinedMenuItem::about(app, Some(labels.about.as_str()), Some(about_meta)).map_err(|err| err.to_string())?,
+            &check,
+            &PredefinedMenuItem::separator(app).map_err(|err| err.to_string())?,
+            &PredefinedMenuItem::services(app, Some(labels.services.as_str())).map_err(|err| err.to_string())?,
+            &PredefinedMenuItem::separator(app).map_err(|err| err.to_string())?,
+            &PredefinedMenuItem::hide(app, Some(labels.hide.as_str())).map_err(|err| err.to_string())?,
+            &PredefinedMenuItem::hide_others(app, Some(labels.hide_others.as_str())).map_err(|err| err.to_string())?,
+            &PredefinedMenuItem::show_all(app, Some(labels.show_all.as_str())).map_err(|err| err.to_string())?,
+            &PredefinedMenuItem::separator(app).map_err(|err| err.to_string())?,
+            &PredefinedMenuItem::quit(app, Some(labels.quit.as_str())).map_err(|err| err.to_string())?,
+        ],
+    )
+    .map_err(|err| err.to_string())?;
+    let file_menu = Submenu::with_items(
+        app,
+        &labels.file,
+        true,
+        &[&PredefinedMenuItem::close_window(app, Some(labels.close_window.as_str())).map_err(|err| err.to_string())?],
+    )
+    .map_err(|err| err.to_string())?;
+    let edit_menu = Submenu::with_items(
+        app,
+        &labels.edit,
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, Some(labels.undo.as_str())).map_err(|err| err.to_string())?,
+            &PredefinedMenuItem::redo(app, Some(labels.redo.as_str())).map_err(|err| err.to_string())?,
+            &PredefinedMenuItem::separator(app).map_err(|err| err.to_string())?,
+            &PredefinedMenuItem::cut(app, Some(labels.cut.as_str())).map_err(|err| err.to_string())?,
+            &PredefinedMenuItem::copy(app, Some(labels.copy.as_str())).map_err(|err| err.to_string())?,
+            &PredefinedMenuItem::paste(app, Some(labels.paste.as_str())).map_err(|err| err.to_string())?,
+            &PredefinedMenuItem::select_all(app, Some(labels.select_all.as_str())).map_err(|err| err.to_string())?,
+        ],
+    )
+    .map_err(|err| err.to_string())?;
+    let view_menu = Submenu::with_items(
+        app,
+        &labels.view,
+        true,
+        &[&PredefinedMenuItem::fullscreen(app, Some(labels.fullscreen.as_str())).map_err(|err| err.to_string())?],
+    )
+    .map_err(|err| err.to_string())?;
+    let window_menu = Submenu::with_id_and_items(
+        app,
+        WINDOW_SUBMENU_ID,
+        &labels.window,
+        true,
+        &[
+            &PredefinedMenuItem::minimize(app, Some(labels.minimize.as_str())).map_err(|err| err.to_string())?,
+            &PredefinedMenuItem::maximize(app, Some(labels.zoom.as_str())).map_err(|err| err.to_string())?,
+            &PredefinedMenuItem::separator(app).map_err(|err| err.to_string())?,
+            &PredefinedMenuItem::close_window(app, Some(labels.close_window.as_str())).map_err(|err| err.to_string())?,
+        ],
+    )
+    .map_err(|err| err.to_string())?;
+    let help_menu = Submenu::with_id_and_items(app, HELP_SUBMENU_ID, &labels.help, true, &[])
+        .map_err(|err| err.to_string())?;
+    let menu = Menu::with_items(
+        app,
+        &[&app_menu, &file_menu, &edit_menu, &view_menu, &window_menu, &help_menu],
+    )
+    .map_err(|err| err.to_string())?;
+    app.set_menu(menu).map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn install_native_menu(app: &tauri::App) {
+    use tauri::Emitter;
+
+    let _ = apply_native_menu(app.handle(), &NativeMenuLabels::from_system());
     app.on_menu_event(|app, event| {
         if event.id().as_ref() == CHECK_UPDATE_MENU_ID {
             let _ = app.emit("app-update-check", ());
         }
     });
+}
+
+#[tauri::command]
+fn set_native_menu_locale(app: tauri::AppHandle, labels: NativeMenuLabels) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        apply_native_menu(&app, &labels)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, labels);
+        Ok(())
+    }
 }
 
 struct DesktopServer(Mutex<Option<Child>>);
@@ -371,10 +552,11 @@ pub fn run() {
             export_cmd::pick_save_path,
             export_cmd::write_export_file,
             export_cmd::export_pdf,
+            set_native_menu_locale,
         ])
         .setup(|app| -> Result<(), Box<dyn std::error::Error>> {
             #[cfg(target_os = "macos")]
-            install_check_update_menu(app);
+            install_native_menu(app);
             let Some(window) = app.get_webview_window("main") else {
                 return Ok(());
             };
