@@ -85,6 +85,55 @@ export function fileKind(name: string): FileKind | null {
   return KIND_BY_EXTENSION[fileExtension(name)] ?? null;
 }
 
+/** 聊天附件用：把常见扩展名收成带颜色的类型 */
+export type AttachFileKind =
+  | FileKind
+  | "markdown"
+  | "text"
+  | "png"
+  | "jpg"
+  | "gif"
+  | "webp"
+  | "svg"
+  | "bmp"
+  | "file";
+
+export function attachFileKind(name: string): AttachFileKind {
+  const ext = fileExtension(name);
+  if (ext === "md" || ext === "markdown") {
+    return "markdown";
+  }
+  if (ext === "txt" || ext === "log") {
+    return "text";
+  }
+  if (ext === "jpeg") {
+    return "jpg";
+  }
+  if (ext === "png" || ext === "jpg" || ext === "gif" || ext === "webp" || ext === "svg" || ext === "bmp") {
+    return ext;
+  }
+  return fileKind(name) ?? "file";
+}
+
+export function attachFileLabel(kind: AttachFileKind): string {
+  if (kind === "word") {
+    return "DOC";
+  }
+  if (kind === "excel") {
+    return "XLS";
+  }
+  if (kind === "markdown") {
+    return "MD";
+  }
+  if (kind === "text") {
+    return "TXT";
+  }
+  if (kind === "file") {
+    return "FILE";
+  }
+  return kind.toUpperCase();
+}
+
 export function videoMime(name: string): string {
   switch (fileExtension(name)) {
     case "webm":

@@ -1,4 +1,5 @@
-import type { FileKind } from "@/lib/document/fileKinds";
+import type { AttachFileKind, FileKind } from "@/lib/document/fileKinds";
+import { attachFileKind, attachFileLabel } from "@/lib/document/fileKinds";
 
 type Props = {
   type: FileKind;
@@ -6,6 +7,19 @@ type Props = {
 };
 
 const COLORS: Record<FileKind, string> = { pdf: "#E5252A", word: "#185ABD", excel: "#107C41", code: "#4B5563", video: "#7C3AED" };
+
+const ATTACH_COLORS: Record<AttachFileKind, string> = {
+  ...COLORS,
+  markdown: "#0F766E",
+  text: "#57534E",
+  png: "#2563EB",
+  jpg: "#D97706",
+  gif: "#DB2777",
+  webp: "#0891B2",
+  svg: "#7C3AED",
+  bmp: "#64748B",
+  file: "#78716C",
+};
 
 const FONT = "ui-sans-serif,system-ui,sans-serif";
 
@@ -38,4 +52,29 @@ export function fileTypeSvg(type: FileKind, size = 16): string {
 
 export function FileTypeIcon({ type, size = 16 }: Props) {
   return <span className="inline-flex shrink-0" dangerouslySetInnerHTML={{ __html: fileTypeSvg(type, size) }} />;
+}
+
+function attachBadge(type: AttachFileKind, color: string): string {
+  const kind: FileKind | null = type === "pdf" || type === "word" || type === "excel" || type === "code" || type === "video" ? type : null;
+  if (kind) {
+    return badge(kind);
+  }
+  const label = attachFileLabel(type);
+  const width = label.length > 3 ? 16 : 13;
+  return `<rect x="2" y="11" width="${width}" height="8" rx="1.5" fill="${color}"/><text x="${2 + width / 2}" y="17.2" text-anchor="middle" font-size="6" font-weight="800" fill="#fff" font-family="${FONT}">${label}</text>`;
+}
+
+function attachFileSvg(type: AttachFileKind, size: number): string {
+  const color = ATTACH_COLORS[type];
+  const picture =
+    type === "png" || type === "jpg" || type === "gif" || type === "webp" || type === "bmp"
+      ? `<path d="M8 16.5 11 13l3 3 2-1.5 3 3.5" fill="none" ${stroke(color, 1.4)} stroke-linecap="round" stroke-linejoin="round"/><circle cx="10.2" cy="10.2" r="1.1" fill="${color}"/>`
+      : type === "svg"
+        ? `<path d="M8.5 13.5c2 3 5 3 7 0" fill="none" ${stroke(color, 1.4)} stroke-linecap="round"/><path d="M9 18.5c2-2.5 6-2.5 8 0" fill="none" ${stroke(color, 1.4)} stroke-linecap="round"/>`
+        : "";
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M6 2h8.5L20 7.5V21a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z" fill="#fff" ${stroke(color, 1.5)}/><path d="M14.5 2v4.5a1 1 0 0 0 1 1H20" fill="none" ${stroke(color, 1.5)} stroke-linejoin="round"/>${picture}${attachBadge(type, color)}</svg>`;
+}
+
+export function AttachFileIcon({ name, size = 32 }: { name: string; size?: number }) {
+  return <span className="inline-flex shrink-0" dangerouslySetInnerHTML={{ __html: attachFileSvg(attachFileKind(name), size) }} />;
 }

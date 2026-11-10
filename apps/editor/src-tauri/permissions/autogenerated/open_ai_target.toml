@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-ai-target"
+description = "Enables the open_ai_target command without any pre-configured scope."
+commands.allow = ["open_ai_target"]
+
+[[permission]]
+identifier = "deny-open-ai-target"
+description = "Denies the open_ai_target command without any pre-configured scope."
+commands.deny = ["open_ai_target"]

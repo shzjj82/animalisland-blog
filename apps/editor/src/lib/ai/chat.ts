@@ -12,6 +12,8 @@ export type ChatBubble = {
   content: string;
   quote?: string;
   attachments?: LocalAttachment[];
+  /** 技能执行结果等系统提示，不当成普通用户气泡 */
+  notice?: boolean;
 };
 
 const TEXT_EXTS = new Set([

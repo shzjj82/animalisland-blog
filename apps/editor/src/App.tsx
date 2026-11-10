@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type EditorJS from "@editorjs/editorjs";
 import { useTranslation } from "react-i18next";
-import { CloudStorage, CloseSmall, Delete, Download, Export, HamburgerButton, HardDisk, MoreTwo, People, Plus, Redo, Robot, Search, Undo } from "@icon-park/react";
+import { CloudStorage, CloseSmall, Delete, Download, Export, HamburgerButton, HardDisk, MoreTwo, People, Plus, Redo, Search, Undo } from "@icon-park/react";
 import type { EditorJsBlock, EditorJsDocument } from "@myblog/shared";
 import { BlockEditor, type EditorHistoryApi } from "@/components/block-editor";
 import type { PageLinkData } from "@/components/block-editor/tools/PageLinkTool";
@@ -84,6 +84,7 @@ import {
 } from "@/store/teamStore";
 import { TeamManageSidebar } from "@/components/team-manage-sidebar";
 import { pageTitle, setAppLocale, type AppLocale } from "@/i18n";
+import { AiRobotIcon } from "@/components/ai-robot-icon";
 import { exportDocument, type ExportFormat } from "@/lib/document/export";
 import { fileKind, isImageFile } from "@/lib/document/fileKinds";
 import { importSpreadsheet, importVideo, importWord, mergeImported, readInsertable, WORD_ACCEPT } from "@/lib/document/import";
@@ -1452,7 +1453,7 @@ export function App() {
             </Button>
             <NotifyBell session={session} onWriteTodo={(todo) => writeTodoPage(todo)} />
             <Button type="button" variant="outline" size="icon" aria-label={t("wikiAsk.title")} onClick={openWiki}>
-              <Robot {...iconProps} />
+              <AiRobotIcon size={16} />
             </Button>
             <LanguageSwitch onChange={(locale) => void switchLocale(locale)} />
           </span>
@@ -1529,7 +1530,7 @@ export function App() {
             </Popover>
             <NotifyBell session={session} onWriteTodo={(todo) => writeTodoPage(todo)} />
             <Button type="button" variant="outline" size="icon" aria-label={t("wikiAsk.title")} onClick={openWiki}>
-              <Robot {...iconProps} />
+              <AiRobotIcon size={16} />
             </Button>
           </span>
         </header>

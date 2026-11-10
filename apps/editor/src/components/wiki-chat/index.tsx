@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
-import { Close, Copy, Paperclip, Refresh, Robot } from "@icon-park/react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Close, Copy, Paperclip, Refresh, Send, SettingTwo, Time } from "@icon-park/react";
 import type { AiAttachment, AiChatMessage } from "@myblog/shared";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { ChatMarkdown } from "@/components/editor-spotlight/ChatMarkdown";
 import { PendingAttachments } from "@/components/editor-spotlight/ChatAttachments";
 import { aiChat } from "@/lib/ai/client";
@@ -14,14 +15,36 @@ import {
   type ChatBubble,
   type LocalAttachment,
 } from "@/lib/ai/chat";
+import {
+  SKILL_SYSTEM,
+  extractSkills,
+  isDesktopApp,
+  loadSkillGrants,
+  runSkill,
+  saveSkillGrants,
+  skillPreview,
+  skillScope,
+  type SkillCall,
+  type SkillGrants,
+  type SkillScope,
+} from "@/lib/ai/skills";
 import { readFileText } from "@/lib/document/fileText";
 import { fileExtension } from "@/lib/document/fileKinds";
 import { pageTodos, retrieveWiki, type SearchDoc } from "@/lib/document/search";
 import { copyText } from "@/lib/clipboard";
+import {
+  deleteThread,
+  findThread,
+  loadActiveThreadId,
+  loadThreads,
+  saveActiveThreadId,
+  upsertThread,
+  type WikiThread,
+} from "@/lib/ai/wikiChatHistory";
 import { iconParkOutline } from "@/lib/iconPark";
 import { t } from "@/i18n";
-import { useVisualViewport } from "@/lib/useKeyboardInset";
 import { useTranslation } from "react-i18next";
+import { HistoryPanel, HISTORY_SIDEBAR_W } from "./HistoryPanel";
 
 type Props = {
   open: boolean;
@@ -31,6 +54,70 @@ type Props = {
   onClose: () => void;
   onLogin: () => void;
 };
+
+type Frame = { x: number; y: number; w: number; h: number };
+
+const FRAME_KEY = "editor:wiki-chat-frame";
+const MIN_W = 340;
+const MIN_H = 480;
+const DEFAULT_H = 720;
+const LEGACY_H = 560;
+
+function defaultFrame(): Frame {
+  const w = Math.min(400, Math.max(MIN_W, window.innerWidth - 32));
+  const h = Math.min(DEFAULT_H, Math.max(MIN_H, window.innerHeight - 40));
+  return {
+    w,
+    h,
+    x: Math.max(16, window.innerWidth - w - 24),
+    y: Math.max(16, window.innerHeight - h - 24),
+  };
+}
+
+function loadFrame(): Frame {
+  try {
+    const raw = localStorage.getItem(FRAME_KEY);
+    if (!raw) {
+      return defaultFrame();
+    }
+    const parsed = JSON.parse(raw) as Partial<Frame>;
+    const base = defaultFrame();
+    const savedH = Number(parsed.h) || 0;
+    const useDefaultH = !savedH || savedH === LEGACY_H;
+    return clampFrame({
+      x: Number(parsed.x) || base.x,
+      y: useDefaultH ? base.y : Number(parsed.y) || base.y,
+      w: Number(parsed.w) || base.w,
+      h: useDefaultH ? base.h : savedH,
+    });
+  } catch {
+    return defaultFrame();
+  }
+}
+
+function windowBox(frame: Frame, historyOpen: boolean): { left: number; width: number } {
+  if (!historyOpen) {
+    return { left: frame.x, width: frame.w };
+  }
+  const extra = HISTORY_SIDEBAR_W;
+  const preferLeft = frame.x - extra;
+  if (preferLeft >= 8) {
+    return { left: preferLeft, width: frame.w + extra };
+  }
+  const maxRight = window.innerWidth - 8;
+  return { left: frame.x, width: Math.min(frame.w + extra, Math.max(frame.w, maxRight - frame.x)) };
+}
+
+function clampFrame(frame: Frame): Frame {
+  const w = Math.min(Math.max(frame.w, MIN_W), Math.max(MIN_W, window.innerWidth - 16));
+  const h = Math.min(Math.max(frame.h, MIN_H), Math.max(MIN_H, window.innerHeight - 16));
+  return {
+    w,
+    h,
+    x: Math.min(Math.max(8, frame.x), Math.max(8, window.innerWidth - w - 8)),
+    y: Math.min(Math.max(8, frame.y), Math.max(8, window.innerHeight - h - 8)),
+  };
+}
 
 function capImages(list: AiAttachment[]): AiAttachment[] {
   let images = 0;
@@ -101,7 +188,6 @@ async function readUpload(files: File[]): Promise<LocalAttachment[]> {
   return out;
 }
 
-/** 把这一轮上传的正文写进用户消息，避免只靠附件字段时被页面摘录盖住 */
 function userContent(question: string, files: LocalAttachment[] | undefined, uploadedLabel: string, questionLabel: string, fallback: string): string {
   const ask = question.trim();
   const uploaded = (files ?? [])
@@ -118,26 +204,38 @@ function userContent(question: string, files: LocalAttachment[] | undefined, upl
 
 export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLogin }: Props) {
   const { t: tr } = useTranslation();
-  const viewport = useVisualViewport();
+  const desktop = isDesktopApp();
+  const [frame, setFrame] = useState<Frame>(() => (typeof window === "undefined" ? { x: 24, y: 24, w: 400, h: DEFAULT_H } : loadFrame()));
   const [prompt, setPrompt] = useState("");
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
-  const [bubbles, setBubbles] = useState<ChatBubble[]>([]);
+  const [threadId, setThreadId] = useState<string | null>(() => loadActiveThreadId());
+  const [threads, setThreads] = useState<WikiThread[]>(() => loadThreads());
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [bubbles, setBubbles] = useState<ChatBubble[]>(() => {
+    const active = loadActiveThreadId();
+    return active ? findThread(active)?.bubbles ?? [] : [];
+  });
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [replyingId, setReplyingId] = useState<string | null>(null);
+  const [grants, setGrants] = useState<SkillGrants>(() => loadSkillGrants());
+  const [permOpen, setPermOpen] = useState(false);
+  const [pendingSkills, setPendingSkills] = useState<SkillCall[]>([]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const copiedTimer = useRef(0);
+  const dragRef = useRef<{ pointer: number; x: number; y: number; start: Frame; mode: "move" | "resize" } | null>(null);
 
   useEffect(() => {
     if (!open) {
       abortRef.current?.abort();
       return;
     }
+    setFrame(loadFrame());
     const timer = window.setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 30);
     return () => window.clearTimeout(timer);
   }, [open, focusToken]);
@@ -147,7 +245,7 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
     if (el) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [bubbles, sending]);
+  }, [bubbles, sending, pendingSkills]);
 
   useEffect(() => {
     if (!open) {
@@ -156,16 +254,128 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
+        if (permOpen) {
+          setPermOpen(false);
+          return;
+        }
+        if (historyOpen) {
+          setHistoryOpen(false);
+          return;
+        }
         onClose();
       }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [open, onClose]);
+  }, [open, onClose, permOpen, historyOpen]);
+
+  useEffect(() => {
+    const onResize = () => setFrame((prev) => clampFrame(prev));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    localStorage.setItem(FRAME_KEY, JSON.stringify(frame));
+  }, [frame, open]);
+
+  useEffect(() => {
+    if (sending) {
+      return;
+    }
+    const id = upsertThread(threadId, bubbles, tr("wikiAsk.untitledChat"));
+    if (id && id !== threadId) {
+      setThreadId(id);
+    }
+    setThreads(loadThreads());
+  }, [bubbles, sending, threadId, tr]);
 
   if (!open) {
     return null;
   }
+
+  const persistGrants = (next: SkillGrants) => {
+    setGrants(next);
+    saveSkillGrants(next);
+  };
+
+  const startNewChat = () => {
+    abortRef.current?.abort();
+    setSending(false);
+    setPendingSkills([]);
+    setError("");
+    setPrompt("");
+    setAttachments([]);
+    setBubbles([]);
+    setThreadId(null);
+    saveActiveThreadId(null);
+    setPermOpen(false);
+  };
+
+  const openThread = (id: string) => {
+    const thread = findThread(id);
+    if (!thread) {
+      return;
+    }
+    abortRef.current?.abort();
+    setSending(false);
+    setPendingSkills([]);
+    setError("");
+    setPrompt("");
+    setAttachments([]);
+    setBubbles(thread.bubbles);
+    setThreadId(thread.id);
+    saveActiveThreadId(thread.id);
+  };
+
+  const removeThread = (id: string) => {
+    deleteThread(id);
+    setThreads(loadThreads());
+    if (threadId !== id) {
+      return;
+    }
+    abortRef.current?.abort();
+    setSending(false);
+    setPendingSkills([]);
+    setError("");
+    setPrompt("");
+    setAttachments([]);
+    setBubbles([]);
+    setThreadId(null);
+    saveActiveThreadId(null);
+  };
+
+  const beginDrag = (event: React.PointerEvent, mode: "move" | "resize") => {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    dragRef.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, start: frame, mode };
+  };
+
+  const onDragMove = (event: React.PointerEvent) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointer !== event.pointerId) {
+      return;
+    }
+    const dx = event.clientX - drag.x;
+    const dy = event.clientY - drag.y;
+    if (drag.mode === "move") {
+      setFrame(clampFrame({ ...drag.start, x: drag.start.x + dx, y: drag.start.y + dy }));
+      return;
+    }
+    setFrame(clampFrame({ ...drag.start, w: drag.start.w + dx, h: drag.start.h + dy }));
+  };
+
+  const endDrag = (event: React.PointerEvent) => {
+    if (dragRef.current?.pointer === event.pointerId) {
+      dragRef.current = null;
+    }
+  };
 
   const addFiles = async (files: File[]) => {
     if (!files.length) {
@@ -188,12 +398,13 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
   };
 
   const answer = async (history: ChatBubble[], assistantId: string, onFail: () => void) => {
-    const user = [...history].reverse().find((item) => item.role === "user");
+    const user = [...history].reverse().find((item) => item.role === "user" && !item.notice);
     const text = user?.content.trim() ?? "";
     const attach = user?.attachments ?? [];
     setError("");
     setSending(true);
     setReplyingId(assistantId);
+    setPendingSkills([]);
     const controller = new AbortController();
     abortRef.current = controller;
     try {
@@ -221,7 +432,9 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
           role: item.role,
           content:
             item.role === "user"
-              ? userContent(item.content, item.attachments, tr("wikiAsk.uploaded"), tr("wikiAsk.question"), tr("ai.attachmentsPrompt"))
+              ? item.notice
+                ? item.content
+                : userContent(item.content, item.attachments, tr("wikiAsk.uploaded"), tr("wikiAsk.question"), tr("ai.attachmentsPrompt"))
               : item.content,
         }))
         .filter((item) => item.content.trim());
@@ -245,7 +458,7 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
         {
           messages,
           attachments: capImages(uploadedFiles),
-          system: t("wikiAsk.system"),
+          system: `${t("wikiAsk.system")}\n${SKILL_SYSTEM}`,
           rag: !aboutTodos,
         },
         controller.signal,
@@ -257,8 +470,11 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
           },
         },
       );
-      const finalText = result.reply.trim() || tr("spotlight.emptyReply");
-      setBubbles((prev) => prev.map((item) => (item.id === assistantId ? { ...item, content: finalText } : item)));
+      const parsed = extractSkills(result.reply.trim() || tr("spotlight.emptyReply"));
+      setBubbles((prev) => prev.map((item) => (item.id === assistantId ? { ...item, content: parsed.text || item.content } : item)));
+      if (parsed.skills.length) {
+        setPendingSkills(parsed.skills);
+      }
     } catch (err) {
       if (controller.signal.aborted) {
         return;
@@ -306,7 +522,7 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
     }
     let userIndex = -1;
     for (let i = index - 1; i >= 0; i -= 1) {
-      if (bubbles[i]?.role === "user") {
+      if (bubbles[i]?.role === "user" && !bubbles[i]?.notice) {
         userIndex = i;
         break;
       }
@@ -335,91 +551,204 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
     }, 1600);
   };
 
+  const allowSkill = async (call: SkillCall, remember: boolean) => {
+    const scope = skillScope(call.name);
+    if (remember) {
+      persistGrants({ ...grants, [scope]: true });
+    }
+    if (!desktop) {
+      setError(tr("wikiAsk.skillDesktopOnly"));
+      return;
+    }
+    try {
+      const output = await runSkill(call);
+      const notice: ChatBubble = {
+        id: uid(),
+        role: "user",
+        notice: true,
+        content: tr("wikiAsk.skillResult", { skill: tr(skillLabel[scope]), result: output }),
+      };
+      const rest = pendingSkills.filter((item) => item !== call);
+      setPendingSkills(rest);
+      const assistantId = uid();
+      const history = [...bubbles, notice];
+      setBubbles([...history, { id: assistantId, role: "assistant", content: "" }]);
+      void answer(history, assistantId, () => {
+        setBubbles((prev) => prev.filter((item) => item.id !== notice.id && item.id !== assistantId));
+      });
+    } catch (err) {
+      setError(err instanceof Error ? skillErrorMessage(err.message) : tr("wikiAsk.skillFailed"));
+    }
+  };
+
+  const canSend = loggedIn && !sending && !uploading && Boolean(prompt.trim() || attachments.length);
+  const box = windowBox(frame, historyOpen);
+
   return (
     <aside
-      className="fixed top-0 right-0 bottom-0 z-50 flex w-[min(420px,100vw)] flex-col border-l border-border bg-background pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] shadow-[-12px_0_32px_rgb(0_0_0/0.08)]"
-      /* 跟随可视视口（top + height）：键盘弹出 / iOS 平移可视视口时都精确覆盖可见区域，
-         键盘弹出时去掉底部安全距离，贴住键盘上沿 */
-      style={{
-        top: viewport.top,
-        height: viewport.height,
-        paddingBottom: viewport.keyboardOpen ? "0px" : undefined,
-      }}
+      className="fixed z-50 flex flex-col overflow-hidden rounded-2xl border border-border/50 bg-background shadow-[0_18px_50px_rgb(0_0_0/0.14)]"
+      style={{ left: box.left, top: frame.y, width: box.width, height: frame.h }}
+      onPointerMove={onDragMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
     >
-      <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
-        <Robot {...iconParkOutline} size={16} aria-hidden />
+      <header
+        className="flex shrink-0 cursor-grab items-center gap-1 border-b border-border/40 px-3 py-2 active:cursor-grabbing"
+        onPointerDown={(event) => {
+          if ((event.target as HTMLElement).closest("button")) {
+            return;
+          }
+          beginDrag(event, "move");
+        }}
+      >
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{tr("wikiAsk.title")}</span>
+        <Button type="button" variant={historyOpen ? "secondary" : "ghost"} size="icon" aria-label={tr("wikiAsk.history")} onClick={() => setHistoryOpen((open) => !open)}>
+          <Time {...iconParkOutline} size={16} />
+        </Button>
+        <Button type="button" variant={permOpen ? "secondary" : "ghost"} size="icon" aria-label={tr("wikiAsk.permissions")} onClick={() => setPermOpen((open) => !open)}>
+          <SettingTwo {...iconParkOutline} size={16} />
+        </Button>
         <Button type="button" variant="ghost" size="icon" aria-label={tr("wikiAsk.close")} onClick={onClose}>
           <Close {...iconParkOutline} size={16} />
         </Button>
       </header>
-      <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
-        {bubbles.map((item) => (
-          <div key={item.id} className={item.role === "user" ? "select-text text-sm" : "select-text rounded-md bg-muted px-3 py-2 text-sm"}>
-            {item.role === "assistant" ? (
-              <>
+
+      <div className="flex min-h-0 flex-1">
+      {historyOpen ? (
+        <HistoryPanel
+          threads={threads}
+          activeId={threadId}
+          onNew={startNewChat}
+          onOpen={openThread}
+          onDelete={removeThread}
+        />
+      ) : null}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {permOpen ? (
+        <div className="shrink-0 space-y-3 border-b border-border/40 px-4 py-3 text-sm">
+          <p className="text-muted-foreground text-xs">{tr("wikiAsk.permHint")}</p>
+          {(["files", "open", "shell"] as SkillScope[]).map((scope) => (
+            <label key={scope} className="flex items-start justify-between gap-3">
+              <span>
+                <span className="block font-medium">{tr(skillLabel[scope])}</span>
+                <span className="text-muted-foreground mt-0.5 block text-xs">{tr(skillHint[scope])}</span>
+              </span>
+              <Switch
+                checked={grants[scope]}
+                disabled={!desktop}
+                onCheckedChange={(checked) => persistGrants({ ...grants, [scope]: checked })}
+              />
+            </label>
+          ))}
+          {!desktop ? <p className="text-muted-foreground text-xs">{tr("wikiAsk.skillDesktopOnly")}</p> : null}
+        </div>
+      ) : null}
+
+      <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-4">
+        {bubbles.length === 0 ? (
+          <AssistantBubble>
+            <p className="leading-5">{tr("wikiAsk.emptyHint")}</p>
+          </AssistantBubble>
+        ) : (
+          bubbles.map((item) =>
+            item.notice ? (
+              <p key={item.id} className="text-muted-foreground mx-auto max-w-[90%] rounded-xl bg-muted/70 px-3 py-2 text-center font-mono text-[11px] whitespace-pre-wrap">
+                {item.content}
+              </p>
+            ) : item.role === "assistant" ? (
+              <AssistantBubble key={item.id}>
                 <ChatMarkdown content={item.content || (sending && item.id === replyingId ? tr("spotlight.thinking") : "")} />
                 {item.content.trim() && item.id !== replyingId ? (
-                  <div className="mt-2 flex items-center gap-1">
-                    <Button type="button" variant="ghost" size="xs" onClick={() => void copyReply(item)}>
+                  <div className="-ml-1 mt-1 flex items-center gap-0.5">
+                    <Button type="button" variant="ghost" size="icon-xs" aria-label={copiedId === item.id ? tr("wikiAsk.copied") : tr("wikiAsk.copy")} onClick={() => void copyReply(item)}>
                       <Copy {...iconParkOutline} size={14} />
-                      {copiedId === item.id ? tr("wikiAsk.copied") : tr("wikiAsk.copy")}
                     </Button>
-                    <Button type="button" variant="ghost" size="xs" disabled={sending} onClick={() => regenerate(item.id)}>
+                    <Button type="button" variant="ghost" size="icon-xs" disabled={sending} aria-label={tr("wikiAsk.regenerate")} onClick={() => regenerate(item.id)}>
                       <Refresh {...iconParkOutline} size={14} />
-                      {tr("wikiAsk.regenerate")}
                     </Button>
                   </div>
                 ) : null}
-              </>
+              </AssistantBubble>
             ) : (
-              <>
-                {item.content}
-                {item.attachments?.length ? (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {item.attachments.map((file) => file.name).join(tr("common.listSeparator"))}
-                  </p>
-                ) : null}
-              </>
-            )}
-          </div>
-        ))}
+              <div key={item.id} className="flex justify-end">
+                <div className="bg-primary text-primary-foreground max-w-[85%] rounded-2xl rounded-br-md px-3 py-2 text-sm">
+                  {item.content ? <p className="leading-5 whitespace-pre-wrap">{item.content}</p> : null}
+                  {item.attachments?.length ? (
+                    <div className={item.content ? "mt-2" : undefined}>
+                      <PendingAttachments items={item.attachments} />
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ),
+          )
+        )}
       </div>
+
+      {pendingSkills.length ? (
+        <div className="shrink-0 space-y-2 border-t border-border/40 px-4 py-3">
+          {pendingSkills.map((call, index) => (
+            <div key={`${call.name}-${index}`} className="rounded-xl border border-border bg-muted/40 p-3 text-sm">
+              <p className="font-medium">{tr("wikiAsk.skillAsk", { skill: tr(skillLabel[skillScope(call.name)]) })}</p>
+              <p className="text-muted-foreground mt-1 font-mono text-xs break-all">{skillPreview(call)}</p>
+              <div className="mt-2 flex flex-wrap justify-end gap-2">
+                <Button type="button" variant="ghost" size="sm" onClick={() => setPendingSkills((prev) => prev.filter((item) => item !== call))}>
+                  {tr("wikiAsk.skillDeny")}
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => void allowSkill(call, false)}>
+                  {tr("wikiAsk.skillOnce")}
+                </Button>
+                <Button type="button" size="sm" onClick={() => void allowSkill(call, true)}>
+                  {tr("wikiAsk.skillAllow")}
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       <form
-        className="shrink-0 border-t border-border p-3"
+        className="shrink-0 border-t border-border/30 p-3 pt-2"
         onSubmit={(event) => {
           event.preventDefault();
           void send();
         }}
       >
-        {attachments.length ? (
-          <PendingAttachments
-            items={attachments}
-            onRemove={(id) => setAttachments((prev) => prev.filter((item) => item.id !== id))}
-          />
+        {error ? <p className="text-destructive mb-2 text-xs">{error}</p> : null}
+        {!loggedIn ? (
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-muted-foreground text-xs">{tr("wikiAsk.login")}</p>
+            <Button type="button" size="sm" onClick={onLogin}>
+              {tr("app.logIn")}
+            </Button>
+          </div>
         ) : null}
-        {error ? <p className="mb-2 text-xs text-destructive">{error}</p> : null}
-        {!loggedIn ? <p className="mb-2 text-xs text-muted-foreground">{tr("wikiAsk.login")}</p> : null}
-        <textarea
-          ref={inputRef}
-          rows={3}
-          value={prompt}
-          disabled={!loggedIn || sending}
-          enterKeyHint="send"
-          placeholder={tr("wikiAsk.placeholder")}
-          aria-label={tr("wikiAsk.placeholder")}
-          // text-base(16px) 防止 iOS 聚焦时整页放大；桌面端回到 text-sm
-          className="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
-          onChange={(event) => setPrompt(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault();
-              void send();
-            }
-          }}
-        />
-        <div className="mt-2 flex items-center justify-between gap-2">
-          <div>
+        <div className="rounded-2xl border border-border/40 bg-muted/20 px-2.5 pt-2.5 pb-2 focus-within:border-border/70">
+          {attachments.length ? (
+            <PendingAttachments
+              items={attachments}
+              onRemove={(id) => setAttachments((prev) => prev.filter((item) => item.id !== id))}
+              className="pb-2"
+            />
+          ) : null}
+          <textarea
+            ref={inputRef}
+            rows={2}
+            value={prompt}
+            disabled={!loggedIn || sending}
+            enterKeyHint="send"
+            placeholder={tr("wikiAsk.placeholder")}
+            aria-label={tr("wikiAsk.placeholder")}
+            className="max-h-36 w-full resize-none bg-transparent px-2 py-1.5 text-base outline-none ring-0 focus:outline-none focus-visible:ring-0 sm:text-sm"
+            onChange={(event) => setPrompt(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                void send();
+              }
+            }}
+          />
+          <div className="flex items-center justify-between gap-2 px-1">
             <input
               ref={fileRef}
               type="file"
@@ -428,25 +757,62 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
               className="hidden"
               onChange={(event) => void addFiles(Array.from(event.target.files ?? []))}
             />
-            <Button type="button" variant="ghost" size="sm" className="min-h-9" disabled={!loggedIn || uploading} onClick={() => fileRef.current?.click()}>
-              <Paperclip {...iconParkOutline} size={14} />
-              {tr("wikiAsk.attach")}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground focus-visible:border-transparent focus-visible:ring-0"
+              disabled={!loggedIn || uploading}
+              aria-label={tr("wikiAsk.attach")}
+              onClick={() => fileRef.current?.click()}
+            >
+              <Paperclip {...iconParkOutline} size={16} />
+            </Button>
+            <Button type="submit" size="icon-sm" className="rounded-full focus-visible:ring-0" disabled={!canSend} aria-label={tr("wikiAsk.send")}>
+              <Send {...iconParkOutline} size={15} />
             </Button>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">{tr("wikiAsk.hint")}</span>
-            {!loggedIn ? (
-              <Button type="button" size="sm" onClick={onLogin}>
-                {tr("app.logIn")}
-              </Button>
-            ) : (
-              <Button type="submit" size="sm" className="min-h-9 px-4" disabled={sending || uploading || (!prompt.trim() && !attachments.length)}>
-                {tr("wikiAsk.send")}
-              </Button>
-            )}
-          </div>
         </div>
+        <p className="text-muted-foreground mt-1.5 px-1 text-[11px]">{tr("wikiAsk.hint")}</p>
       </form>
+      </div>
+      </div>
+      <button
+        type="button"
+        aria-label={tr("wikiAsk.resize")}
+        className="absolute right-1 bottom-1 size-3 cursor-nwse-resize rounded-sm border-r-2 border-b-2 border-border/80"
+        onPointerDown={(event) => beginDrag(event, "resize")}
+      />
     </aside>
   );
+}
+
+function AssistantBubble({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex justify-start">
+      <div className="bg-muted/70 max-w-[85%] rounded-2xl rounded-bl-md px-3 py-2 text-sm select-text">{children}</div>
+    </div>
+  );
+}
+
+const skillLabel: Record<SkillScope, "wikiAsk.skillFiles" | "wikiAsk.skillOpen" | "wikiAsk.skillShell"> = {
+  files: "wikiAsk.skillFiles",
+  open: "wikiAsk.skillOpen",
+  shell: "wikiAsk.skillShell",
+};
+
+const skillHint: Record<SkillScope, "wikiAsk.skillHintFiles" | "wikiAsk.skillHintOpen" | "wikiAsk.skillHintShell"> = {
+  files: "wikiAsk.skillHintFiles",
+  open: "wikiAsk.skillHintOpen",
+  shell: "wikiAsk.skillHintShell",
+};
+
+function skillErrorMessage(code: string): string {
+  if (code === "DESKTOP_ONLY") {
+    return t("wikiAsk.skillDesktopOnly");
+  }
+  if (code === "COMMAND_TIMEOUT") {
+    return t("wikiAsk.skillTimeout");
+  }
+  return t("wikiAsk.skillFailed");
 }

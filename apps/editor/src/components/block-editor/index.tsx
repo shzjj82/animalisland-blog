@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { CloseSmall, DownC, More, Plus, Redo, Robot, Undo } from "@icon-park/react";
+import { CloseSmall, DownC, More, Plus, Redo, Undo } from "@icon-park/react";
 import EditorJS from "@editorjs/editorjs";
 import Delimiter from "@editorjs/delimiter";
 import Header from "@editorjs/header";
@@ -23,6 +23,7 @@ import { VideoBlockTool } from "./tools/VideoBlockTool";
 import type { AttachmentData } from "@/store/fileStore";
 import { htmlToBlocks } from "@/lib/document/htmlToBlocks";
 import { isImageFile } from "@/lib/document/fileKinds";
+import { AiRobotIcon } from "@/components/ai-robot-icon";
 import { bindEditingGuards } from "./editingGuards";
 import { menuIcons } from "./menuIcons";
 import { bindToolbarAnchor, blockIconKey } from "./toolbarAnchor";
@@ -761,7 +762,7 @@ export function BlockEditor({ doc, onChange, onOpenPage, onCreateChild, resolveP
                 ))}
               </div>
               <button type="button" aria-label={t("app.aiChatTitle")} className={barButtonClass} onPointerDown={keepEditorFocus} onMouseDown={keepEditorFocus} onClick={openAi}>
-                <Robot {...barIconProps} />
+                <AiRobotIcon size={20} />
               </button>
               <button type="button" aria-label={t("app.blockActions")} className={barButtonClass} onPointerDown={keepEditorFocus} onMouseDown={keepEditorFocus} onClick={openBlockSettings}>
                 <More {...barIconProps} />

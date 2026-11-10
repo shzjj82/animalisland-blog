@@ -1,9 +1,9 @@
 use std::fs::OpenOptions;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{mpsc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 mod export_cmd;
 
@@ -205,6 +205,150 @@ fn install_native_menu(app: &tauri::App) {
             let _ = app.emit("app-update-check", ());
         }
     });
+}
+
+const AI_COMMAND_TIMEOUT: Duration = Duration::from_secs(20);
+const AI_OUTPUT_LIMIT: usize = 16 * 1024;
+const AI_FILE_LIMIT: u64 = 256 * 1024;
+
+fn clip_output(text: String) -> String {
+    if text.len() <= AI_OUTPUT_LIMIT {
+        return text;
+    }
+    let mut end = AI_OUTPUT_LIMIT;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}\n…(truncated)", &text[..end])
+}
+
+fn wait_child(mut child: Child) -> Result<String, String> {
+    let deadline = Instant::now() + AI_COMMAND_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let mut stdout = String::new();
+                let mut stderr = String::new();
+                if let Some(mut pipe) = child.stdout.take() {
+                    let _ = pipe.read_to_string(&mut stdout);
+                }
+                if let Some(mut pipe) = child.stderr.take() {
+                    let _ = pipe.read_to_string(&mut stderr);
+                }
+                let mut out = String::new();
+                if !stdout.trim().is_empty() {
+                    out.push_str(&stdout);
+                }
+                if !stderr.trim().is_empty() {
+                    if !out.is_empty() {
+                        out.push('\n');
+                    }
+                    out.push_str(&stderr);
+                }
+                if !status.success() {
+                    let code = status.code().map(|n| n.to_string()).unwrap_or_else(|| "?".into());
+                    if out.is_empty() {
+                        return Err(format!("exit {code}"));
+                    }
+                    return Ok(clip_output(format!("exit {code}\n{out}")));
+                }
+                return Ok(clip_output(if out.is_empty() { "(no output)".into() } else { out }));
+            }
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                return Err("COMMAND_TIMEOUT".into());
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(80)),
+            Err(err) => return Err(err.to_string()),
+        }
+    }
+}
+
+/// 用户在聊天里点了允许之后，才执行这一条本机命令。
+#[tauri::command]
+fn run_ai_command(command: String) -> Result<String, String> {
+    let command = command.trim();
+    if command.is_empty() || command.len() > 4000 || command.contains('\0') {
+        return Err("COMMAND_INVALID".into());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let child = Command::new("cmd")
+            .args(["/C", command])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|err| err.to_string())?;
+        wait_child(child)
+    }
+    #[cfg(not(windows))]
+    {
+        let child = Command::new("sh")
+            .args(["-c", command])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|err| err.to_string())?;
+        wait_child(child)
+    }
+}
+
+#[tauri::command]
+fn open_ai_target(target: String) -> Result<(), String> {
+    let target = target.trim();
+    if target.is_empty() || target.len() > 4000 || target.contains('\0') {
+        return Err("TARGET_INVALID".into());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(target)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|err| err.to_string())?;
+        Ok(())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        Command::new("cmd")
+            .args(["/C", "start", "", target])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|err| err.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = target;
+        Err("OPEN_UNSUPPORTED".into())
+    }
+}
+
+#[tauri::command]
+fn read_ai_file(path: String) -> Result<String, String> {
+    let path = PathBuf::from(path.trim());
+    if path.as_os_str().is_empty() {
+        return Err("PATH_INVALID".into());
+    }
+    let meta = std::fs::metadata(&path).map_err(|err| err.to_string())?;
+    if !meta.is_file() {
+        return Err("NOT_A_FILE".into());
+    }
+    if meta.len() > AI_FILE_LIMIT {
+        return Err("FILE_TOO_LARGE".into());
+    }
+    let bytes = std::fs::read(&path).map_err(|err| err.to_string())?;
+    Ok(clip_output(String::from_utf8_lossy(&bytes).into_owned()))
 }
 
 #[tauri::command]
@@ -553,6 +697,9 @@ pub fn run() {
             export_cmd::write_export_file,
             export_cmd::export_pdf,
             set_native_menu_locale,
+            run_ai_command,
+            open_ai_target,
+            read_ai_file,
         ])
         .setup(|app| -> Result<(), Box<dyn std::error::Error>> {
             #[cfg(target_os = "macos")]
