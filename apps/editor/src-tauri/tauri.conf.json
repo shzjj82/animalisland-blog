@@ -11,7 +11,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhFODY4QTYwNDc4NEFENEYK\nUldSUHJZUkhZSXFHanAyMy9aNzdnRVR4dEZYSUFpTzlabjRxbStwTUdBbU9QbmFGU1UwYmJtUTEK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhFODY4QTYwNDc4NEFENEYKUldSUHJZUkhZSXFHanAyMy9aNzdnRVR4dEZYSUFpTzlabjRxbStwTUdBbU9QbmFGU1UwYmJtUTEK",
       "endpoints": [
         "https://championsea.oss-cn-shanghai.aliyuncs.com/wiki-agent/latest.json"
       ],
