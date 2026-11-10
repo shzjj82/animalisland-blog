@@ -47,12 +47,43 @@ function copyInto(file) {
     run("ditto", [file, dest]);
   } else {
     fs.copyFileSync(file, dest);
-  }
+    50|  }
   console.log(dest);
 }
 
-function packMacos() {
+/** 更新插件用私钥签名。优先用环境变量，否则用本机 .updater 里的密钥文件 */
+function loadUpdaterKey() {
   loadSigningEnv();
+  if (process.env.TAURI_SIGNING_PRIVATE_KEY) {
+    return;
+  }
+    60|  const keyFile = path.join(root, "src-tauri/.updater/wiki-agent.key");
+  if (!fs.existsSync(keyFile)) {
+    console.error("缺少更新签名私钥：src-tauri/.updater/wiki-agent.key");
+    console.error("也可以把密钥内容设到 TAURI_SIGNING_PRIVATE_KEY。没有私钥，以后的版本无法在应用内安装。");
+    process.exit(1);
+  }
+  process.env.TAURI_SIGNING_PRIVATE_KEY = keyFile;
+}
+
+function copyUpdaterFiles(dir) {
+    70|  if (!fs.existsSync(dir)) {
+    return;
+  }
+  for (const name of fs.readdirSync(dir)) {
+    if (name.endsWith(".app.tar.gz") || name.endsWith(".sig") || name.endsWith(".nsis.zip")) {
+      copyInto(path.join(dir, name));
+    }
+  }
+}
+
+function writeUpdateManifest() {
+    80|  const version = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
+  run(process.execPath, ["scripts/gen-update-manifest.mjs", releaseDir, version]);
+}
+
+function packMacos() {
+  loadUpdaterKey();
   const identity = process.env.APPLE_SIGNING_IDENTITY;
   const signed = Boolean(identity && identity !== "-");
   const notarize = Boolean(
@@ -115,6 +146,8 @@ function packMacos() {
     }
   }
   copyInto(app);
+  copyUpdaterFiles(path.join(bundle, "macos"));
+  writeUpdateManifest();
   // 不管有没有证书都评估一次：ad-hoc 的包这里一定是 rejected，
   // 提前讲明白「发给别人打不开」的原因，别等到用户来问
   const assess = spawnSync("spctl", ["--assess", "--type", "execute", path.join(releaseDir, "wiki-agent.app")], {
@@ -155,6 +188,7 @@ function addHomebrewLlvmToPath() {
 }
 
 function packWindows() {
+  loadUpdaterKey();
   if (process.platform !== "win32") {
     addHomebrewLlvmToPath();
   }
@@ -180,12 +214,13 @@ function packWindows() {
   const nsisDir = path.join(targetDir(), "x86_64-pc-windows-msvc/release/bundle/nsis");
   if (fs.existsSync(nsisDir)) {
     for (const name of fs.readdirSync(nsisDir)) {
-      if (name.endsWith(".exe")) {
+      if (name.endsWith(".exe") || name.endsWith(".sig") || name.endsWith(".nsis.zip")) {
         copyInto(path.join(nsisDir, name));
       }
     }
   }
   assembleWindowsPortable();
+  writeUpdateManifest();
 }
 
 if (mode === "macos") {

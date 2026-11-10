@@ -301,6 +301,8 @@ pub fn run() {
         }
     });
     builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             export_cmd::pick_save_path,
             export_cmd::write_export_file,

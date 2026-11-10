@@ -28,6 +28,7 @@ logs/
 
 # Tauri
 apps/editor/src-tauri/target/
+apps/editor/src-tauri/.updater/
 apps/editor/src-tauri/resources/node
 apps/editor/src-tauri/resources/node.exe
 apps/editor/src-tauri/resources/desktop-server.mjs

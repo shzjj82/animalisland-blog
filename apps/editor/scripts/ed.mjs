@@ -372,7 +372,7 @@ function requireOss() {
 async function fetchReleaseAssets(version) {
   const clean = (assets) =>
     (assets || [])
-      .filter((a) => /\.(dmg|zip|exe)$/i.test(a.name))
+      .filter((a) => /\.(dmg|zip|exe|sig)$/i.test(a.name) || a.name.endsWith(".tar.gz") || a.name === "latest.json")
       .map((a) => ({ id: a.id, name: a.name, size: a.size, url: a.browser_download_url || a.url }));
 
   if (hasGithubCli()) {
@@ -386,7 +386,7 @@ async function fetchReleaseAssets(version) {
     const rel = await repoApi(`/releases/tags/v${version}`);
     const list = clean(rel.assets);
     if (list.length) return list;
-    die(`Release v${version} 里没有 dmg/zip/exe 产物`);
+    die(`Release v${version} 里没有安装包或更新包`);
   } catch (err) {
     die(`读不到 Release v${version}（${err.message}）：先确认 CI 已跑完 → https://github.com/${CONFIG.repo}/releases/tag/v${version}`);
   }
@@ -557,7 +557,9 @@ async function uploadMany(cfg, version, items, flags) {
 async function writeIndex(client, cfg, currentVersion, versions) {
   const entries = [];
   for (const v of versions) {
-    const objs = (await listObjects(client, `${cfg.prefix}/${v}/`)).filter((o) => /\.(dmg|zip|exe)$/i.test(o.name));
+    const objs = (await listObjects(client, `${cfg.prefix}/${v}/`)).filter(
+      (o) => /\.(dmg|zip|exe)$/i.test(o.name) && !o.name.endsWith(".nsis.zip"),
+    );
     if (!objs.length) continue;
     entries.push({
       version: v,
@@ -576,17 +578,32 @@ async function writeIndex(client, cfg, currentVersion, versions) {
   ok(`版本索引已更新（${entries.length} 个版本）`);
 }
 
+/** 应用内更新读的是固定地址 <prefix>/latest.json，不跟版本目录走 */
+async function publishLatestFile(cfg, file) {
+  const body = JSON.parse(fs.readFileSync(file, "utf8"));
+  await putJson(ossClient(cfg), `${cfg.prefix}/latest.json`, body);
+  ok(`更新清单 ${publicBase(cfg)}/${encodeURIComponent(cfg.prefix)}/latest.json`);
+}
+
 /** 从 GitHub Release 取包再上传（本机补传用） */
 async function cmdOssPush(ver, flags) {
   const cfg = requireOss();
   const v = assertVersion(normalizeVersion(ver || localVersion()));
   const assets = await fetchReleaseAssets(v);
-  return uploadMany(
-    cfg,
-    v,
-    assets.map((a) => ({ name: a.name, size: a.size, ensure: () => ensureLocalAsset(v, a, flags) })),
-    flags,
-  );
+  const latest = assets.find((asset) => asset.name === "latest.json");
+  const packages = assets.filter((asset) => asset.name !== "latest.json");
+  const uploaded = packages.length
+    ? await uploadMany(
+        cfg,
+        v,
+        packages.map((a) => ({ name: a.name, size: a.size, ensure: () => ensureLocalAsset(v, a, flags) })),
+        flags,
+      )
+    : [];
+  if (latest) {
+    await publishLatestFile(cfg, await ensureLocalAsset(v, latest, flags));
+  }
+  return uploaded;
 }
 
 /** 直接把本地目录里的产物传上去（CI 用，不需要再回 GitHub 拉一遍） */
@@ -599,13 +616,18 @@ async function cmdOssUpload(ver, dir, flags) {
   // rw.*.dmg 是 create-dmg 留下的中间镜像，几百 MB，别传上去
   const items = fs
     .readdirSync(dir)
-    .filter((n) => /\.(dmg|zip|exe)$/i.test(n) && !n.startsWith("rw."))
+    .filter((n) => (/\.(dmg|zip|exe|sig)$/i.test(n) || n.endsWith(".tar.gz")) && !n.startsWith("rw.") && n !== "latest.json")
     .map((n) => {
       const file = path.join(dir, n);
       return { name: n, size: fs.statSync(file).size, ensure: async () => file };
     });
-  if (!items.length) die(`目录里没有 dmg/zip/exe：${dir}`);
-  return uploadMany(cfg, v, items, flags);
+  if (!items.length && !fs.existsSync(path.join(dir, "latest.json"))) die(`目录里没有安装包或更新包：${dir}`);
+  const uploaded = items.length ? await uploadMany(cfg, v, items, flags) : [];
+  const latest = path.join(dir, "latest.json");
+  if (fs.existsSync(latest)) {
+    await publishLatestFile(cfg, latest);
+  }
+  return uploaded;
 }
 
 async function cmdOssLs() {

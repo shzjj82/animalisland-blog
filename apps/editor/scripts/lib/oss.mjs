@@ -24,7 +24,8 @@ const MIME = {
   ".zip": "application/zip",
   ".exe": "application/vnd.microsoft.portable-executable",
   ".msi": "application/x-msi",
-  ".pkg": "application/octet-stream",
+  ".gz": "application/gzip",
+  ".sig": "text/plain",
 };
 
 /* ------------------------------------------------------------ 配置加载 */

@@ -16,6 +16,7 @@ import { ImportDialog, type ImportChoice } from "@/components/import-dialog";
 import { LanguageSwitch } from "@/components/language-switch";
 import { NotifyBell } from "@/components/notify-bell";
 import { PageTree } from "@/components/page-tree";
+import { AppUpdate } from "@/components/app-update";
 import { SettingsMenu } from "@/components/settings-menu";
 import { TeamDialog } from "@/components/team-dialog";
 import { SyncChecklistDialog, SyncSummaryDialog } from "@/components/sync-dialogs";
@@ -1256,7 +1257,8 @@ export function App() {
           onReparent={(id, parentId) => void movePage(id, parentId)}
           onExport={(id, format) => void exportPage(id, format)}
         />
-        <div className="mt-3 flex items-center justify-between gap-2 border-t border-sidebar-border px-1 pt-3 text-xs text-muted-foreground">
+        <div className="mt-3 flex flex-col gap-2 border-t border-sidebar-border px-1 pt-3 text-xs text-muted-foreground">
+          <div className="flex items-center justify-between gap-2">
           {session && activeTeamId ? (
             <div className="group/teams flex min-w-0 flex-1 items-center overflow-x-auto">
               {[...teams.filter((team) => team.id === activeTeamId), ...teams.filter((team) => team.id !== activeTeamId)].map((team, index) => (
@@ -1324,6 +1326,8 @@ export function App() {
               }}
             />
           ) : null}
+          </div>
+          <AppUpdate />
         </div>
         <div
           role="separator"
