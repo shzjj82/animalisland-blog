@@ -85,30 +85,49 @@ export function formatSnapshot(snapshot: WorkSnapshot | null): string {
   return `URL: ${snapshot.url}\n标题: ${snapshot.title}\n可见元素:\n${items || "（无）"}\n正文摘录:\n${snapshot.text}`;
 }
 
-export const WORK_SYSTEM = `你是 wiki-agent 的「工作」助手，通过用户本机浏览器扩展操作当前网页，不是知识库闲聊。
-根据当前页面元素编号决定下一步。每次只输出一个 work 代码块，不要把 JSON 混进正文：
+export const WORK_SYSTEM = `你是 wiki-agent 的「工作」助手，在用户选定的本机浏览器里完成网页任务，不是知识库闲聊。
+每次只输出一个 work 代码块，正文只用一句人话说明正在做什么，不要把 JSON 写进正文：
 \`\`\`work
-{"action":"click","id":12}
+{"action":"navigate","url":"https://www.baidu.com"}
 \`\`\`
-action 只能是 snapshot（再看一眼页面）、click（点击编号）、type（向编号输入 text）、scroll（up 或 down）、navigate（打开 url）、done（任务结束，带 summary）。
-没看清页面就先 snapshot。不要编造编号。登录、支付、提交表单前在正文里说明风险。用户没要求操作网页时用 done。`;
+action 只能是 snapshot（再看一眼页面）、click（点击编号）、type（向编号输入 text）、scroll（up 或 down）、navigate（在本机浏览器打开 url）、done（任务结束，带 summary）。
+用户要打开网站、而当前没有页面时，直接 navigate，不要先 snapshot。
+已经能看到页面元素时，再按编号 click 或 type。不要编造编号。登录、支付、提交表单前在正文里说明风险。用户没要求操作网页时用 done。`;
+
+function readWorkAction(body: string): WorkAction | null {
+  try {
+    const parsed = JSON.parse(body.trim()) as WorkAction;
+    if (parsed && typeof parsed === "object" && typeof parsed.action === "string") {
+      return parsed;
+    }
+  } catch {
+    // 不是动作 JSON
+  }
+  return null;
+}
 
 export function extractWorkAction(reply: string): { text: string; action: WorkAction | null } {
   let action: WorkAction | null = null;
-  const text = reply.replace(/```work\s*([\s\S]*?)```/gi, (_all, body: string) => {
-    if (action) {
-      return "";
+  let text = reply.replace(/```(?:work|json)?\s*([\s\S]*?)```/gi, (all, body: string) => {
+    const parsed = readWorkAction(String(body));
+    if (!parsed) {
+      return all;
     }
-    try {
-      const parsed = JSON.parse(String(body).trim()) as WorkAction;
-      if (parsed && typeof parsed === "object" && typeof parsed.action === "string") {
-        action = parsed;
-      }
-    } catch {
-      // ignore
+    if (!action) {
+      action = parsed;
     }
     return "";
   });
+  if (!action) {
+    text = text.replace(/\{[^{}]*"action"\s*:\s*"[^"]+"[^{}]*\}/g, (blob) => {
+      const parsed = readWorkAction(blob);
+      if (parsed && !action) {
+        action = parsed;
+        return "";
+      }
+      return blob;
+    });
+  }
   return { text: text.trim(), action };
 }
 
@@ -132,5 +151,5 @@ export function previewWorkAction(action: WorkAction): string {
 }
 
 export function needsWorkConfirm(action: WorkAction): boolean {
-  return action.action === "click" || action.action === "type" || action.action === "navigate";
+  return action.action === "click" || action.action === "type";
 }

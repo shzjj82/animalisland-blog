@@ -100,8 +100,10 @@ function toMember(raw: unknown): TeamMember | null {
   };
 }
 
+const WIKI_TEAMS = "/wiki/teams";
+
 export async function listTeams(session: RemoteSession): Promise<TeamInfo[]> {
-  const data = await request<unknown>(session, "GET", "/teams");
+  const data = await request<unknown>(session, "GET", WIKI_TEAMS);
   const rows = Array.isArray(data) ? data : (asRecord(data).teams ?? asRecord(data).items ?? []);
   return (Array.isArray(rows) ? rows : []).map(toTeam).filter((item): item is TeamInfo => item !== null);
 }
@@ -111,7 +113,7 @@ function readTeam(data: unknown): TeamInfo | null {
 }
 
 export async function createTeam(session: RemoteSession, name: string): Promise<TeamInfo> {
-  const data = await request<unknown>(session, "POST", "/teams", {
+  const data = await request<unknown>(session, "POST", WIKI_TEAMS, {
     name: name.trim(),
   });
   const team = readTeam(data);
@@ -127,7 +129,7 @@ export async function joinTeam(session: RemoteSession, raw: string): Promise<Tea
   if (!code) {
     throw new Error(t("team.badCode"));
   }
-  const data = await request<unknown>(session, "POST", `/teams/${encodeURIComponent(code)}/join`);
+  const data = await request<unknown>(session, "POST", `${WIKI_TEAMS}/join`, { code });
   const team = readTeam(data);
   if (!team) {
     throw new Error(t("team.joinFailed"));
@@ -136,11 +138,11 @@ export async function joinTeam(session: RemoteSession, raw: string): Promise<Tea
 }
 
 export async function leaveTeam(session: RemoteSession, id: string): Promise<void> {
-  await request(session, "POST", `/teams/${id}/leave`);
+  await request(session, "POST", `${WIKI_TEAMS}/${encodeURIComponent(id)}/leave`);
 }
 
 export async function loadTeam(session: RemoteSession, id: string): Promise<{ team: TeamInfo; members: TeamMember[] }> {
-  const data = asRecord(await request<unknown>(session, "GET", `/teams/${id}`));
+  const data = asRecord(await request<unknown>(session, "GET", `${WIKI_TEAMS}/${encodeURIComponent(id)}`));
   const team = toTeam(data.team);
   if (!team) {
     throw new Error(t("team.loadFailed"));
@@ -155,9 +157,21 @@ export async function setTeamRole(
   accountId: string,
   role: TeamRole,
 ): Promise<TeamMember> {
-  const member = toMember(await request<unknown>(session, "PATCH", `/teams/${teamId}/members/${accountId}`, { role }));
+  const member = toMember(
+    await request<unknown>(session, "PATCH", `${WIKI_TEAMS}/${encodeURIComponent(teamId)}/members/${encodeURIComponent(accountId)}`, { role }),
+  );
   if (!member) {
     throw new Error(t("team.roleFailed"));
   }
   return member;
+}
+
+/** 服务端重新签发邀请码，旧码失效。 */
+export async function refreshTeamCode(session: RemoteSession, id: string): Promise<TeamInfo> {
+  const data = await request<unknown>(session, "POST", `${WIKI_TEAMS}/${encodeURIComponent(id)}/code`);
+  const team = readTeam(data);
+  if (!team) {
+    throw new Error(t("team.refreshFailed"));
+  }
+  return team;
 }

@@ -1,28 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import { Close, Laptop, Send } from "@icon-park/react";
+import { Close, Send } from "@icon-park/react";
 import { Button } from "@/components/ui/button";
 import { SoftScrollbar } from "@/components/soft-scrollbar";
 import { ChatMarkdown } from "@/components/editor-spotlight/ChatMarkdown";
-import { isDesktopApp } from "@/lib/ai/skills";
+import type { AiAttachment } from "@myblog/shared";
 import { aiChat } from "@/lib/ai/client";
 import { aiErrorMessage, uid, type ChatBubble } from "@/lib/ai/chat";
-import {
-  createWorkPair,
-  extractWorkAction,
-  formatSnapshot,
-  needsWorkConfirm,
-  postWorkAction,
-  previewWorkAction,
-  readWorkSession,
-  workBridgeOrigin,
-  WORK_SYSTEM,
-  type WorkAction,
-  type WorkPair,
-  type WorkSessionState,
-} from "@/lib/work/bridge";
-import { listInstalledBrowsers, openInstalledBrowser, revealWorkExtension, type InstalledBrowser } from "@/lib/work/browsers";
+import { extractSkills, skillPreview } from "@/lib/ai/skills";
+import { captureLook, observeSkill, skillKey } from "@/lib/work/observe";
+import { extractDeliverable, takeLooks, takeQuestions, WORK_SYSTEM } from "@/lib/work/task";
 import { iconParkOutline } from "@/lib/iconPark";
 import { useTranslation } from "react-i18next";
+
+type WorkBubble = ChatBubble & { result?: { id: string; title: string }; shot?: string };
 
 type Props = {
   open: boolean;
@@ -30,6 +20,8 @@ type Props = {
   loggedIn: boolean;
   onClose: () => void;
   onLogin: () => void;
+  onDeliver: (markdown: string) => Promise<{ id: string; title: string }>;
+  onOpenResult: (id: string) => void;
 };
 
 const FRAME_KEY = "editor:work-desk-frame";
@@ -73,24 +65,16 @@ function loadFrame(): Frame {
   }
 }
 
-export function WorkDesk({ open, focusToken, loggedIn, onClose, onLogin }: Props) {
+export function WorkDesk({ open, focusToken, loggedIn, onClose, onLogin, onDeliver, onOpenResult }: Props) {
   const { t } = useTranslation();
-  const desktop = isDesktopApp();
   const [frame, setFrame] = useState<Frame>(() => (typeof window === "undefined" ? { x: 24, y: 24, w: 420, h: 640 } : loadFrame()));
-  const [browsers, setBrowsers] = useState<InstalledBrowser[]>([]);
-  const [picked, setPicked] = useState("");
-  const [pair, setPair] = useState<WorkPair | null>(null);
-  const [remote, setRemote] = useState<WorkSessionState | null>(null);
   const [prompt, setPrompt] = useState("");
-  const [bubbles, setBubbles] = useState<ChatBubble[]>([]);
+  const [bubbles, setBubbles] = useState<WorkBubble[]>([]);
   const [sending, setSending] = useState(false);
-  const [pending, setPending] = useState<WorkAction | null>(null);
   const [error, setError] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const dragRef = useRef<{ pointer: number; x: number; y: number; start: Frame } | null>(null);
-  const pairRef = useRef<WorkPair | null>(null);
-  pairRef.current = pair;
 
   useEffect(() => {
     if (!open) {
@@ -101,44 +85,6 @@ export function WorkDesk({ open, focusToken, loggedIn, onClose, onLogin }: Props
     const timer = window.setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 30);
     return () => window.clearTimeout(timer);
   }, [open, focusToken]);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    void (async () => {
-      const list = await listInstalledBrowsers();
-      setBrowsers(list);
-      const first = list.find((item) => item.supported);
-      if (first) {
-        setPicked(first.id);
-      }
-      try {
-        const next = await createWorkPair();
-        setPair(next);
-      } catch {
-        setError(t("work.bridgeFailed"));
-      }
-    })();
-  }, [open, t]);
-
-  useEffect(() => {
-    if (!open || !pair) {
-      return;
-    }
-    const tick = () => {
-      const current = pairRef.current;
-      if (!current) {
-        return;
-      }
-      void readWorkSession(current.token)
-        .then(setRemote)
-        .catch(() => undefined);
-    };
-    tick();
-    const timer = window.setInterval(tick, 1200);
-    return () => window.clearInterval(timer);
-  }, [open, pair]);
 
   useEffect(() => {
     if (!open) {
@@ -182,10 +128,16 @@ export function WorkDesk({ open, focusToken, loggedIn, onClose, onLogin }: Props
     setFrame(clampFrame({ ...drag.start, x: drag.start.x + event.clientX - drag.x, y: drag.start.y + event.clientY - drag.y }));
   };
 
-  const connected = Boolean(remote?.connected);
-  const snapshot = remote?.snapshot ?? null;
+  const showTurn = (assistantId: string, content: string, notes: WorkBubble[], saved: { id: string; title: string } | null) => {
+    setBubbles((prev) => [
+      ...prev.map((item) =>
+        item.id === assistantId ? { ...item, content: content || item.content, result: saved ?? item.result } : item,
+      ),
+      ...notes,
+    ]);
+  };
 
-  const runTurn = async (history: ChatBubble[], assistantId: string) => {
+  const runTurn = async (history: WorkBubble[], assistantId: string) => {
     if (!loggedIn) {
       setError(t("work.login"));
       return;
@@ -194,41 +146,104 @@ export function WorkDesk({ open, focusToken, loggedIn, onClose, onLogin }: Props
     setError("");
     const controller = new AbortController();
     abortRef.current = controller;
+    let thread = history;
+    let saved: { id: string; title: string } | null = null;
+    const seen = new Map<string, string>();
+    let pendingShot: { url: string; expect: string } | null = null;
     try {
-      const page = formatSnapshot(snapshot);
-      const result = await aiChat(
-        {
-          messages: [
-            {
-              role: "user",
-              content: `${t("work.pageContext")}\n${page}\n\n${history
-                .filter((item) => !item.notice)
-                .map((item) => `${item.role === "user" ? "用户" : "工作助手"}: ${item.content}`)
-                .join("\n\n")}`,
-            },
-          ],
-          system: WORK_SYSTEM,
-          rag: false,
-        },
-        controller.signal,
-        {
-          onDelta: (delta) => {
-            setBubbles((prev) => prev.map((item) => (item.id === assistantId ? { ...item, content: item.content + delta } : item)));
+      for (let step = 0; step < 6; step += 1) {
+        const shot = pendingShot;
+        pendingShot = null;
+        let streamed = "";
+        const transcript = thread
+          .filter((item) => !item.result)
+          .map((item) => `${item.role === "user" ? "用户" : "工作助手"}: ${item.content}`)
+          .join("\n\n");
+        const result = await aiChat(
+          {
+            messages: [
+              {
+                role: "user",
+                content: shot
+                  ? `${transcript}\n\n这是刚截的一张画面。预期：${shot.expect}\n对照图片判断是否符合预期。符合就做下一步；需要登录或要人操作就只输出 ask 并停下；不符合就说明差在哪。不要为这次核对再截一张。`
+                  : transcript,
+              },
+            ],
+            attachments: shot ? [{ kind: "image", name: "screen.jpg", url: shot.url } satisfies AiAttachment] : undefined,
+            system: WORK_SYSTEM,
+            rag: false,
           },
-        },
-      );
-      const parsed = extractWorkAction(result.reply.trim() || t("spotlight.emptyReply"));
-      setBubbles((prev) => prev.map((item) => (item.id === assistantId ? { ...item, content: parsed.text || item.content } : item)));
-      if (parsed.action && parsed.action.action !== "done") {
-        if (needsWorkConfirm(parsed.action)) {
-          setPending(parsed.action);
-        } else if (pair) {
-          await postWorkAction(pair.token, parsed.action);
+          controller.signal,
+          {
+            onDelta: (delta) => {
+              streamed += delta;
+              const visible = streamed
+                .replace(/```skill[\s\S]*?(```|$)/gi, "")
+                .replace(/```deliver[\s\S]*?(```|$)/gi, "")
+                .trim();
+              if (visible) {
+                setBubbles((prev) => prev.map((item) => (item.id === assistantId ? { ...item, content: visible } : item)));
+              }
+            },
+          },
+        );
+        const asked = takeQuestions(result.reply.trim() || "");
+        if (asked.questions.length) {
+          const text = extractDeliverable(extractSkills(asked.reply).text).text;
+          showTurn(assistantId, [text, ...asked.questions].filter(Boolean).join("\n\n"), [], saved);
+          break;
         }
+        const looked = takeLooks(asked.reply);
+        const skilled = extractSkills(looked.reply);
+        const parsed = extractDeliverable(skilled.text);
+        if (parsed.markdown && !saved) {
+          saved = await onDeliver(parsed.markdown);
+        }
+        const notes: WorkBubble[] = [];
+        for (const call of skilled.skills) {
+          const key = skillKey(call);
+          if (seen.has(key)) {
+            continue;
+          }
+          const observation = await observeSkill(call);
+          seen.set(key, observation.detail);
+          if (!observation.ok) {
+            setError(t("work.computerFailed"));
+          }
+          notes.push({
+            id: uid(),
+            role: "user",
+            notice: true,
+            content: `${skillPreview(call)}\n${observation.detail}`,
+          });
+        }
+        if (looked.expects.length) {
+          const expect = looked.expects.join("；");
+          try {
+            const url = await captureLook();
+            pendingShot = { url, expect };
+            notes.push({
+              id: uid(),
+              role: "user",
+              notice: true,
+              shot: url,
+              content: t("work.lookCheck", { expect }),
+            });
+          } catch {
+            showTurn(assistantId, [parsed.text, t("work.needScreen")].filter(Boolean).join("\n\n"), notes, saved);
+            break;
+          }
+        }
+        const content = parsed.text || (saved ? t("work.resultReady") : "");
+        showTurn(assistantId, content, notes, saved);
+        if (!notes.length) {
+          break;
+        }
+        thread = [...thread, { id: assistantId, role: "assistant", content: content || t("work.lookCheck", { expect: looked.expects.join("；") }) }, ...notes];
       }
     } catch (err) {
       if (!controller.signal.aborted) {
-        setError(aiErrorMessage(err instanceof Error ? err.message : t("spotlight.failedToSend")));
+        setError(aiErrorMessage(err instanceof Error ? err.message : t("work.computerFailed")));
       }
     } finally {
       if (!controller.signal.aborted) {
@@ -246,28 +261,12 @@ export function WorkDesk({ open, focusToken, loggedIn, onClose, onLogin }: Props
       setError(t("work.login"));
       return;
     }
-    const user: ChatBubble = { id: uid(), role: "user", content: text };
+    const user: WorkBubble = { id: uid(), role: "user", content: text };
     const assistantId = uid();
     const history = [...bubbles, user];
     setBubbles([...history, { id: assistantId, role: "assistant", content: "" }]);
     setPrompt("");
     void runTurn(history, assistantId);
-  };
-
-  const allowAction = async () => {
-    if (!pending || !pair) {
-      return;
-    }
-    const action = pending;
-    setPending(null);
-    await postWorkAction(pair.token, action);
-    const notice: ChatBubble = { id: uid(), role: "user", notice: true, content: previewWorkAction(action) };
-    const assistantId = uid();
-    const history = [...bubbles, notice];
-    setBubbles([...history, { id: assistantId, role: "assistant", content: "" }]);
-    window.setTimeout(() => {
-      void runTurn(history, assistantId);
-    }, 900);
   };
 
   return (
@@ -290,67 +289,24 @@ export function WorkDesk({ open, focusToken, loggedIn, onClose, onLogin }: Props
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="shrink-0 space-y-2 border-b border-border/40 px-3 py-2 text-xs">
-          {desktop && browsers.length ? (
-            <div className="flex flex-wrap gap-1.5">
-              {browsers.map((item) => (
-                <Button
-                  key={item.id}
-                  type="button"
-                  size="sm"
-                  variant={picked === item.id ? "secondary" : "ghost"}
-                  disabled={!item.supported}
-                  className="h-7 px-2 text-xs"
-                  onClick={() => {
-                    setPicked(item.id);
-                    void openInstalledBrowser(item.id).catch(() => setError(t("work.openFailed")));
-                  }}
-                >
-                  {item.name}
-                  {item.supported ? "" : ` · ${t("work.unsupported")}`}
-                </Button>
-              ))}
-            </div>
-          ) : (
-            <p className="text-muted-foreground">{desktop ? t("work.noBrowser") : t("work.webHint")}</p>
-          )}
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-muted-foreground">
-              {connected ? t("work.connected", { browser: remote?.browserName || t("work.helper") }) : t("work.pairHint", { code: pair?.pairCode ?? "------" })}
-            </p>
-            {desktop ? (
-              <Button type="button" variant="outline" size="sm" className="h-7" onClick={() => void revealWorkExtension().catch(() => setError(t("work.extensionMissing")))}>
-                {t("work.openExtension")}
-              </Button>
-            ) : (
-              <a className="text-foreground underline-offset-2 hover:underline" href="/work-extension/install.html" target="_blank" rel="noreferrer">
-                {t("work.openExtension")}
-              </a>
-            )}
-          </div>
-          <p className="text-muted-foreground break-all">{t("work.bridgeUrl")}: {workBridgeOrigin()}</p>
-          {snapshot ? (
-            <p className="flex items-center gap-1 truncate text-foreground">
-              <Laptop {...iconParkOutline} size={13} />
-              {snapshot.title || snapshot.url}
-            </p>
-          ) : (
-            <p className="text-muted-foreground">{t("work.waitingPage")}</p>
-          )}
-        </div>
-
         <SoftScrollbar className="min-h-0 flex-1" contentClassName="space-y-3 px-3 py-4" stickToBottom jumpToBottomLabel={t("common.scrollToBottom")}>
           {bubbles.length === 0 ? (
             <p className="text-muted-foreground text-sm leading-6">{t("work.emptyHint")}</p>
           ) : (
             bubbles.map((item) =>
               item.notice ? (
-                <p key={item.id} className="text-muted-foreground mx-auto max-w-[90%] rounded-xl bg-muted/70 px-3 py-2 text-center font-mono text-[11px]">
+                <div key={item.id} className="text-muted-foreground mx-auto max-w-[92%] rounded-xl bg-muted/70 px-3 py-2 text-left text-xs leading-5 whitespace-pre-wrap">
                   {item.content}
-                </p>
+                  {item.shot ? <img src={item.shot} alt="" className="mt-2 max-h-44 w-full rounded-lg object-contain" /> : null}
+                </div>
               ) : item.role === "assistant" ? (
-                <div key={item.id} className="bg-muted/70 max-w-[92%] rounded-2xl rounded-bl-md px-3 py-2 text-sm">
+                <div key={item.id} className="bg-muted/70 max-w-[92%] space-y-2 rounded-2xl rounded-bl-md px-3 py-2 text-sm">
                   <ChatMarkdown content={item.content || (sending ? t("spotlight.thinking") : "")} />
+                  {item.result ? (
+                    <Button type="button" variant="outline" size="sm" onClick={() => onOpenResult(item.result!.id)}>
+                      {t("work.openResult", { title: item.result.title })}
+                    </Button>
+                  ) : null}
                 </div>
               ) : (
                 <div key={item.id} className="flex justify-end">
@@ -360,21 +316,6 @@ export function WorkDesk({ open, focusToken, loggedIn, onClose, onLogin }: Props
             )
           )}
         </SoftScrollbar>
-
-        {pending ? (
-          <div className="shrink-0 space-y-2 border-t border-border/40 px-3 py-2">
-            <p className="text-sm font-medium">{t("work.confirmAction")}</p>
-            <p className="text-muted-foreground font-mono text-xs break-all">{previewWorkAction(pending)}</p>
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" size="sm" onClick={() => setPending(null)}>
-                {t("work.deny")}
-              </Button>
-              <Button type="button" size="sm" onClick={() => void allowAction()}>
-                {t("work.allow")}
-              </Button>
-            </div>
-          </div>
-        ) : null}
 
         <form
           className="shrink-0 border-t border-border/30 p-3 pt-2"
@@ -397,7 +338,7 @@ export function WorkDesk({ open, focusToken, loggedIn, onClose, onLogin }: Props
               ref={inputRef}
               rows={2}
               value={prompt}
-              disabled={!loggedIn || sending}
+              disabled={sending}
               placeholder={t("work.placeholder")}
               aria-label={t("work.placeholder")}
               className="max-h-36 w-full resize-none bg-transparent px-2 py-1.5 text-base outline-none ring-0 sm:text-sm"
@@ -410,7 +351,7 @@ export function WorkDesk({ open, focusToken, loggedIn, onClose, onLogin }: Props
               }}
             />
             <div className="flex justify-end px-1">
-              <Button type="submit" size="icon-sm" className="rounded-full" disabled={!loggedIn || sending || !prompt.trim()} aria-label={t("work.send")}>
+              <Button type="submit" size="icon-sm" className="rounded-full" disabled={sending || !prompt.trim()} aria-label={t("work.send")}>
                 <Send {...iconParkOutline} size={15} />
               </Button>
             </div>

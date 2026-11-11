@@ -108,6 +108,16 @@ function findByCode(code: string): Session | undefined {
   return undefined;
 }
 
+function newestSession(): Session | undefined {
+  let best: Session | undefined;
+  for (const session of sessions.values()) {
+    if (!best || session.createdAt > best.createdAt) {
+      best = session;
+    }
+  }
+  return best;
+}
+
 function findByToken(value: string): Session | undefined {
   for (const session of sessions.values()) {
     if (session.token === value || session.id === value) {
@@ -167,9 +177,9 @@ export async function handleWorkBridge(req: IncomingMessage, res: ServerResponse
 
     if (path === "/work-bridge/connect" && req.method === "POST") {
       const code = String(body.pairCode ?? "").replace(/\D/g, "");
-      const session = findByCode(code);
+      const session = (code ? findByCode(code) : undefined) ?? newestSession();
       if (!session) {
-        json(res, 404, { error: "PAIR_NOT_FOUND" });
+        json(res, 404, { error: "SESSION_NOT_FOUND" });
         return true;
       }
       session.connected = true;

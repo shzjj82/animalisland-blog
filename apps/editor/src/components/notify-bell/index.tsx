@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { CheckOne, Remind, Time } from "@icon-park/react";
+import { CheckOne, Remind } from "@icon-park/react";
 import { Button } from "@/components/ui/button";
 import { SoftScrollbar } from "@/components/soft-scrollbar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -185,8 +185,16 @@ export function NotifyBell({ session, className, onWriteTodo }: Props) {
           {badge > 0 ? <span className="absolute top-1 right-1 size-1.5 rounded-full bg-red-500" /> : null}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[min(20rem,calc(100vw-1.5rem))] overflow-hidden p-0">
-        <div className="grid grid-cols-2 border-b border-border/50">
+      <PopoverContent
+        align="end"
+        className="w-[min(22rem,calc(100vw-1.5rem))] origin-top-right overflow-hidden p-0 duration-200 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 motion-reduce:animate-none"
+      >
+        <div className="relative m-2 grid grid-cols-2 rounded-lg bg-muted/60 p-1">
+          <span
+            aria-hidden
+            className="absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-md bg-background shadow-sm transition-transform duration-300 ease-out motion-reduce:transition-none"
+            style={{ transform: tab === "notices" ? "translateX(100%)" : "translateX(0)" }}
+          />
           <TabButton active={tab === "todos"} count={openTodos} onClick={() => setTab("todos")}>
             <CheckOne {...iconParkOutline} size={14} />
             {t("notify.todos")}
@@ -196,37 +204,39 @@ export function NotifyBell({ session, className, onWriteTodo }: Props) {
             {t("notify.notices")}
           </TabButton>
         </div>
-        {error ? <div className="px-3 py-2 text-xs text-destructive">{error}</div> : null}
-        <SoftScrollbar className="max-h-80" contentClassName="p-1.5">
+        {error ? <div className="px-3 pb-2 text-xs text-destructive">{error}</div> : null}
+        <SoftScrollbar key={tab} className="max-h-96 bg-muted/30" contentClassName="space-y-1.5 p-2.5 pt-1">
           {tab === "todos" ? (
             todos.length === 0 ? (
               <Empty>{t("notify.emptyTodos")}</Empty>
             ) : (
-              todos.map((todo) => {
+              todos.map((todo, index) => {
                 const due = todoDue(todo, i18n.language);
                 const writing = busyId === `write:${todo.id}`;
                 const finishing = busyId === todo.id;
                 return (
-                  <div key={todo.id} className="group flex items-center gap-1 rounded-xl px-2 py-2 hover:bg-muted/70">
+                  <div
+                    key={todo.id}
+                    className={cn(
+                      "group relative rounded-xl border border-border/60 bg-background shadow-sm transition-[transform,opacity,box-shadow] duration-200 ease-out motion-reduce:transition-none",
+                      finishing ? "pointer-events-none scale-[0.98] opacity-0" : "hover:-translate-y-0.5 hover:shadow-md",
+                    )}
+                    style={{ animation: "notify-card-in 220ms ease-out backwards", animationDelay: `${Math.min(index, 6) * 35}ms` }}
+                  >
                     <button
                       type="button"
-                      className="min-w-0 flex-1 text-left disabled:opacity-50"
+                      className="flex min-h-16 w-full flex-col justify-between px-3 pt-2 pb-2.5 pr-9 text-left disabled:opacity-50"
                       disabled={writing || !onWriteTodo}
                       onClick={() => void onWrite(todo)}
                     >
-                      <span className="block truncate text-sm font-medium">{todo.title.trim() || t("notify.untitled")}</span>
-                      {due ? (
-                        <span className="text-muted-foreground mt-0.5 flex items-center gap-1 text-[11px]">
-                          <Time {...iconParkOutline} size={12} />
-                          {due}
-                        </span>
-                      ) : null}
+                      {due ? <span className="text-muted-foreground text-[10px] leading-none tabular-nums">{due}</span> : <span />}
+                      <span className="block truncate pt-3 text-[13px] leading-5 font-medium">{todo.title.trim() || t("notify.untitled")}</span>
                     </button>
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon-xs"
-                      className="text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                      className="text-muted-foreground absolute right-1.5 bottom-1.5 transition-transform duration-200 hover:scale-110 active:scale-90 motion-reduce:transition-none"
                       disabled={finishing}
                       aria-label={t("notify.markDone")}
                       onClick={() => void onDone(todo)}
@@ -242,40 +252,43 @@ export function NotifyBell({ session, className, onWriteTodo }: Props) {
           ) : (
             <>
               {unread > 0 ? (
-                <div className="flex justify-end px-1 pb-1">
+                <div className="flex justify-end px-0.5">
                   <Button
                     type="button"
                     variant="ghost"
-                    size="icon-xs"
-                    className="text-muted-foreground"
+                    size="xs"
+                    className="text-muted-foreground h-6 px-2 text-[11px]"
                     disabled={busyId === "all"}
-                    aria-label={t("notify.readAll")}
                     onClick={() => void onReadAll()}
                   >
-                    <CheckOne {...iconParkOutline} size={14} />
+                    {t("notify.readAll")}
                   </Button>
                 </div>
               ) : null}
-              {notices.map((notice) => (
-                <button
-                  key={notice.id}
-                  type="button"
-                  className="flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left hover:bg-muted/70 disabled:opacity-50"
-                  disabled={busyId === notice.id}
-                  onClick={() => void onRead(notice)}
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">{notice.title}</span>
-                    {notice.content.trim() ? (
-                      <span className="text-muted-foreground mt-0.5 line-clamp-2 block text-xs">{notice.content}</span>
-                    ) : null}
-                    <span className="text-muted-foreground mt-0.5 flex items-center gap-1 text-[11px]">
-                      <Time {...iconParkOutline} size={12} />
-                      {formatWhen(notice.createdAt, i18n.language)}
+              {notices.map((notice, index) => {
+                const line = notice.title.trim() || notice.content.trim() || t("notify.untitled");
+                const when = formatWhen(notice.createdAt, i18n.language);
+                const reading = busyId === notice.id;
+                return (
+                  <button
+                    key={notice.id}
+                    type="button"
+                    className={cn(
+                      "flex min-h-16 w-full flex-col justify-between rounded-xl border border-border/60 bg-background px-3 pt-2 pb-2.5 text-left shadow-sm transition-[transform,opacity,box-shadow] duration-200 ease-out motion-reduce:transition-none",
+                      reading ? "pointer-events-none scale-[0.98] opacity-0" : "hover:-translate-y-0.5 hover:shadow-md",
+                    )}
+                    style={{ animation: "notify-card-in 220ms ease-out backwards", animationDelay: `${Math.min(index, 6) * 35}ms` }}
+                    disabled={reading}
+                    onClick={() => void onRead(notice)}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <span className="size-1.5 shrink-0 rounded-full bg-red-500" />
+                      {when ? <span className="text-muted-foreground text-[10px] leading-none tabular-nums">{when}</span> : null}
                     </span>
-                  </span>
-                </button>
-              ))}
+                    <span className="block truncate pt-3 text-[13px] leading-5 font-medium">{line}</span>
+                  </button>
+                );
+              })}
             </>
           )}
         </SoftScrollbar>
@@ -299,8 +312,8 @@ function TabButton({
     <button
       type="button"
       className={cn(
-        "flex h-10 items-center justify-center gap-1.5 text-xs",
-        active ? "border-b-2 border-foreground font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
+        "relative z-10 flex h-8 items-center justify-center gap-1.5 rounded-md text-xs transition-colors duration-200",
+        active ? "font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
       )}
       onClick={onClick}
     >
@@ -311,5 +324,9 @@ function TabButton({
 }
 
 function Empty({ children }: { children: ReactNode }) {
-  return <div className="text-muted-foreground px-3 py-10 text-center text-xs">{children}</div>;
+  return (
+    <div className="text-muted-foreground rounded-xl border border-dashed border-border/70 bg-background/70 px-3 py-10 text-center text-xs">
+      {children}
+    </div>
+  );
 }

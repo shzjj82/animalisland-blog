@@ -487,7 +487,7 @@ async function ensureLocalAsset(version, asset, flags) {
  * 阿里云 OSS 在 Range 右端超出对象长度时回 200 整包而不是 206，
  * 签名文件只有几百字节，固定请求 0-1023 会被当成越界。
  */
-async function verifyPublic(url, expect) {
+async function verifyPublicOnce(url, expect) {
   const head = await fetch(url, { method: "HEAD" });
   if (!head.ok) return { ok: false, why: `HEAD ${head.status}` };
   const size = Number(head.headers.get("content-length") || 0);
@@ -499,6 +499,21 @@ async function verifyPublic(url, expect) {
   const got = (await range.arrayBuffer()).byteLength;
   if (got !== end + 1) return { ok: false, why: `Range 长度 ${got} ≠ ${end + 1}` };
   return { ok: true, size };
+}
+
+/** 公共域名偶发超时，重试几次再判失败 */
+async function verifyPublic(url, expect) {
+  let last = { ok: false, why: "未校验" };
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      last = await verifyPublicOnce(url, expect);
+    } catch (err) {
+      last = { ok: false, why: err?.message || String(err) };
+    }
+    if (last.ok) return last;
+    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 1500 * attempt));
+  }
+  return last;
 }
 
 /** 核心上传流程：items = [{ name, size, ensure(): Promise<path> }] */

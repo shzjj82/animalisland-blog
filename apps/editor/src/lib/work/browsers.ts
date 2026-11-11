@@ -28,8 +28,8 @@ export async function listInstalledBrowsers(): Promise<InstalledBrowser[]> {
   }
 }
 
-export async function openInstalledBrowser(id: string): Promise<void> {
-  await invoke("open_installed_browser", { id });
+export async function openInstalledBrowser(id: string, url?: string): Promise<void> {
+  await invoke("open_installed_browser", { id, url });
 }
 
 export async function revealWorkExtension(): Promise<string> {

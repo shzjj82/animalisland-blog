@@ -27,8 +27,8 @@ export const GATEWAY_BASE_URL = (
 ).replace(/\/$/, "");
 
 /**
- * Editor（Web / 桌面）统一用 wiki：业务码走 X-Biz-Code，应用码走 X-App-Code。
- * 与博客的 blog 隔离。网关会丢弃查询参数和 body 里的 appCode。
+ * Editor 只走 /wiki/*。网关会给这些路由注入 bizCode=wiki，前端不必再带 X-Biz-Code。
+ * 文档上的 appCode 仍用来丢掉不属于 wiki 的行。
  */
 export const WIKI_APP_CODE = "wiki";
 
@@ -52,13 +52,11 @@ function emitSession(session: RemoteSession | null): void {
 function wikiHeaders(extra?: Record<string, string>): Record<string, string> {
   return {
     Accept: "application/json",
-    "X-Biz-Code": WIKI_APP_CODE,
-    "X-App-Code": WIKI_APP_CODE,
     ...extra,
   };
 }
 
-/** 拼网关路径；基址为空时走当前源（/auth、/docs…） */
+/** 拼网关路径；基址为空时走当前源（/auth、/wiki…） */
 export function gatewayUrl(path: string): string {
   const normalized = path.startsWith("/") ? path : `/${path}`;
   if (!GATEWAY_BASE_URL) {
@@ -153,7 +151,7 @@ export function refreshSession(): Promise<RemoteSession | null> {
     if (!current?.refreshToken) {
       return current?.token ? current : null;
     }
-    const response = await fetch(gatewayUrl("/auth/refresh"), {
+    const response = await fetch(gatewayUrl("/wiki/auth/refresh"), {
       method: "POST",
       headers: wikiHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ refreshToken: current.refreshToken }),
@@ -228,7 +226,7 @@ export async function request<T>(
 }
 
 async function authRemote(
-  path: "/auth/login" | "/auth/register",
+  path: "/wiki/auth/login" | "/wiki/auth/register",
   body: { username: string; password: string; nickname?: string },
   fallback: string,
 ): Promise<RemoteSession> {
@@ -255,7 +253,7 @@ export async function logoutRemote(session: RemoteSession | null): Promise<void>
     return;
   }
   try {
-    await fetch(gatewayUrl("/auth/logout"), {
+    await fetch(gatewayUrl("/wiki/auth/logout"), {
       method: "POST",
       headers: wikiHeaders({
         "Content-Type": "application/json",
@@ -271,20 +269,20 @@ export async function logoutRemote(session: RemoteSession | null): Promise<void>
 }
 
 export function loginRemote(username: string, password: string): Promise<RemoteSession> {
-  return authRemote("/auth/login", { username, password }, t("common.loginFailed"));
+  return authRemote("/wiki/auth/login", { username, password }, t("common.loginFailed"));
 }
 
 export function registerRemote(username: string, password: string, nickname?: string): Promise<RemoteSession> {
-  return authRemote("/auth/register", { username, password, nickname }, t("common.signUpFailed"));
+  return authRemote("/wiki/auth/register", { username, password, nickname }, t("common.signUpFailed"));
 }
 
-/** 需要用户中心提供 POST /auth/change-password，body 为 { oldPassword, newPassword } */
+/** POST /wiki/auth/change-password，body 为 { oldPassword, newPassword } */
 export async function changePasswordRemote(session: RemoteSession, oldPassword: string, newPassword: string): Promise<void> {
   const ready = await prepareSession(session);
   if (!ready?.token) {
     throw new Error("UNAUTHORIZED");
   }
-  const response = await fetch(gatewayUrl("/auth/change-password"), {
+  const response = await fetch(gatewayUrl("/wiki/auth/change-password"), {
     method: "POST",
     headers: wikiHeaders({
       "Content-Type": "application/json",
@@ -337,11 +335,13 @@ function toPage(raw: unknown): EditorPage | null {
   return { ...node, body: document };
 }
 
+const WIKI_DOCUMENTS = "/wiki/documents";
+
 export async function listRemote(session: RemoteSession): Promise<PageNode[]> {
   const data = await request<{ posts?: unknown[]; documents?: unknown[] }>(
     session,
     "GET",
-    "/docs/documents?scope=mine&tree=1",
+    `${WIKI_DOCUMENTS}?scope=mine&tree=1`,
   );
   const rows = data.posts ?? data.documents ?? [];
   return rows.map(toNode).filter((item): item is PageNode => item !== null);
@@ -352,7 +352,7 @@ export async function listRemoteClientIds(session: RemoteSession): Promise<Map<s
   const data = await request<{ posts?: unknown[]; documents?: unknown[] }>(
     session,
     "GET",
-    "/docs/documents?scope=mine&tree=1",
+    `${WIKI_DOCUMENTS}?scope=mine&tree=1`,
   );
   const map = new Map<string, string>();
   for (const raw of data.posts ?? data.documents ?? []) {
@@ -369,7 +369,7 @@ export async function createRemoteFromLocal(
   session: RemoteSession,
   input: { clientId: string; parentId: string | null; title: string },
 ): Promise<string> {
-  const data = await request<{ post?: unknown; document?: unknown }>(session, "POST", "/docs/documents", {
+  const data = await request<{ post?: unknown; document?: unknown }>(session, "POST", WIKI_DOCUMENTS, {
     title: input.title || t("common.untitled"),
     type: "life",
     kind: "article",
@@ -388,7 +388,7 @@ export async function createRemoteFromLocal(
 }
 
 export async function loadRemote(session: RemoteSession, id: string): Promise<EditorPage> {
-  const data = await request<{ post?: unknown; document?: unknown }>(session, "GET", `/docs/documents/id/${id}`);
+  const data = await request<{ post?: unknown; document?: unknown }>(session, "GET", `${WIKI_DOCUMENTS}/id/${encodeURIComponent(id)}`);
   const page = toPage(data.post ?? data.document);
   if (!page) {
     throw new Error(t("store.pageNotFound"));
@@ -404,7 +404,7 @@ export async function createRemote(
 ): Promise<EditorPage> {
   const body = seed?.body ?? starterArticleDocument();
   const title = seed?.title?.trim() || titleFromBody(body) || t("common.untitled");
-  const data = await request<{ post?: unknown; document?: unknown }>(session, "POST", "/docs/documents", {
+  const data = await request<{ post?: unknown; document?: unknown }>(session, "POST", WIKI_DOCUMENTS, {
     title,
     type: "life",
     kind: "article",
@@ -429,7 +429,7 @@ export async function saveRemote(
   props: Record<string, unknown> = {},
 ): Promise<EditorPage> {
   const title = titleFromBody(page.body);
-  const data = await request<{ post?: unknown; document?: unknown }>(session, "PUT", `/docs/documents/${page.id}`, {
+  const data = await request<{ post?: unknown; document?: unknown }>(session, "PUT", `${WIKI_DOCUMENTS}/${encodeURIComponent(page.id)}`, {
     title,
     type: "life",
     kind: "article",
@@ -446,12 +446,12 @@ export async function saveRemote(
 }
 
 export async function reparentRemote(session: RemoteSession, id: string, parentId: string | null): Promise<void> {
-  await request<null>(session, "PUT", `/docs/documents/id/${encodeURIComponent(id)}/parent`, { parentId });
+  await request<null>(session, "PUT", `${WIKI_DOCUMENTS}/id/${encodeURIComponent(id)}/parent`, { parentId });
 }
 
 export async function removeRemote(session: RemoteSession, id: string): Promise<void> {
   try {
-    await request<null>(session, "DELETE", `/docs/documents/${id}`);
+    await request<null>(session, "DELETE", `${WIKI_DOCUMENTS}/${encodeURIComponent(id)}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : "";
     if (message.includes("404") || message.includes("不存在") || message.includes("NOT_FOUND")) {

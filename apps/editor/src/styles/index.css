@@ -421,3 +421,24 @@
 .cdx-attachment.is-error .cdx-attachment__meta {
   color: var(--destructive);
 }
+
+@keyframes notify-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes notify-card-in {
+    from,
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}

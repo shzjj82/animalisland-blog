@@ -1,9 +1,6 @@
 import type { AiAttachment, AiChatMessage, AiChatResult, EditorJsDocument } from "@myblog/shared";
-import { gatewayUrl, loadSession, prepareSession, WIKI_APP_CODE } from "@/store/remoteStore";
+import { gatewayUrl, loadSession, prepareSession } from "@/store/remoteStore";
 import { t } from "@/i18n";
-
-/** Editor 智能体业务码：与登录/文档一致，用 wiki（博客用 blog） */
-const AGENTS_BIZ_CODE = WIKI_APP_CODE;
 
 type Envelope<T> = {
   success?: boolean;
@@ -34,8 +31,6 @@ async function requireToken(): Promise<string> {
 function agentsHeaders(token: string, accept: string): HeadersInit {
   return {
     Authorization: `Bearer ${token}`,
-    "X-Biz-Code": AGENTS_BIZ_CODE,
-    "X-App-Code": AGENTS_BIZ_CODE,
     Accept: accept,
     "Content-Type": "application/json",
   };
@@ -118,7 +113,7 @@ function throwFromEnvelope(status: number, json: Envelope<unknown> | null): neve
 }
 
 /**
- * 先看本地登录态；已登录再问 Nest `/agents/chat/status`。
+ * 先看本地登录态；已登录再问 Nest `/wiki/agents/chat/status`。
  * 网络失败返回 reason，不再抛「本地写作接口请重启」。
  */
 export async function aiStatus(): Promise<AiStatusResult> {
@@ -133,7 +128,7 @@ export async function aiStatus(): Promise<AiStatusResult> {
 
   let response: Response;
   try {
-    response = await fetch(gatewayUrl("/agents/chat/status"), {
+    response = await fetch(gatewayUrl("/wiki/agents/chat/status"), {
       method: "GET",
       headers: agentsHeaders(ready.token, "application/json"),
     });
@@ -200,7 +195,7 @@ export async function aiChat(
 
   let response: Response;
   try {
-    response = await fetch(gatewayUrl("/agents/chat"), {
+    response = await fetch(gatewayUrl("/wiki/agents/chat"), {
       method: "POST",
       headers: agentsHeaders(token, "text/event-stream"),
       body: JSON.stringify({
@@ -422,7 +417,7 @@ function mapMessages(data: unknown): AgentConversationDetail["messages"] {
 }
 
 export async function listAgentConversations(untitled: string): Promise<AgentConversationSummary[]> {
-  const data = await agentsJson<unknown>("/agents/conversations?page=1&pageSize=50");
+  const data = await agentsJson<unknown>("/wiki/agents/conversations?page=1&pageSize=50");
   return asRows(data)
     .map((row) => mapSummary(row, untitled))
     .filter((item): item is AgentConversationSummary => Boolean(item))
@@ -430,7 +425,7 @@ export async function listAgentConversations(untitled: string): Promise<AgentCon
 }
 
 export async function getAgentConversation(id: string, untitled: string): Promise<AgentConversationDetail> {
-  const data = await agentsJson<unknown>(`/agents/conversations/${encodeURIComponent(id)}`);
+  const data = await agentsJson<unknown>(`/wiki/agents/conversations/${encodeURIComponent(id)}`);
   const row = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
   const summary = mapSummary({ ...row, id: asText(row.id) || id }, untitled) ?? {
     id,
@@ -448,5 +443,5 @@ export async function getAgentConversation(id: string, untitled: string): Promis
 }
 
 export async function deleteAgentConversation(id: string): Promise<void> {
-  await agentsJson<unknown>(`/agents/conversations/${encodeURIComponent(id)}`, { method: "DELETE" });
+  await agentsJson<unknown>(`/wiki/agents/conversations/${encodeURIComponent(id)}`, { method: "DELETE" });
 }

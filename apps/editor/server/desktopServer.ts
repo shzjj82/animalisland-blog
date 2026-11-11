@@ -32,7 +32,7 @@ const MIME: Record<string, string> = {
 /**
  * 路由约定（按优先级）：
  *
- *   1. /auth /docs /agents /upload /teams   → 反代到网关
+ *   1. /auth /wiki   → 反代到网关
  *   2. /version.json                        → 版本号 + 安装包清单（链接指向 OSS 直链）
  *   3. /downloads/*                         → 410 Gone（安装包已迁到 OSS，不再由本机托管）
  *   4. 别名 308 跳转                         → /download、/download.html、/downloads
@@ -73,7 +73,7 @@ function isSpaPath(pathname: string): boolean {
 /** 打包后的资源名里带 hash，可以长缓存；其余给短缓存 */
 const HASHED_ASSET = /\/assets\/.+-[A-Za-z0-9_-]{8,}\.(?:js|css|woff2?|ttf|png|jpe?g|svg|webp)$/;
 
-const PROXY_ROOTS = ["/auth", "/docs", "/agents", "/upload", "/teams", "/notifications", "/todos"] as const;
+const PROXY_ROOTS = ["/auth", "/wiki"] as const;
 
 function resolveGatewayBase(): string {
   const fromBake = (process.env.DESKTOP_GATEWAY_BASE || "").trim();
@@ -135,10 +135,10 @@ function proxyToGateway(req: IncomingMessage, res: ServerResponse, gatewayBase: 
   req.pipe(upstream);
 }
 
-/** 把 /notifications/socket 的 WebSocket upgrade 转到网关 */
+/** 把 /wiki/notifications/socket 的 WebSocket upgrade 转到网关 */
 function proxyWsUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer, gatewayBase: string): void {
   const incoming = new URL(req.url ?? "/", "http://127.0.0.1");
-  if (incoming.pathname !== "/notifications/socket") {
+  if (incoming.pathname !== "/wiki/notifications/socket") {
     socket.destroy();
     return;
   }
@@ -453,7 +453,7 @@ function serveStatic(distRoot: string, req: IncomingMessage, res: ServerResponse
  */
 const DESKTOP_PORT = Number(process.env.EDITOR_PORT || 47321);
 
-/** 本机静态页 + 同源代理 Nest（/auth /docs /agents /upload /teams），避免 WebView CORS。 */
+/** 本机静态页 + 同源代理 Nest（/auth /wiki），避免 WebView CORS。 */
 export function startDesktopServer(distDir: string): Promise<number> {
   const root = path.resolve(distDir);
   const gatewayBase = resolveGatewayBase();

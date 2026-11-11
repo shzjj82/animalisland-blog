@@ -5,7 +5,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { loadTeam, setTeamRole, type TeamInfo, type TeamMember, type TeamRole } from "@/store/teamStore";
+import { canManageTeam, loadTeam, refreshTeamCode, setTeamRole, type TeamInfo, type TeamMember, type TeamRole } from "@/store/teamStore";
 import { copyText } from "@/lib/clipboard";
 import type { RemoteSession } from "@/store/remoteStore";
 
@@ -84,19 +84,44 @@ export function TeamManageSidebar({ session, team, onClose, onChanged }: Props) 
         accessorKey: "value",
         header: t("team.value"),
         cell: ({ row }) =>
-          row.original.field === t("team.code") && code ? (
+          row.original.field === t("team.code") ? (
             <span className="flex min-w-0 items-center gap-2">
-              <span className="font-mono tracking-[0.2em]">{code}</span>
-              <Button type="button" size="sm" variant="outline" onClick={() => void copyText(code)}>
-                {t("team.copyCode")}
-              </Button>
+              <span className="font-mono tracking-[0.2em]">{code ?? "—"}</span>
+              {code ? (
+                <Button type="button" size="sm" variant="outline" onClick={() => void copyText(code)}>
+                  {t("team.copyCode")}
+                </Button>
+              ) : null}
+              {canManageTeam(shown.role) ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => {
+                    setBusy(true);
+                    setError("");
+                    void refreshTeamCode(session, shown.id)
+                      .then((next) => {
+                        setShown(next);
+                        onChanged();
+                      })
+                      .catch((err: unknown) => {
+                        setError(err instanceof Error ? err.message : t("team.refreshFailed"));
+                      })
+                      .finally(() => setBusy(false));
+                  }}
+                >
+                  {t("team.refreshCode")}
+                </Button>
+              ) : null}
             </span>
           ) : (
             <span>{row.original.value}</span>
           ),
       },
     ],
-    [code, t],
+    [busy, code, onChanged, session, shown.id, shown.role, t],
   );
 
   const memberColumns = useMemo<ColumnDef<TeamMember, unknown>[]>(

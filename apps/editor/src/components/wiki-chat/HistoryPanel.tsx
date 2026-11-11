@@ -1,12 +1,14 @@
 import { useMemo, useState } from "react";
 import { Delete, Plus, Search } from "@icon-park/react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { SoftScrollbar } from "@/components/soft-scrollbar";
-import { historyGroup, threadPreview, type HistoryGroupId, type WikiThread } from "@/lib/ai/wikiChatHistory";
+import { historyGroup, plainTalk, threadPreview, type HistoryGroupId, type WikiThread } from "@/lib/ai/wikiChatHistory";
 import { iconParkOutline } from "@/lib/iconPark";
+import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 
-export const HISTORY_SIDEBAR_W = 236;
+export const HISTORY_SIDEBAR_W = 268;
 
 type Props = {
   threads: WikiThread[];
@@ -24,18 +26,23 @@ const GROUP_KEY = {
   older: "wikiAsk.historyOlder",
 } as const;
 
-function formatCardTime(value: number, locale: string, group: HistoryGroupId): string {
+function formatChatTime(value: number, locale: string, group: HistoryGroupId, yesterday: string): string {
   if (!value) {
     return "";
   }
+  const date = new Date(value);
   try {
-    if (group === "today" || group === "yesterday") {
-      return new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }).format(value);
+    if (group === "today") {
+      return new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(date);
+    }
+    if (group === "yesterday") {
+      return yesterday;
     }
     if (group === "week") {
-      return new Intl.DateTimeFormat(locale, { weekday: "short", hour: "2-digit", minute: "2-digit" }).format(value);
+      return new Intl.DateTimeFormat(locale, { weekday: "short" }).format(date);
     }
-    return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }).format(value);
+    const sameYear = date.getFullYear() === new Date().getFullYear();
+    return new Intl.DateTimeFormat(locale, sameYear ? { month: "numeric", day: "numeric" } : { year: "numeric", month: "numeric", day: "numeric" }).format(date);
   } catch {
     return "";
   }
@@ -56,50 +63,57 @@ export function HistoryPanel({ threads, activeId, onNew, onOpen, onDelete }: Pro
   }, [threads, query]);
 
   return (
-    <aside className="flex h-full shrink-0 flex-col border-r border-border/40 bg-muted/25" style={{ width: HISTORY_SIDEBAR_W }}>
-      <div className="flex shrink-0 items-center gap-1 px-2 pt-2">
-        <label className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg bg-background/80 px-2 py-1.5">
-          <Search {...iconParkOutline} size={13} className="text-muted-foreground shrink-0" />
-          <input
+    <aside className="flex h-full shrink-0 flex-col border-r border-border/40 bg-muted/30" style={{ width: HISTORY_SIDEBAR_W }}>
+      <div className="flex shrink-0 items-center gap-1 px-2.5 pt-2.5">
+        <div className="relative min-w-0 flex-1">
+          <Search
+            {...iconParkOutline}
+            size={14}
+            className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t("wikiAsk.historySearch")}
-            className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+            aria-label={t("wikiAsk.historySearch")}
+            className="h-8 bg-background pl-7"
           />
-        </label>
+        </div>
         <Button type="button" variant="ghost" size="icon-xs" aria-label={t("wikiAsk.newChat")} onClick={onNew}>
           <Plus {...iconParkOutline} size={14} />
         </Button>
       </div>
-      <SoftScrollbar className="min-h-0 flex-1" contentClassName="px-1.5 pb-2">
+      <SoftScrollbar className="min-h-0 flex-1" contentClassName="px-2.5 pb-3">
         {groups.length === 0 ? (
-          <p className="text-muted-foreground px-2 py-8 text-center text-xs">
+          <p className="text-muted-foreground rounded-xl border border-dashed border-border/70 bg-background/60 px-3 py-8 text-center text-xs">
             {t(query.trim() ? "wikiAsk.historyNoMatch" : "wikiAsk.historyEmpty")}
           </p>
         ) : (
           groups.map((group) => (
-            <section key={group.id} className="mt-2">
-              <h2 className="text-muted-foreground px-2 pb-0.5 text-[10px] font-medium tracking-wide">{t(GROUP_KEY[group.id])}</h2>
-              <ul className="space-y-1">
+            <section key={group.id} className="mt-3">
+              <h2 className="text-muted-foreground px-1 pb-1.5 text-[10px] font-medium tracking-wide">{t(GROUP_KEY[group.id])}</h2>
+              <ul className="space-y-1.5">
                 {group.items.map((thread) => {
-                  const preview = threadPreview(thread);
+                  const title = plainTalk(thread.title) || t("wikiAsk.untitledChat");
                   const current = thread.id === activeId;
-                  const when = formatCardTime(thread.updatedAt, i18n.language, group.id);
+                  const when = formatChatTime(thread.updatedAt, i18n.language, group.id, t("wikiAsk.historyYesterday"));
                   return (
                     <li key={thread.id}>
-                      <div className={`group flex items-stretch rounded-xl ${current ? "bg-background shadow-sm" : "hover:bg-background/70"}`}>
-                        <button type="button" className="min-w-0 flex-1 px-2.5 py-2.5 text-left" onClick={() => onOpen(thread.id)}>
-                          <span className="flex items-baseline justify-between gap-2">
-                            <span className="min-w-0 truncate text-[13px] font-medium">{thread.title}</span>
-                            {when ? <span className="text-muted-foreground shrink-0 text-[10px] tabular-nums">{when}</span> : null}
-                          </span>
-                          {preview ? <span className="text-muted-foreground mt-1 line-clamp-2 text-[11px] leading-4">{preview}</span> : <span className="mt-1 block h-4" />}
+                      <div
+                        className={cn(
+                          "group relative rounded-xl border bg-background shadow-sm",
+                          current ? "border-foreground/25 shadow-md" : "border-border/60 hover:border-border",
+                        )}
+                      >
+                        <button type="button" className="flex min-h-16 w-full flex-col justify-between px-3 pt-2 pb-2.5 pr-7 text-left" onClick={() => onOpen(thread.id)}>
+                          {when ? <span className="text-muted-foreground text-[10px] leading-none tabular-nums">{when}</span> : <span />}
+                          <span className="block truncate pt-3 text-[13px] leading-5 font-medium">{title}</span>
                         </button>
                         <Button
                           type="button"
                           variant="ghost"
                           size="icon-xs"
-                          className="text-muted-foreground mr-1 self-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                          className="text-muted-foreground absolute top-1 right-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
                           aria-label={t("wikiAsk.deleteChat")}
                           onClick={() => onDelete(thread.id)}
                         >

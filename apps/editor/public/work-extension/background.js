@@ -1,11 +1,10 @@
 const DEFAULTS = ["http://127.0.0.1:47321", "http://127.0.0.1:5174", "http://127.0.0.1:8082"];
 
 async function settings() {
-  const stored = await chrome.storage.local.get(["bridge", "token", "pairCode"]);
+  const stored = await chrome.storage.local.get(["bridge", "token"]);
   return {
     bridge: String(stored.bridge || "").replace(/\/$/, ""),
     token: String(stored.token || ""),
-    pairCode: String(stored.pairCode || ""),
   };
 }
 
@@ -28,18 +27,18 @@ async function resolveBridge(preferred) {
   return preferred || DEFAULTS[0];
 }
 
-async function connect(pairCode, bridge) {
+async function connect(bridge) {
   const origin = await resolveBridge(bridge);
   const res = await fetch(`${origin}/work-bridge/connect`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pairCode, browserName: navigator.userAgent }),
+    body: JSON.stringify({ browserName: navigator.userAgent }),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(body.error || "CONNECT_FAILED");
   }
-  await chrome.storage.local.set({ bridge: origin, token: body.token, pairCode });
+  await chrome.storage.local.set({ bridge: origin, token: body.token });
   return { origin, token: body.token };
 }
 
@@ -58,9 +57,15 @@ async function sendTab(tabId, message) {
 }
 
 async function tick() {
-  const { bridge, token } = await settings();
+  let { bridge, token } = await settings();
   if (!bridge || !token) {
-    return;
+    try {
+      const linked = await connect("");
+      bridge = linked.origin;
+      token = linked.token;
+    } catch {
+      return;
+    }
   }
   const tab = await activeTab();
   if (tab?.id) {
@@ -103,7 +108,7 @@ async function tick() {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "wiki-work-connect") {
-    connect(message.pairCode, message.bridge)
+    connect(message.bridge)
       .then((ok) => sendResponse({ ok: true, ...ok }))
       .catch((err) => sendResponse({ ok: false, error: String(err.message || err) }));
     return true;

@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -117,8 +118,17 @@ pub fn list_installed_browsers() -> Vec<InstalledBrowser> {
         .collect()
 }
 
+fn http_url(url: Option<String>) -> Option<String> {
+    let value = url?.trim().to_string();
+    if value.starts_with("https://") || value.starts_with("http://") {
+        Some(value)
+    } else {
+        None
+    }
+}
+
 #[tauri::command]
-pub fn open_installed_browser(id: String) -> Result<(), String> {
+pub fn open_installed_browser(id: String, url: Option<String>) -> Result<(), String> {
     let item = KNOWN
         .iter()
         .find(|row| row.id == id)
@@ -126,12 +136,15 @@ pub fn open_installed_browser(id: String) -> Result<(), String> {
     if !is_installed(item) {
         return Err("BROWSER_MISSING".into());
     }
+    let target = http_url(url);
     #[cfg(target_os = "macos")]
     {
-        Command::new("open")
-            .args(["-a", item.mac_app])
-            .status()
-            .map_err(|err| err.to_string())?;
+        let mut command = Command::new("open");
+        command.args(["-a", item.mac_app]);
+        if let Some(page) = target.as_deref() {
+            command.arg(page);
+        }
+        command.status().map_err(|err| err.to_string())?;
         return Ok(());
     }
     #[cfg(target_os = "windows")]
@@ -154,7 +167,11 @@ pub fn open_installed_browser(id: String) -> Result<(), String> {
             })
             .find_map(|path| path)
             .ok_or_else(|| "BROWSER_MISSING".to_string())?;
-        Command::new(exe).spawn().map_err(|err| err.to_string())?;
+        let mut command = Command::new(exe);
+        if let Some(page) = target.as_deref() {
+            command.arg(page);
+        }
+        command.spawn().map_err(|err| err.to_string())?;
         return Ok(());
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -202,4 +219,57 @@ pub fn reveal_work_extension(app: tauri::AppHandle) -> Result<String, String> {
             .map_err(|err| err.to_string())?;
     }
     Ok(shown.to_string_lossy().into_owned())
+}
+
+/// 截一张当前屏幕，压成较小的 JPEG。只在需要对照画面时调用，不是每个动作都截。
+#[tauri::command]
+pub fn capture_screen() -> Result<String, String> {
+    let path = std::env::temp_dir().join(format!("wiki-agent-look-{}.jpg", std::process::id()));
+    let path_text = path.to_string_lossy().to_string();
+    #[cfg(target_os = "macos")]
+    {
+        let shot = Command::new("screencapture")
+            .args(["-x", "-t", "jpg", &path_text])
+            .output()
+            .map_err(|err| err.to_string())?;
+        if !shot.status.success() {
+            let err = String::from_utf8_lossy(&shot.stderr);
+            return Err(if err.trim().is_empty() {
+                "SCREEN_CAPTURE_FAILED".into()
+            } else {
+                err.trim().to_string()
+            });
+        }
+        let _ = Command::new("sips")
+            .args(["-Z", "1280", "-s", "format", "jpeg", "-s", "formatOptions", "55", &path_text])
+            .status();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let script = format!(
+            "$b=[Windows.Forms.Screen]::PrimaryScreen.Bounds; $bmp=New-Object Drawing.Bitmap $b.Width,$b.Height; $g=[Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($b.Location,[Drawing.Point]::Empty,$b.Size); $bmp.Save('{}',[Drawing.Imaging.ImageFormat]::Jpeg)",
+            path_text.replace('\'', "''")
+        );
+        let shot = Command::new("powershell")
+            .args(["-NoProfile", "-Command", &format!("Add-Type -AssemblyName System.Windows.Forms,System.Drawing; {script}")])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|err| err.to_string())?;
+        if !shot.status.success() {
+            return Err("SCREEN_CAPTURE_FAILED".into());
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = path_text;
+        return Err("SCREEN_CAPTURE_UNSUPPORTED".into());
+    }
+    let bytes = std::fs::read(&path).map_err(|err| err.to_string())?;
+    let _ = std::fs::remove_file(&path);
+    if bytes.is_empty() || bytes.len() > 3_500_000 {
+        return Err("SCREEN_CAPTURE_FAILED".into());
+    }
+    Ok(format!("data:image/jpeg;base64,{}", STANDARD.encode(bytes)))
 }

@@ -128,6 +128,9 @@ export function ossClient(cfg = ossConfig()) {
       bucket: cfg.bucket,
       secure: true,
       authorizationV4: true,
+      // 默认 60 秒。CI 在海外，整包 PUT 到上海经常超时。
+      timeout: 10 * 60 * 1000,
+      retryMax: 2,
     });
   }
   return client;
@@ -139,20 +142,63 @@ export function contentTypeOf(name) {
   return MIME[path.extname(name).toLowerCase()] ?? "application/octet-stream";
 }
 
+const MULTIPART_AT = 8 * 1024 * 1024;
+const PART_SIZE = 5 * 1024 * 1024;
+/** 单片超时。默认 60 秒不够：GitHub 机器在海外，整包传到上海会被掐掉。 */
+const PUT_TIMEOUT = 10 * 60 * 1000;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * 上传单个文件。公共读 + 长缓存 + attachment：
  * 跨域链接上的 download 属性浏览器会忽略，靠 Content-Disposition 才是真的「点了就下载」。
+ * 大文件走分片，避免一次 PUT 被 60 秒超时掐掉。
  */
 export async function putFile(client, key, file, name, onProgress) {
-  return client.put(key, file, {
-    mime: contentTypeOf(name),
-    headers: {
-      "x-oss-object-acl": "public-read",
-      "Cache-Control": "public, max-age=31536000, immutable",
-      "Content-Disposition": `attachment; filename="${name.replace(/[^\x20-\x7e]/g, "_")}"`,
-    },
-    progress: onProgress ? (pct) => onProgress(pct) : undefined,
-  });
+  const headers = {
+    "x-oss-object-acl": "public-read",
+    "Cache-Control": "public, max-age=31536000, immutable",
+    "Content-Disposition": `attachment; filename="${name.replace(/[^\x20-\x7e]/g, "_")}"`,
+  };
+  const size = fs.statSync(file).size;
+  let checkpoint;
+  let last;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      if (size >= MULTIPART_AT) {
+        await client.multipartUpload(key, file, {
+          mime: contentTypeOf(name),
+          timeout: PUT_TIMEOUT,
+          partSize: PART_SIZE,
+          parallel: 3,
+          headers,
+          checkpoint,
+          progress: (pct, next) => {
+            checkpoint = next;
+            if (onProgress) onProgress(pct);
+          },
+        });
+      } else {
+        await client.put(key, file, {
+          mime: contentTypeOf(name),
+          timeout: PUT_TIMEOUT,
+          headers,
+          progress: onProgress,
+        });
+      }
+      await client.putACL(key, "public-read");
+      return;
+    } catch (err) {
+      last = err;
+      if (err?.status === 404 || err?.name === "abort") checkpoint = undefined;
+      if (attempt === 3) break;
+      await sleep(2000 * attempt);
+    }
+  }
+  const detail = last?.code || last?.name || "Error";
+  throw new Error(`上传 ${name} 失败（${detail}）：${last?.message || last}`);
 }
 
 export async function headObject(client, key) {

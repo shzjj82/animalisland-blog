@@ -1,4 +1,4 @@
-import { GATEWAY_BASE_URL, WIKI_APP_CODE, prepareSession, type RemoteSession } from "@/store/remoteStore";
+import { GATEWAY_BASE_URL, prepareSession, type RemoteSession } from "@/store/remoteStore";
 
 export type NotifySocketEvent =
   | { type: "ready"; bizCode: string; userId: string }
@@ -24,10 +24,9 @@ function socketHttpBase(): string {
 }
 
 export function buildNotifySocketUrl(token: string): string {
-  const url = new URL("/notifications/socket", socketHttpBase());
+  const url = new URL("/wiki/notifications/socket", socketHttpBase());
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.searchParams.set("token", token);
-  url.searchParams.set("bizCode", WIKI_APP_CODE);
   return url.toString();
 }
 
@@ -55,7 +54,7 @@ function asSocketEvent(raw: unknown): NotifySocketEvent | null {
   return null;
 }
 
-/** 登录后订阅 /notifications/socket；断线自动重连 */
+/** 登录后订阅 /wiki/notifications/socket；断线自动重连 */
 export function connectNotifySocket(
   session: RemoteSession,
   onEvent: Listener,

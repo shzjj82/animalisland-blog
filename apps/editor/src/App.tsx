@@ -18,6 +18,7 @@ import { LanguageSwitch } from "@/components/language-switch";
 import { NotifyBell } from "@/components/notify-bell";
 import { PageTree } from "@/components/page-tree";
 import { AppUpdateProvider } from "@/components/app-update";
+import { isDesktopApp } from "@/lib/ai/skills";
 import { SettingsMenu } from "@/components/settings-menu";
 import { TeamDialog } from "@/components/team-dialog";
 import { SyncChecklistDialog, SyncSummaryDialog } from "@/components/sync-dialogs";
@@ -84,6 +85,7 @@ import {
 } from "@/store/teamStore";
 import { TeamManageSidebar } from "@/components/team-manage-sidebar";
 import { pageTitle, setAppLocale, type AppLocale } from "@/i18n";
+import { documentFromMarkdown, titleFromMarkdown } from "@/lib/document/fromMarkdown";
 import { exportDocument, type ExportFormat } from "@/lib/document/export";
 import { fileKind, isImageFile } from "@/lib/document/fileKinds";
 import { importSpreadsheet, importVideo, importWord, mergeImported, readInsertable, WORD_ACCEPT } from "@/lib/document/import";
@@ -229,6 +231,8 @@ export function App() {
   const [spotlightOpen, setSpotlightOpen] = useState(false);
   const [wikiOpen, setWikiOpen] = useState(false);
   const [wikiFocus, setWikiFocus] = useState(0);
+  // 工作台还差得远，先不出现在界面上。
+  const workEnabled = false;
   const [workOpen, setWorkOpen] = useState(false);
   const [workFocus, setWorkFocus] = useState(0);
   const [spotlightLaunch, setSpotlightLaunch] = useState<{
@@ -368,6 +372,9 @@ export function App() {
   }, [session]);
 
   const openWork = useCallback(() => {
+    if (!isDesktopApp()) {
+      return;
+    }
     if (!session) {
       setAuthOpen(true);
       return;
@@ -1463,9 +1470,11 @@ export function App() {
             <Button type="button" variant="outline" size="icon" aria-label={t("wikiAsk.title")} onClick={openWiki}>
               <span className="text-[11px] font-semibold leading-none tracking-wide">AI</span>
             </Button>
-            <Button type="button" variant="outline" size="sm" aria-label={t("work.title")} onClick={openWork}>
-              {t("work.title")}
-            </Button>
+            {workEnabled ? (
+              <Button type="button" variant="outline" size="sm" aria-label={t("work.title")} onClick={openWork}>
+                {t("work.title")}
+              </Button>
+            ) : null}
             <LanguageSwitch onChange={(locale) => void switchLocale(locale)} />
           </span>
           {/* 移动端：更多菜单 + AI */}
@@ -1543,9 +1552,11 @@ export function App() {
             <Button type="button" variant="outline" size="icon" aria-label={t("wikiAsk.title")} onClick={openWiki}>
               <span className="text-[11px] font-semibold leading-none tracking-wide">AI</span>
             </Button>
-            <Button type="button" variant="outline" size="sm" aria-label={t("work.title")} onClick={openWork}>
-              {t("work.title")}
-            </Button>
+            {workEnabled ? (
+              <Button type="button" variant="outline" size="sm" aria-label={t("work.title")} onClick={openWork}>
+                {t("work.title")}
+              </Button>
+            ) : null}
           </span>
         </header>
         <FileDropZone
@@ -1623,13 +1634,17 @@ export function App() {
               keywords: t("wikiAsk.keywords"),
               icon: "search",
             },
-            {
-              id: "work-desk",
-              title: t("work.title"),
-              subtitle: t("work.subtitle"),
-              keywords: t("work.keywords"),
-              icon: "search",
-            },
+            ...(workEnabled
+              ? [
+                  {
+                    id: "work-desk",
+                    title: t("work.title"),
+                    subtitle: t("work.subtitle"),
+                    keywords: t("work.keywords"),
+                    icon: "search" as const,
+                  },
+                ]
+              : []),
           ] satisfies SpotlightAction[]
         }
         editor={editorReady ? editorRef.current : null}
@@ -1652,16 +1667,37 @@ export function App() {
           setAuthOpen(true);
         }}
       />
-      <WorkDesk
-        open={workOpen}
-        focusToken={workFocus}
-        loggedIn={Boolean(session)}
-        onClose={() => setWorkOpen(false)}
-        onLogin={() => {
-          setWorkOpen(false);
-          setAuthOpen(true);
-        }}
-      />
+      {workEnabled ? (
+        <WorkDesk
+          open={workOpen}
+          focusToken={workFocus}
+          loggedIn={Boolean(session)}
+          onClose={() => setWorkOpen(false)}
+          onLogin={() => {
+            setWorkOpen(false);
+            setAuthOpen(true);
+          }}
+          onDeliver={async (markdown) => {
+            const body = documentFromMarkdown(markdown);
+            const title = titleFromMarkdown(markdown, t("work.resultReady"));
+            const writingTeam =
+              activeTeamId && canWriteTeam(teams.find((team) => team.id === activeTeamId)?.role) ? activeTeamId : null;
+            const created = session
+              ? await createRemote(session, null, writingTeam, { title, body })
+              : createLocal(null, { title, body });
+            if (session) {
+              await refreshRemote(session, created.id);
+            } else {
+              refreshLocal(created.id);
+            }
+            return { id: created.id, title: created.title || title };
+          }}
+          onOpenResult={(id) => {
+            setWorkOpen(false);
+            void openPage(id);
+          }}
+        />
+      ) : null}
       <Dialog open={fileDeleteAsk !== null} onOpenChange={(open) => !open && answerDeleteFile(false)}>
         <DialogContent>
           <DialogHeader>

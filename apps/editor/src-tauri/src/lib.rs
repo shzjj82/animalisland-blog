@@ -704,6 +704,7 @@ pub fn run() {
             browser_cmd::list_installed_browsers,
             browser_cmd::open_installed_browser,
             browser_cmd::reveal_work_extension,
+            browser_cmd::capture_screen,
         ])
         .setup(|app| -> Result<(), Box<dyn std::error::Error>> {
             #[cfg(target_os = "macos")]

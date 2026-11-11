@@ -47,12 +47,16 @@ export function detailToThread(item: AgentConversationDetail): WikiThread {
   };
 }
 
+/** 会话摘要有时会带上「用户：」，卡片上只留原话。 */
+export function plainTalk(text: string): string {
+  return text.replace(/\s+/g, " ").replace(/^(用户|助手|工作助手|user|assistant)\s*[:：]\s*/i, "").trim();
+}
+
 export function threadPreview(thread: WikiThread): string {
-  if (thread.preview?.trim()) {
-    return thread.preview.replace(/\s+/g, " ").trim().slice(0, 72);
-  }
-  const last = [...thread.bubbles].reverse().find((item) => item.role === "assistant" && item.content.trim());
-  return (last?.content ?? "").replace(/\s+/g, " ").trim().slice(0, 72);
+  const source = thread.preview?.trim()
+    ? thread.preview
+    : ([...thread.bubbles].reverse().find((item) => item.role === "assistant" && item.content.trim())?.content ?? "");
+  return plainTalk(source).slice(0, 72);
 }
 
 export type HistoryGroupId = "today" | "yesterday" | "week" | "older";

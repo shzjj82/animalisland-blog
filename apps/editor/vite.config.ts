@@ -18,12 +18,7 @@ function gatewayProxy(target: string): Record<string, ProxyOptions> {
   const withWs: ProxyOptions = { ...common, ws: true };
   return {
     "/auth": common,
-    "/docs": common,
-    "/agents": common,
-    "/upload": common,
-    "/teams": common,
-    "/notifications": withWs,
-    "/todos": common,
+    "/wiki": withWs,
   };
 }
 
