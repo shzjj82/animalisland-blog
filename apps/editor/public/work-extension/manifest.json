@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "wiki-agent 工作助手",
-  "version": "0.0.21",
+  "version": "0.0.22",
   "description": "把当前标签页交给 wiki-agent 工作台操作。",
   "action": {
     "default_title": "wiki-agent 工作",
