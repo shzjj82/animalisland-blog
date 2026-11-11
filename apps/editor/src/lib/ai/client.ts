@@ -61,16 +61,22 @@ function summarizeDocument(document?: EditorJsDocument): string {
       if (block.type === "todo") {
         const lines = (Array.isArray(data.items) ? data.items : [])
           .map((item) => {
-            const row = item as { text?: string; done?: boolean; start?: string; end?: string };
+            const row = item as { text?: string; status?: string; done?: boolean; start?: string; end?: string };
             const text = String(row.text ?? "").trim();
             const start = String(row.start ?? "").trim();
             const end = String(row.end ?? "").trim();
             if (!text && !start && !end) {
               return "";
             }
-            const mark = row.done ? "x" : " ";
+            const status =
+              row.status === "pending" || row.status === "in_progress" || row.status === "done" || row.status === "cancelled"
+                ? row.status
+                : row.done
+                  ? "done"
+                  : "pending";
+            const mark = status === "done" ? "x" : status === "cancelled" ? "-" : " ";
             const range = start || end ? ` (${start || "?"}–${end || "?"})` : "";
-            return `[${mark}] ${text}${range}`;
+            return `[${mark}|${status}] ${text}${range}`;
           })
           .filter(Boolean);
         return `${index + 1}. [todo] ${lines.join("; ").slice(0, 2000)}`;

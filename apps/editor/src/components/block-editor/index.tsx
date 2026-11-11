@@ -18,7 +18,7 @@ import { useVisualViewport } from "@/lib/useKeyboardInset";
 import { PageLinkTool, type PageLinkData } from "./tools/PageLinkTool";
 import { AttachmentTool } from "./tools/AttachmentTool";
 import { ImageBlockTool, imageBlockData } from "./tools/ImageBlockTool";
-import { TodoBlockTool } from "./tools/TodoBlockTool";
+import { TodoBlockTool, type TodoBlockDetailRequest } from "./tools/TodoBlockTool";
 import { VideoBlockTool } from "./tools/VideoBlockTool";
 import type { AttachmentData } from "@/store/fileStore";
 import { htmlToBlocks } from "@/lib/document/htmlToBlocks";
@@ -107,6 +107,9 @@ async function insertPastedImages(
   }
 }
 
+/** page=文档页全功能；embed=嵌入详情等场景，不含子页面 / 待办 / AI */
+export type BlockEditorVariant = "page" | "embed";
+
 type Props = {
   doc: EditorJsDocument;
   pageId?: string;
@@ -128,13 +131,39 @@ type Props = {
   onHistory?: (api: EditorHistoryApi | null) => void;
   /** 移动端底栏挂载点（父级布局流里的一个空容器）；不传则不渲染底栏 */
   barSlot?: HTMLElement | null;
+  variant?: BlockEditorVariant;
+  className?: string;
+  /** 待办块「添加 / 编辑」打开详情对话框 */
+  onTodoDetail?: (request: TodoBlockDetailRequest) => void;
 };
 
-export function BlockEditor({ doc, pageId, onChange, onOpenPage, onCreateChild, resolvePageTitle, onReady, onAi, onAskSelection, onUploadFile, onUploadError, onOpenFile, onConfirmDeleteFile, reveal, readOnly = false, onHistory, barSlot }: Props) {
+export function BlockEditor({
+  doc,
+  pageId,
+  onChange,
+  onOpenPage,
+  onCreateChild,
+  resolvePageTitle,
+  onReady,
+  onAi,
+  onAskSelection,
+  onUploadFile,
+  onUploadError,
+  onOpenFile,
+  onConfirmDeleteFile,
+  reveal,
+  readOnly = false,
+  onHistory,
+  barSlot,
+  variant = "page",
+  className,
+  onTodoDetail,
+}: Props) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const viewport = useVisualViewport();
   const { keyboardOpen } = viewport;
+  const embed = variant === "embed";
   const [ready, setReady] = useState(false);
   const [editing, setEditing] = useState(false);
   /** 当前块的样式（用于底栏高亮），取值与 blockIconKey 一致 */
@@ -171,9 +200,12 @@ export function BlockEditor({ doc, pageId, onChange, onOpenPage, onCreateChild, 
   onConfirmDeleteRef.current = onConfirmDeleteFile;
   const pageIdRef = useRef(pageId);
   pageIdRef.current = pageId;
+  const onTodoDetailRef = useRef(onTodoDetail);
+  onTodoDetailRef.current = onTodoDetail;
   const readOnlyRef = useRef(readOnly);
   readOnlyRef.current = readOnly;
   const initialRef = useRef(doc);
+  const inlineToolbar = embed ? ["link", "bold", "italic"] : inlineTools;
   const history = useDocHistory();
   /** 撤销 / 重做期间由我们自己渲染，别把这一次变更又记进历史栈 */
   const applyingRef = useRef(false);
@@ -196,10 +228,9 @@ export function BlockEditor({ doc, pageId, onChange, onOpenPage, onCreateChild, 
       holder,
       data: initialRef.current,
       readOnly,
-      // 移动端不自动聚焦：一进页面 Editor.js 就把光标塞进正文，focus 立刻为真，
-      // 底栏（以及 iOS 上跟着起来的键盘）会在用户还没操作时就出现在底部
-      autofocus: !readOnly && !isMobile,
-      minHeight: 40,
+      // 移动端 / 嵌入态不自动聚焦，避免弹层一开就抢键盘
+      autofocus: !readOnly && !isMobile && !embed,
+      minHeight: embed ? 80 : 40,
       placeholder: t("blockEditor.placeholder"),
       i18n: editorI18n(),
       tools: {
@@ -208,7 +239,7 @@ export function BlockEditor({ doc, pageId, onChange, onOpenPage, onCreateChild, 
         },
         header: {
           class: Header,
-          inlineToolbar: inlineTools,
+          inlineToolbar,
           config: { placeholder: t("blockEditor.heading"), levels: [1, 2, 3], defaultLevel: 1 },
           toolbox: [
             { title: "Heading 1", icon: menuIcons.h1, data: { level: 1 } },
@@ -218,21 +249,26 @@ export function BlockEditor({ doc, pageId, onChange, onOpenPage, onCreateChild, 
         },
         list: {
           class: List,
-          inlineToolbar: inlineTools,
+          inlineToolbar,
           toolbox: [
             { title: "Unordered List", icon: menuIcons.ul, data: { style: "unordered" } },
             { title: "Ordered List", icon: menuIcons.ol, data: { style: "ordered" } },
           ],
         },
-        todo: {
-          class: TodoBlockTool as unknown as typeof Header,
-          config: {
-            getPageId: () => pageIdRef.current ?? "",
-          },
-        },
+        ...(embed
+          ? {}
+          : {
+              todo: {
+                class: TodoBlockTool as unknown as typeof Header,
+                config: {
+                  getPageId: () => pageIdRef.current ?? "",
+                  onOpenDetail: (request: TodoBlockDetailRequest) => onTodoDetailRef.current?.(request),
+                },
+              },
+            }),
         quote: {
           class: Quote,
-          inlineToolbar: inlineTools,
+          inlineToolbar,
           config: { quotePlaceholder: t("blockEditor.quote"), captionPlaceholder: t("blockEditor.caption") },
           toolbox: { icon: menuIcons.quote },
         },
@@ -242,29 +278,33 @@ export function BlockEditor({ doc, pageId, onChange, onOpenPage, onCreateChild, 
         },
         table: {
           class: Table as unknown as typeof Header,
-          inlineToolbar: inlineTools,
+          inlineToolbar,
           toolbox: { icon: menuIcons.table },
         },
-        askAi: {
-          class: AskAiInlineTool as unknown as typeof Header,
-          config: {
-            onAsk: (text: string) => onAskRef.current?.(text),
-          },
-        },
-        pageLink: {
-          class: PageLinkTool as unknown as typeof Header,
-          config: {
-            onOpen: (page: PageLinkData) => onOpenRef.current?.(page.pageId),
-            resolveTitle: (pageId: string) => resolveTitleRef.current?.(pageId),
-            createChild: () => {
-              const create = onCreateRef.current;
-              if (!create) {
-                return Promise.reject(new Error("无法创建子页面"));
-              }
-              return create();
-            },
-          },
-        },
+        ...(embed
+          ? {}
+          : {
+              askAi: {
+                class: AskAiInlineTool as unknown as typeof Header,
+                config: {
+                  onAsk: (text: string) => onAskRef.current?.(text),
+                },
+              },
+              pageLink: {
+                class: PageLinkTool as unknown as typeof Header,
+                config: {
+                  onOpen: (page: PageLinkData) => onOpenRef.current?.(page.pageId),
+                  resolveTitle: (pageId: string) => resolveTitleRef.current?.(pageId),
+                  createChild: () => {
+                    const create = onCreateRef.current;
+                    if (!create) {
+                      return Promise.reject(new Error("无法创建子页面"));
+                    }
+                    return create();
+                  },
+                },
+              },
+            }),
         image: {
           class: ImageBlockTool as unknown as typeof Header,
           config: {
@@ -288,12 +328,16 @@ export function BlockEditor({ doc, pageId, onChange, onOpenPage, onCreateChild, 
             confirmDelete: (name: string) => onConfirmDeleteRef.current?.(name) ?? Promise.resolve(true),
           },
         },
-        aiAssist: {
-          class: AiAssistTriggerTool as unknown as typeof Header,
-          config: {
-            onInvoke: ({ blockIndex }: { blockIndex: number }) => onAiRef.current?.(blockIndex),
-          },
-        },
+        ...(embed
+          ? {}
+          : {
+              aiAssist: {
+                class: AiAssistTriggerTool as unknown as typeof Header,
+                config: {
+                  onInvoke: ({ blockIndex }: { blockIndex: number }) => onAiRef.current?.(blockIndex),
+                },
+              },
+            }),
       },
       onReady() {
         new DragDrop(editor, "2px solid #191919");
@@ -631,7 +675,8 @@ export function BlockEditor({ doc, pageId, onChange, onOpenPage, onCreateChild, 
   }, [ready]);
 
   /* 放在所有 useState 之后：压缩后如果提前引用会命中 TDZ（Cannot access before initialization） */
-  const showBar = isMobile && ready && !readOnly && editing;
+  const showBar = isMobile && ready && !readOnly && editing && Boolean(barSlot);
+  const mobileStyles = embed ? blockStyles.filter((item) => item.key !== "todo") : blockStyles;
   const barIconProps = { theme: "outline" as const, strokeWidth: 3, size: 20 };
   const barButtonClass =
     "flex h-11 w-10 shrink-0 items-center justify-center rounded-lg text-foreground/70 transition-colors active:bg-muted active:text-foreground";
@@ -641,10 +686,16 @@ export function BlockEditor({ doc, pageId, onChange, onOpenPage, onCreateChild, 
   return (
     <>
       <div
-        className="notion-editor mx-auto max-w-3xl pt-4 px-4 pb-6 sm:pt-6 sm:pr-6 sm:pb-20 sm:pl-20"
+        className={cn(
+          "notion-editor",
+          embed
+            ? "notion-editor--embed max-w-none"
+            : "mx-auto max-w-3xl pt-4 px-4 pb-6 sm:pt-6 sm:pr-6 sm:pb-20 sm:pl-20",
+          className,
+        )}
         /* 横屏刘海：正文左右也避开非安全区（竖屏 env() 为 0，等价 px-4） */
         style={
-          isMobile
+          isMobile && !embed
             ? {
                 paddingLeft: "max(1rem, env(safe-area-inset-left))",
                 paddingRight: "max(1rem, env(safe-area-inset-right))",
@@ -745,7 +796,7 @@ export function BlockEditor({ doc, pageId, onChange, onOpenPage, onCreateChild, 
               </button>
               {/* 字体/块样式直接铺在底栏上，点哪个就是哪种，不再弹菜单 */}
               <div className="editor-style-strip flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
-                {blockStyles.map((item) => (
+                {mobileStyles.map((item) => (
                   <button
                     key={item.key}
                     type="button"
@@ -766,9 +817,11 @@ export function BlockEditor({ doc, pageId, onChange, onOpenPage, onCreateChild, 
                   </button>
                 ))}
               </div>
-              <button type="button" aria-label={t("app.aiChatTitle")} className={barButtonClass} onPointerDown={keepEditorFocus} onMouseDown={keepEditorFocus} onClick={openAi}>
-                <span className="text-[11px] font-semibold leading-none tracking-wide">AI</span>
-              </button>
+              {!embed ? (
+                <button type="button" aria-label={t("app.aiChatTitle")} className={barButtonClass} onPointerDown={keepEditorFocus} onMouseDown={keepEditorFocus} onClick={openAi}>
+                  <span className="text-[11px] font-semibold leading-none tracking-wide">AI</span>
+                </button>
+              ) : null}
               <button type="button" aria-label={t("app.blockActions")} className={barButtonClass} onPointerDown={keepEditorFocus} onMouseDown={keepEditorFocus} onClick={openBlockSettings}>
                 <More {...barIconProps} />
               </button>

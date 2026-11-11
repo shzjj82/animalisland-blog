@@ -1,18 +1,39 @@
 import type { API, BlockAPI, BlockTool, BlockToolConstructorOptions } from "@editorjs/editorjs";
 import { appLocale, t } from "@/i18n";
-import { createTodo, markTodoDone, rememberTodoPage, updateTodo, type UpsertTodoInput } from "@/store/notifyStore";
+import {
+  createTodo,
+  fineTodoStatus,
+  getTodo,
+  rememberTodoPage,
+  syncTodoStatus,
+  updateTodoMergingData,
+  type UpsertTodoInput,
+} from "@/store/notifyStore";
 import { loadSession } from "@/store/remoteStore";
 import { menuIcons } from "../menuIcons";
+
+/** pending 未开始 · in_progress 进行中 · done 已完成 · cancelled 已终止 */
+export type TodoStatus = "pending" | "in_progress" | "done" | "cancelled";
 
 export type TodoItem = {
   id: string;
   text: string;
-  done: boolean;
+  status: TodoStatus;
   /** YYYY-MM-DD，空字符串表示未选 */
   start: string;
   end: string;
+  /** 详情正文：Editor.js JSON；非必填 */
+  content?: string;
   /** 已同步到 notify 服务的远程待办 id */
   remoteId?: string;
+};
+
+/** 块内「添加 / 编辑」走 React 详情对话框 */
+export type TodoBlockDetailRequest = {
+  creating: boolean;
+  pageId: string;
+  draft: { title: string; content?: string; status?: TodoStatus };
+  onSubmit: (data: { title: string; content: string }) => void | Promise<void>;
 };
 
 export type TodoData = {
@@ -21,7 +42,19 @@ export type TodoData = {
   notify: boolean;
 };
 
-type Tab = "open" | "done";
+type Tab = "pending" | "in_progress" | "ended";
+
+function isEnded(status: TodoStatus): boolean {
+  return status === "done" || status === "cancelled";
+}
+
+function migrateStatus(raw: { status?: unknown; done?: unknown }): TodoStatus {
+  const status = String(raw.status ?? "").trim();
+  if (status === "pending" || status === "in_progress" || status === "done" || status === "cancelled") {
+    return status;
+  }
+  return raw.done ? "done" : "pending";
+}
 
 const DAY = 86_400_000;
 
@@ -49,6 +82,14 @@ const CALENDAR_ICON = glyph(
 const REMOVE_ICON = glyph(
   `<path d="M9 10V44H39V10H9Z" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>` +
     `<path d="M20 20V33M28 20V33M4 10H44M16 10L19.289 4H28.7771L32 10H16Z" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`,
+);
+const CANCEL_ICON = glyph(
+  `<circle cx="24" cy="24" r="18" stroke="currentColor" stroke-width="3"/>` +
+    `<path d="M16 16l16 16M32 16L16 32" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>`,
+);
+const RESTORE_ICON = glyph(
+  `<path d="M12 24a12 12 0 1 0 4-8.5" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>` +
+    `<path d="M12 12v8h8" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`,
 );
 const ADD_ICON = glyph(
   `<path d="M24 10V38M10 24H38" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>`,
@@ -87,7 +128,7 @@ function todayIso(): string {
 
 function blankItem(): TodoItem {
   const today = todayIso();
-  return { id: uid(), text: "", done: false, start: today, end: today };
+  return { id: uid(), text: "", status: "pending", start: today, end: today };
 }
 
 function asDate(value: unknown): string {
@@ -95,18 +136,71 @@ function asDate(value: unknown): string {
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
 }
 
+/** 取消完成 / 恢复终止时，按开始日回到 pending 或 in_progress */
+function reopenStatus(item: Pick<TodoItem, "start">): TodoStatus {
+  const today = todayIso();
+  if (item.start && item.start <= today) {
+    return "in_progress";
+  }
+  return "pending";
+}
+
+/**
+ * 展示态：通知关闭时，到了开始日把 pending 看成进行中（不改持久化）；
+ * 通知开启时以块内 status 为准（会由 advanceDueStatuses / 远端拉回写入）。
+ */
+function displayStatus(item: TodoItem, notifyOn: boolean): TodoStatus {
+  if (item.status !== "pending") {
+    return item.status;
+  }
+  if (notifyOn) {
+    return item.status;
+  }
+  if (item.start && item.start <= todayIso()) {
+    return "in_progress";
+  }
+  return "pending";
+}
+
+/** 到了开始日的 pending → in_progress（通知开启时写入块内并随后 sync） */
+function advanceDueItem(item: TodoItem): boolean {
+  if (item.status !== "pending") {
+    return false;
+  }
+  if (!item.start || item.start > todayIso()) {
+    return false;
+  }
+  item.status = "in_progress";
+  return true;
+}
+
+function statusLabel(status: TodoStatus): string {
+  if (status === "in_progress") {
+    return t("todo.inProgress");
+  }
+  if (status === "done") {
+    return t("todo.done");
+  }
+  if (status === "cancelled") {
+    return t("todo.cancelled");
+  }
+  return t("todo.pending");
+}
+
 function normalizeItem(raw: unknown): TodoItem | null {
   if (!raw || typeof raw !== "object") {
     return null;
   }
-  const item = raw as Partial<TodoItem>;
+  const item = raw as Partial<TodoItem> & { done?: boolean };
   const remoteId = typeof item.remoteId === "string" && item.remoteId.trim() ? item.remoteId.trim() : undefined;
+  const content = typeof item.content === "string" && item.content.trim() ? item.content : undefined;
   return {
     id: typeof item.id === "string" && item.id ? item.id : uid(),
     text: String(item.text ?? ""),
-    done: Boolean(item.done),
+    status: migrateStatus(item),
     start: asDate(item.start),
     end: asDate(item.end),
+    ...(content ? { content } : {}),
     ...(remoteId ? { remoteId } : {}),
   };
 }
@@ -117,21 +211,24 @@ function dueAtFromItem(item: TodoItem): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-function upsertPayload(item: TodoItem, pageId: string): UpsertTodoInput | null {
+function upsertPayload(item: TodoItem, pageId: string, notify: boolean): UpsertTodoInput | null {
   const title = item.text.trim().slice(0, 120);
   if (!title) return null;
   if (!pageId) return null;
   return {
     title,
-    content: title,
+    ...(item.content?.trim() ? { content: item.content.trim() } : {}),
     pageId,
     category: "page",
     source: "wiki",
+    status: item.status,
+    startsAt: item.start || null,
     dueAt: dueAtFromItem(item),
     data: {
       localItemId: item.id,
       start: item.start || null,
       end: item.end || null,
+      notify,
     },
   };
 }
@@ -177,7 +274,8 @@ function monthWeeks(year: number, month: number): Date[][] {
 
 type GanttSegment = {
   name: string;
-  done: boolean;
+  status: TodoStatus;
+  overdue: boolean;
   startCol: number;
   endCol: number;
   from: boolean;
@@ -208,7 +306,7 @@ function formatPretty(iso: string): string {
   return year === thisYear ? `${month}/${day}` : `${year}/${month}/${day}`;
 }
 
-/** 待办块：未完成/已完成、起止日期、整块通知，以及列表/甘特图页签。 */
+/** 待办块：未开始/进行中/已完成/已终止、起止日期、整块通知，以及列表/甘特图页签。 */
 export class TodoBlockTool implements BlockTool {
   static get toolbox() {
     return { title: "Todo · todo", icon: menuIcons.todo };
@@ -244,7 +342,7 @@ export class TodoBlockTool implements BlockTool {
   private api: API;
   private block?: BlockAPI;
   private wrapper = document.createElement("div");
-  private tab: Tab = "open";
+  private tab: Tab = "pending";
   private gantt = false;
   private ganttExpanded = false;
   private ganttYear = 0;
@@ -256,14 +354,18 @@ export class TodoBlockTool implements BlockTool {
   private heightFrame = 0;
   private syncing = false;
   private getPageId: () => string;
+  private onOpenDetail?: (request: TodoBlockDetailRequest) => void;
 
   constructor({ data, readOnly, block, api, config }: BlockToolConstructorOptions<TodoData>) {
     this.data = normalize(data);
     this.readOnly = Boolean(readOnly);
     this.block = block;
     this.api = api;
-    const getPageId = (config as { getPageId?: () => string } | undefined)?.getPageId;
-    this.getPageId = typeof getPageId === "function" ? getPageId : () => "";
+    const conf = config as
+      | { getPageId?: () => string; onOpenDetail?: (request: TodoBlockDetailRequest) => void }
+      | undefined;
+    this.getPageId = typeof conf?.getPageId === "function" ? conf.getPageId : () => "";
+    this.onOpenDetail = typeof conf?.onOpenDetail === "function" ? conf.onOpenDetail : undefined;
     this.wrapper.className = "cdx-todo";
     this.wrapper.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === "Backspace") {
@@ -279,7 +381,28 @@ export class TodoBlockTool implements BlockTool {
   }
 
   render() {
-    this.paint();
+    try {
+      this.paint();
+    } catch (err) {
+      console.warn("[todo-render]", err);
+      this.wrapper.replaceChildren();
+      this.wrapper.className = "cdx-todo";
+      const fallback = document.createElement("div");
+      fallback.className = "cdx-todo__list";
+      fallback.append(this.emptyState(t("todo.emptyPending")));
+      this.wrapper.append(this.header(), fallback, this.footer());
+    }
+    // 勿在 render 同步里 dispatchChange：Editor.js 会当成块渲染失败
+    if (!this.readOnly && this.data.notify) {
+      queueMicrotask(() => {
+        if (!this.wrapper.isConnected) return;
+        if (this.reconcileLocalStatuses()) {
+          this.commit();
+          this.paint();
+        }
+        void this.syncRemoteTodos();
+      });
+    }
     return this.wrapper;
   }
 
@@ -290,12 +413,16 @@ export class TodoBlockTool implements BlockTool {
         .map((item) => ({
           id: item.id,
           text: item.text.trim(),
-          done: item.done,
+          status: item.status,
           start: item.start,
           end: item.end,
+          ...(item.content?.trim() ? { content: item.content.trim() } : {}),
           ...(item.remoteId ? { remoteId: item.remoteId } : {}),
         }))
-        .filter((item) => item.text || item.start || item.end || item.done || item.remoteId),
+        .filter(
+          (item) =>
+            item.text || item.start || item.end || item.content || item.status !== "pending" || item.remoteId,
+        ),
     };
   }
 
@@ -315,7 +442,21 @@ export class TodoBlockTool implements BlockTool {
     this.block?.dispatchChange?.();
   }
 
-  /** 通知开启时：未同步则创建远程待办，已同步则更新；已完成则标远程完成 */
+  /** 通知开启时：到开始日的 pending 升为 in_progress */
+  private reconcileLocalStatuses(): boolean {
+    if (this.readOnly || !this.data.notify) {
+      return false;
+    }
+    let changed = false;
+    for (const item of this.data.items) {
+      if (advanceDueItem(item)) {
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  /** 通知开启时：未同步则创建；已有 remoteId 则先拉远端状态，再按状态走 start/done/cancel/reopen 或 PATCH */
   private async syncRemoteTodos() {
     if (this.readOnly || !this.data.notify || this.syncing) {
       return;
@@ -325,30 +466,40 @@ export class TodoBlockTool implements BlockTool {
       return;
     }
     this.syncing = true;
-    let changed = false;
+    let changed = this.reconcileLocalStatuses();
     try {
       for (const item of this.data.items) {
-        if (item.done) {
-          if (!item.remoteId) continue;
-          try {
-            await markTodoDone(session, item.remoteId);
-          } catch {
-            // 可能已经是完成态，忽略
-          }
-          continue;
-        }
         const pageId = this.getPageId().trim();
-        const payload = upsertPayload(item, pageId);
+        const payload = upsertPayload(item, pageId, this.data.notify);
         if (!payload) continue;
         try {
           if (item.remoteId) {
-            await updateTodo(session, item.remoteId, payload);
+            try {
+              const remote = await getTodo(session, item.remoteId);
+              const remoteStatus = fineTodoStatus(remote);
+              // 远端已推进而本地仍 pending：以远端为准（cron /start）
+              if (item.status === "pending" && remoteStatus !== "pending") {
+                item.status = remoteStatus;
+                changed = true;
+              }
+            } catch {
+              // 读失败则继续按本地推
+            }
+            const nextPayload = upsertPayload(item, pageId, this.data.notify) ?? payload;
+            await updateTodoMergingData(session, item.remoteId, nextPayload);
+            // 专用状态接口优先；未上线时 syncTodoStatus 会回退 PATCH
+            if (item.status !== "pending") {
+              await syncTodoStatus(session, item.remoteId, item.status, nextPayload);
+            }
             if (pageId) {
               rememberTodoPage(item.remoteId, pageId);
             }
           } else {
             const created = await createTodo(session, payload);
             item.remoteId = created.id;
+            if (item.status !== "pending") {
+              await syncTodoStatus(session, created.id, item.status, payload);
+            }
             if (pageId) {
               rememberTodoPage(created.id, pageId);
             }
@@ -362,12 +513,33 @@ export class TodoBlockTool implements BlockTool {
       this.syncing = false;
       if (changed) {
         this.commit();
+        this.paint();
       }
     }
   }
 
   private visibleItems(): TodoItem[] {
-    return this.data.items.filter((item) => (this.tab === "done" ? item.done : !item.done));
+    return this.data.items.filter((item) => {
+      if (this.tab === "ended") {
+        return isEnded(item.status);
+      }
+      // 未开始 / 进行中按展示态分栏（通知关闭时，到了开始日的 pending 会出现在「进行中」）
+      const shown = displayStatus(item, this.data.notify);
+      if (this.tab === "in_progress") {
+        return shown === "in_progress";
+      }
+      return shown === "pending";
+    });
+  }
+
+  private emptyTabMessage(): string {
+    if (this.tab === "ended") {
+      return t("todo.emptyEnded");
+    }
+    if (this.tab === "in_progress") {
+      return t("todo.emptyInProgress");
+    }
+    return t("todo.emptyPending");
   }
 
   private paint() {
@@ -466,7 +638,11 @@ export class TodoBlockTool implements BlockTool {
   private tabs(): HTMLElement {
     const group = document.createElement("div");
     group.className = "cdx-todo__tabs";
-    group.append(this.tabButton("open", t("todo.open")), this.tabButton("done", t("todo.done")));
+    group.append(
+      this.tabButton("pending", t("todo.pending")),
+      this.tabButton("in_progress", t("todo.inProgress")),
+      this.tabButton("ended", t("todo.ended")),
+    );
     return group;
   }
 
@@ -498,6 +674,9 @@ export class TodoBlockTool implements BlockTool {
     button.append(knob, caption);
     button.addEventListener("click", () => {
       this.data.notify = !this.data.notify;
+      if (this.data.notify) {
+        this.reconcileLocalStatuses();
+      }
       this.commit();
       this.paint();
       if (this.data.notify) {
@@ -512,7 +691,7 @@ export class TodoBlockTool implements BlockTool {
     list.className = "cdx-todo__list";
     const items = this.visibleItems();
     if (!items.length) {
-      list.append(this.emptyState(this.tab === "done" ? t("todo.emptyDone") : t("todo.emptyOpen")));
+      list.append(this.emptyState(this.emptyTabMessage()));
       return list;
     }
     for (const item of items) {
@@ -535,52 +714,83 @@ export class TodoBlockTool implements BlockTool {
   }
 
   private itemRow(item: TodoItem): HTMLElement {
+    const shown = displayStatus(item, this.data.notify);
+    const ended = isEnded(item.status);
     const row = document.createElement("div");
-    row.className = `cdx-todo__item${item.done ? " is-done" : ""}`;
+    row.className = `cdx-todo__item is-${item.status}${shown === "in_progress" && item.status === "pending" ? " is-due-start" : ""}`;
 
     const check = document.createElement("button");
     check.type = "button";
-    check.className = `cdx-todo__check${item.done ? " is-checked" : ""}`;
+    check.className = `cdx-todo__check${item.status === "done" ? " is-checked" : ""}${item.status === "cancelled" ? " is-cancelled" : ""}`;
     check.disabled = this.readOnly;
     check.innerHTML = CHECK_ICON;
-    check.setAttribute("aria-pressed", item.done ? "true" : "false");
-    check.setAttribute("aria-label", item.done ? t("todo.open") : t("todo.done"));
+    check.setAttribute("aria-pressed", item.status === "done" ? "true" : "false");
+    check.setAttribute("aria-label", item.status === "done" ? t("todo.reopen") : t("todo.markDone"));
     check.addEventListener("click", () => {
       if (row.classList.contains("is-striking") || row.classList.contains("is-leaving")) {
         return;
       }
-      const markDone = !item.done;
-      if (markDone && this.tab === "open") {
+      if (item.status === "cancelled") {
+        return;
+      }
+      if (item.status === "done") {
+        item.status = reopenStatus(item);
+        this.tab = item.status === "in_progress" ? "in_progress" : "pending";
+        this.commit();
+        void this.syncRemoteTodos();
+        this.paint();
+        return;
+      }
+      if (this.tab !== "ended") {
         this.finishItem(item, row, check);
         return;
       }
-      item.done = markDone;
+      item.status = "done";
       this.commit();
+      void this.syncRemoteTodos();
       this.paint();
     });
 
     const body = document.createElement("div");
     body.className = "cdx-todo__body";
 
+    const titleRow = document.createElement("div");
+    titleRow.className = "cdx-todo__title-row";
+    const badge = document.createElement("span");
+    badge.className = `cdx-todo__badge is-${shown}`;
+    badge.textContent = statusLabel(shown);
     const text = document.createElement("input");
     text.type = "text";
     text.className = "cdx-todo__text";
     text.value = item.text;
     text.placeholder = t("todo.placeholder");
-    text.disabled = this.readOnly;
+    text.disabled = this.readOnly || item.status === "cancelled";
+    text.readOnly = Boolean(this.onOpenDetail) && !this.readOnly && item.status !== "cancelled";
     text.dataset.todoFocus = item.id;
     text.addEventListener("input", () => {
+      if (text.readOnly) {
+        return;
+      }
       item.text = text.value;
       this.commit();
     });
+    text.addEventListener("click", () => {
+      if (text.readOnly) {
+        this.openEditDetail(item);
+      }
+    });
     text.addEventListener("keydown", (event) => {
+      if (text.readOnly && (event.key === "Enter" || event.key === " ")) {
+        event.preventDefault();
+        this.openEditDetail(item);
+        return;
+      }
       if (event.key === "Enter") {
         event.preventDefault();
         this.insertAfter(item.id);
       }
       if (event.key === "Backspace" && text.value === "") {
         event.preventDefault();
-        // 只剩这一条、而且还是空的：再退格就是想把整个待办块删掉
         if (this.data.items.length <= 1) {
           this.deleteBlock();
         } else {
@@ -588,6 +798,45 @@ export class TodoBlockTool implements BlockTool {
         }
       }
     });
+    titleRow.append(badge, text);
+
+    const cancelOrRestore = document.createElement("button");
+    cancelOrRestore.type = "button";
+    cancelOrRestore.className = "cdx-todo__cancel";
+    cancelOrRestore.hidden = this.readOnly;
+    if (item.status === "cancelled") {
+      cancelOrRestore.innerHTML = RESTORE_ICON;
+      cancelOrRestore.title = t("todo.restore");
+      cancelOrRestore.setAttribute("aria-label", t("todo.restore"));
+      cancelOrRestore.addEventListener("click", () => {
+        item.status = reopenStatus(item);
+        this.tab = item.status === "in_progress" ? "in_progress" : "pending";
+        this.commit();
+        void this.syncRemoteTodos();
+        this.paint();
+      });
+    } else if (!ended) {
+      cancelOrRestore.innerHTML = CANCEL_ICON;
+      cancelOrRestore.title = t("todo.cancel");
+      cancelOrRestore.setAttribute("aria-label", t("todo.cancel"));
+      cancelOrRestore.addEventListener("click", () => {
+        item.status = "cancelled";
+        this.commit();
+        void this.syncRemoteTodos();
+        if (this.tab !== "ended") {
+          row.classList.add("is-leaving");
+          const fade = window.setTimeout(() => {
+            this.leaveTimers = this.leaveTimers.filter((timer) => timer !== fade);
+            this.paint();
+          }, 280);
+          this.leaveTimers.push(fade);
+        } else {
+          this.paint();
+        }
+      });
+    } else {
+      cancelOrRestore.hidden = true;
+    }
 
     const remove = document.createElement("button");
     remove.type = "button";
@@ -600,15 +849,15 @@ export class TodoBlockTool implements BlockTool {
 
     const actions = document.createElement("div");
     actions.className = "cdx-todo__actions";
-    actions.append(this.dateRange(item), remove);
+    actions.append(this.dateRange(item), cancelOrRestore, remove);
 
-    body.append(text, actions);
+    body.append(titleRow, actions);
     row.append(check, body);
     return row;
   }
 
   private finishItem(item: TodoItem, row: HTMLElement, check: HTMLButtonElement) {
-    item.done = true;
+    item.status = "done";
     this.commit();
     void this.syncRemoteTodos();
     check.classList.add("is-checked");
@@ -633,10 +882,11 @@ export class TodoBlockTool implements BlockTool {
   }
 
   private dateRange(item: TodoItem): HTMLButtonElement {
+    const locked = isEnded(item.status);
     const button = document.createElement("button");
     button.type = "button";
     button.className = "cdx-todo__range";
-    button.disabled = this.readOnly || item.done;
+    button.disabled = this.readOnly || locked;
     button.dataset.todoFocus = `${item.id}:range`;
     const icon = document.createElement("span");
     icon.className = "cdx-todo__range-icon";
@@ -654,7 +904,7 @@ export class TodoBlockTool implements BlockTool {
     end.dataset.side = "end";
     end.textContent = item.end ? formatPretty(item.end) : t("todo.endDate");
     button.append(icon, start, sep, end);
-    if (item.done) {
+    if (locked) {
       return button;
     }
     button.addEventListener("click", (event) => {
@@ -764,10 +1014,16 @@ export class TodoBlockTool implements BlockTool {
         }
         item.start = draftStart;
         item.end = draftEnd;
+        if (this.data.notify) {
+          advanceDueItem(item);
+        }
         settled = true;
         this.commit();
         this.closeCalendar();
         this.paint();
+        if (this.data.notify) {
+          void this.syncRemoteTodos();
+        }
       };
       const panels = document.createElement("div");
       panels.className = "cdx-todo__cal-panels";
@@ -784,7 +1040,13 @@ export class TodoBlockTool implements BlockTool {
       }
       item.start = draftStart;
       item.end = draftStart;
+      if (this.data.notify) {
+        advanceDueItem(item);
+      }
       this.commit();
+      if (this.data.notify) {
+        void this.syncRemoteTodos();
+      }
     };
 
     anchor.classList.add("is-open");
@@ -1055,9 +1317,12 @@ export class TodoBlockTool implements BlockTool {
       }
       const visibleStart = Math.max(start, weekStart);
       const visibleEnd = Math.min(end, weekEnd);
+      const shown = displayStatus(item, this.data.notify);
+      const overdue = !isEnded(item.status) && Boolean(item.end) && item.end < today;
       segments.push({
         name: item.text.trim() || t("todo.placeholder"),
-        done: item.done,
+        status: shown,
+        overdue,
         startCol: (visibleStart - weekStart) / DAY + 1,
         endCol: (visibleEnd - weekStart) / DAY + 1,
         from: visibleStart === start,
@@ -1067,11 +1332,19 @@ export class TodoBlockTool implements BlockTool {
     const packed = packGantt(segments);
     for (const { segment, lane } of packed) {
       const bar = document.createElement("div");
-      bar.className = `cdx-todo__gantt-chip${segment.done ? " is-done" : ""}${segment.from ? " is-from" : ""}${segment.to ? " is-to" : ""}`;
+      const statusClass =
+        segment.status === "in_progress"
+          ? "is-progress"
+          : segment.status === "done"
+            ? "is-done"
+            : segment.status === "cancelled"
+              ? "is-cancelled"
+              : "is-pending";
+      bar.className = `cdx-todo__gantt-chip ${statusClass}${segment.overdue ? " is-overdue" : ""}${segment.from ? " is-from" : ""}${segment.to ? " is-to" : ""}`;
       bar.style.gridColumn = `${segment.startCol} / ${segment.endCol + 1}`;
       bar.style.gridRow = String(lane + 2);
       bar.textContent = segment.name;
-      bar.title = segment.name;
+      bar.title = `${segment.name} · ${statusLabel(segment.status)}${segment.overdue ? ` · ${t("todo.overdue")}` : ""}`;
       row.append(bar);
     }
     return row;
@@ -1091,7 +1364,7 @@ export class TodoBlockTool implements BlockTool {
     const addLabel = document.createElement("span");
     addLabel.textContent = t("todo.add");
     add.append(addIcon, addLabel);
-    add.addEventListener("click", () => this.insertAfter(this.data.items.at(-1)?.id));
+    add.addEventListener("click", () => this.openCreateDetail(this.data.items.at(-1)?.id));
 
     const views = document.createElement("div");
     views.className = "cdx-todo__views";
@@ -1119,16 +1392,71 @@ export class TodoBlockTool implements BlockTool {
     return button;
   }
 
-  private insertAfter(id: string | undefined) {
+  private openCreateDetail(afterId: string | undefined) {
+    if (this.readOnly) {
+      return;
+    }
+    if (!this.onOpenDetail) {
+      this.insertBlank(afterId);
+      return;
+    }
+    this.onOpenDetail({
+      creating: true,
+      pageId: this.getPageId(),
+      draft: { title: "", content: "" },
+      onSubmit: ({ title, content }) => {
+        const item: TodoItem = {
+          ...blankItem(),
+          text: title.trim(),
+          ...(content.trim() ? { content: content.trim() } : {}),
+        };
+        const index = afterId ? this.data.items.findIndex((entry) => entry.id === afterId) : -1;
+        this.data.items.splice(index + 1, 0, item);
+        this.tab = "pending";
+        this.gantt = false;
+        this.pendingScrollId = item.id;
+        this.commit();
+        this.paint();
+        void this.syncRemoteTodos();
+      },
+    });
+  }
+
+  private openEditDetail(item: TodoItem) {
+    if (this.readOnly || item.status === "cancelled") {
+      return;
+    }
+    if (!this.onOpenDetail) {
+      return;
+    }
+    this.onOpenDetail({
+      creating: false,
+      pageId: this.getPageId(),
+      draft: { title: item.text, content: item.content ?? "", status: displayStatus(item, this.data.notify) },
+      onSubmit: ({ title, content }) => {
+        item.text = title.trim();
+        item.content = content.trim() || undefined;
+        this.commit();
+        this.paint();
+        void this.syncRemoteTodos();
+      },
+    });
+  }
+
+  private insertBlank(id: string | undefined) {
     const item = blankItem();
     const index = id ? this.data.items.findIndex((entry) => entry.id === id) : -1;
     this.data.items.splice(index + 1, 0, item);
-    this.tab = "open";
+    this.tab = "pending";
     this.gantt = false;
     this.pendingScrollId = item.id;
     this.commit();
     this.paint();
     this.wrapper.querySelector<HTMLInputElement>(`[data-todo-focus="${CSS.escape(item.id)}"]`)?.focus({ preventScroll: true });
+  }
+
+  private insertAfter(id: string | undefined) {
+    this.openCreateDetail(id);
   }
 
   /** 整块待办删掉，光标落到上一块（最后一条清空后再退格就是这个意图） */

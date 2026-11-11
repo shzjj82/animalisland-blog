@@ -153,20 +153,21 @@ function capImages(list: AiAttachment[]): AiAttachment[] {
 }
 
 function asksAboutTodos(query: string): boolean {
-  return /待办|未完成|已完成|todo/i.test(query);
+  return /待办|未完成|未开始|进行中|已完成|已终止|todo/i.test(query);
 }
 
-function keepsTodo(query: string, done: boolean): boolean {
-  const open = /未完成|待办|todo/i.test(query);
-  const closed = /已完成/.test(query);
-  if (open && closed) {
-    return true;
+function keepsTodo(query: string, status: string, done: boolean): boolean {
+  const wantDone = /已完成/.test(query);
+  const wantCancel = /已终止|取消|终止/.test(query);
+  const wantActive = /未完成|未开始|进行中|待办|todo/i.test(query);
+  if (wantDone && !wantActive && !wantCancel) {
+    return done || status === "已完成";
   }
-  if (closed && !open) {
-    return done;
+  if (wantCancel && !wantActive && !wantDone) {
+    return status === "已终止";
   }
-  if (open) {
-    return !done;
+  if (wantActive && !wantDone && !wantCancel) {
+    return status === "未开始" || status === "进行中" || (!done && status !== "已终止" && status !== "已完成");
   }
   return true;
 }
@@ -174,14 +175,14 @@ function keepsTodo(query: string, done: boolean): boolean {
 function formatTodos(docs: SearchDoc[], query: string, rule: string, empty: string): string {
   const lines = [rule];
   for (const page of pageTodos(docs)) {
-    const items = page.items.filter((item) => keepsTodo(query, item.done));
+    const items = page.items.filter((item) => keepsTodo(query, item.status, item.done));
     if (!items.length) {
       continue;
     }
     lines.push(`《${page.title}》`);
     for (const item of items) {
       const range = item.start || item.end ? `（${item.start || "?"}至${item.end || "?"}）` : "";
-      lines.push(`- ${item.done ? "已完成" : "未完成"}：${item.text}${range}`);
+      lines.push(`- ${item.status}：${item.text}${range}`);
     }
   }
   return lines.length > 1 ? lines.join("\n") : empty;

@@ -35,7 +35,7 @@ type Options = {
 };
 
 function asksAboutTodos(query: string): boolean {
-  return /待办|未完成|已完成|todo/i.test(query);
+  return /待办|未完成|未开始|进行中|已完成|已终止|todo/i.test(query);
 }
 
 export function useSpotlightChat({ open, editor, insertIndex, loadPages, onInserted }: Options) {
@@ -170,19 +170,20 @@ export function useSpotlightChat({ open, editor, insertIndex, loadPages, onInser
       const messages = toApiMessages(nextBubbles);
       if (loadPages && asksAboutTodos(text)) {
         try {
-          const open = /未完成|待办|todo/i.test(text);
-          const closed = /已完成/.test(text);
+          const wantDone = /已完成/.test(text);
+          const wantCancel = /已终止|取消|终止/.test(text);
+          const wantActive = /未完成|未开始|进行中|待办|todo/i.test(text);
           const lines = [t("wikiAsk.todoRule")];
           for (const page of pageTodos(await loadPages())) {
             const items = page.items.filter((item) => {
-              if (open && closed) {
-                return true;
+              if (wantDone && !wantActive && !wantCancel) {
+                return item.done || item.status === "已完成";
               }
-              if (closed && !open) {
-                return item.done;
+              if (wantCancel && !wantActive && !wantDone) {
+                return item.status === "已终止";
               }
-              if (open) {
-                return !item.done;
+              if (wantActive && !wantDone && !wantCancel) {
+                return item.status === "未开始" || item.status === "进行中";
               }
               return true;
             });
@@ -192,7 +193,7 @@ export function useSpotlightChat({ open, editor, insertIndex, loadPages, onInser
             lines.push(`《${page.title}》`);
             for (const item of items) {
               const range = item.start || item.end ? `（${item.start || "?"}至${item.end || "?"}）` : "";
-              lines.push(`- ${item.done ? "已完成" : "未完成"}：${item.text}${range}`);
+              lines.push(`- ${item.status}：${item.text}${range}`);
             }
           }
           const retrieved = lines.length > 1 ? lines.join("\n") : t("wikiAsk.todoEmpty");

@@ -28,27 +28,40 @@ function listText(items: ListItem[] = []): string[] {
   return items.flatMap((item) => [plain(item.content), ...listText(item.items)]);
 }
 
+export type TodoStatusLabel = "未开始" | "进行中" | "已完成" | "已终止";
+
+export type PageTodo = {
+  status: TodoStatusLabel;
+  /** @deprecated 用 status；已完成=true */
+  done: boolean;
+  text: string;
+  start: string;
+  end: string;
+};
+
+function statusFromItem(item: { status?: unknown; done?: unknown }): TodoStatusLabel {
+  const status = String(item.status ?? "").trim();
+  if (status === "pending") return "未开始";
+  if (status === "in_progress") return "进行中";
+  if (status === "done") return "已完成";
+  if (status === "cancelled") return "已终止";
+  return item.done ? "已完成" : "未开始";
+}
+
 /** 带上状态和日期，提问「待办 / 未完成 / todo」时才能命中条目本身 */
-function todoLine(item: { text?: string; done?: boolean; start?: string; end?: string }): string {
+function todoLine(item: { text?: string; status?: unknown; done?: boolean; start?: string; end?: string }): string {
   const text = plain(item.text).trim();
   const start = String(item.start ?? "").trim();
   const end = String(item.end ?? "").trim();
   if (!text && !start && !end) {
     return "";
   }
-  const state = item.done ? "已完成" : "未完成";
+  const state = statusFromItem(item);
   const range = start || end ? ` ${start || "?"}至${end || "?"}` : "";
   return `${state} 待办任务 todo ${text}${range}`.trim();
 }
 
-const TODO_MARK = /(?=未完成 待办任务 todo |已完成 待办任务 todo )/;
-
-export type PageTodo = {
-  done: boolean;
-  text: string;
-  start: string;
-  end: string;
-};
+const TODO_MARK = /(?=未开始 待办任务 todo |进行中 待办任务 todo |已完成 待办任务 todo |已终止 待办任务 todo |未完成 待办任务 todo )/;
 
 /** 从检索正文里抽出待办，避免问答只拿到网关检索到的别的材料 */
 export function pageTodos(docs: SearchDoc[]): { title: string; items: PageTodo[] }[] {
@@ -56,7 +69,7 @@ export function pageTodos(docs: SearchDoc[]): { title: string; items: PageTodo[]
   for (const doc of docs) {
     const items: PageTodo[] = [];
     for (const part of doc.text.split(TODO_MARK)) {
-      const match = part.trim().match(/^(未完成|已完成) 待办任务 todo ([\s\S]*)$/);
+      const match = part.trim().match(/^(未开始|进行中|已完成|已终止|未完成) 待办任务 todo ([\s\S]*)$/);
       if (!match) {
         continue;
       }
@@ -72,7 +85,8 @@ export function pageTodos(docs: SearchDoc[]): { title: string; items: PageTodo[]
       if (!text && !start && !end) {
         continue;
       }
-      items.push({ done: match[1] === "已完成", text, start, end });
+      const label = (match[1] === "未完成" ? "未开始" : match[1]) as TodoStatusLabel;
+      items.push({ status: label, done: label === "已完成", text, start, end });
     }
     if (items.length) {
       pages.push({ title: doc.title, items });
@@ -107,7 +121,7 @@ export function documentText(body: EditorJsDocument): string {
         break;
       case "todo":
         parts.push(
-          ...((data.items as { text?: string; done?: boolean; start?: string; end?: string }[] | undefined) ?? []).map(
+          ...((data.items as { text?: string; status?: string; done?: boolean; start?: string; end?: string }[] | undefined) ?? []).map(
             (item) => todoLine(item),
           ),
         );

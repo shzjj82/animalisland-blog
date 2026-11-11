@@ -270,9 +270,12 @@ function blocksToChildren(doc: EditorJsDocument): FileChild[] {
         }
         break;
       case "todo": {
-        const todos = (data.items as { text?: string; done?: boolean; start?: string; end?: string }[] | undefined) ?? [];
+        const todos =
+          (data.items as { text?: string; status?: string; done?: boolean; start?: string; end?: string }[] | undefined) ?? [];
         for (const item of todos) {
-          const mark = item.done ? "☑" : "☐";
+          const done = item.status === "done" || (!item.status && item.done);
+          const cancelled = item.status === "cancelled";
+          const mark = done ? "☑" : cancelled ? "⊘" : "☐";
           const dates = [item.start, item.end].filter(Boolean).join(" → ");
           const line = `${mark} ${String(item.text ?? "").trim()}${dates ? ` (${dates})` : ""}`.trim();
           if (line) {

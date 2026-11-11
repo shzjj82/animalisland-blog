@@ -282,12 +282,13 @@ export function blocksToPreviewMarkdown(blocks: EditorJsBlock[]): string {
         const items = Array.isArray(data.items) ? data.items : [];
         const lines = items
           .map((item) => {
-            const row = item as { text?: string; done?: boolean };
+            const row = item as { text?: string; status?: string; done?: boolean };
             const text = stripHtml(String(row.text ?? ""));
             if (!text) {
               return "";
             }
-            return `- [${row.done ? "x" : " "}] ${text}`;
+            const done = row.status === "done" || (!row.status && row.done);
+            return `- [${done ? "x" : " "}] ${text}`;
           })
           .filter(Boolean);
         if (lines.length) {

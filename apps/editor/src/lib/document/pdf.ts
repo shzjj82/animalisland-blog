@@ -237,16 +237,18 @@ function blocksToContent(doc: EditorJsDocument): PdfNode[] {
         content.push({ text: inlineSpans(String(data.text ?? "")), margin: [0, 2, 0, 4] });
         break;
       case "todo": {
-        const todos = (data.items as { text?: string; done?: boolean }[] | undefined) ?? [];
+        const todos = (data.items as { text?: string; status?: string; done?: boolean }[] | undefined) ?? [];
         for (const item of todos) {
-          const line = `${item.done ? "☑" : "☐"} ${stripTags(String(item.text ?? "")).trim()}`.trim();
+          const done = item.status === "done" || (!item.status && item.done);
+          const cancelled = item.status === "cancelled";
+          const line = `${done ? "☑" : cancelled ? "⊘" : "☐"} ${stripTags(String(item.text ?? "")).trim()}`.trim();
           if (!line) {
             continue;
           }
           content.push({
             text: line,
             margin: [0, 2, 0, 2],
-            ...(item.done ? { decoration: "lineThrough", color: MUTED } : {}),
+            ...(done || cancelled ? { decoration: "lineThrough", color: MUTED } : {}),
           });
         }
         break;

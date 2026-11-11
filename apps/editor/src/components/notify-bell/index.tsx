@@ -10,7 +10,10 @@ import {
   markAllNoticesRead,
   markNoticeRead,
   markTodoDone,
+  normalizeTodoStatus,
+  noticeKind,
   pageIdFromNotice,
+  todoContentPreview,
   type NotifyNotice,
   type NotifySnapshot,
   type NotifyTodo,
@@ -18,6 +21,7 @@ import {
 import { connectNotifySocket } from "@/store/notifySocket";
 import { iconParkOutline } from "@/lib/iconPark";
 import type { RemoteSession } from "@/store/remoteStore";
+import { TodoDetailDialog, type TodoDetailTarget } from "./TodoDetailDialog";
 
 type Tab = "todos" | "notices";
 
@@ -48,7 +52,9 @@ function formatWhen(value: string | null, locale: string): string {
 }
 
 function todoDue(todo: NotifyTodo, locale: string): string {
-  const start = typeof todo.data?.start === "string" ? todo.data.start : "";
+  const start =
+    (typeof todo.startsAt === "string" && todo.startsAt) ||
+    (typeof todo.data?.start === "string" ? todo.data.start : "");
   const end = typeof todo.data?.end === "string" ? todo.data.end : "";
   if (start && end && start !== end) {
     const a = formatDay(start, locale);
@@ -61,6 +67,20 @@ function todoDue(todo: NotifyTodo, locale: string): string {
   return formatWhen(todo.dueAt, locale);
 }
 
+function todoStatusKey(todo: NotifyTodo): "notify.statusInProgress" | "notify.statusPending" {
+  return normalizeTodoStatus(todo.status) === "in_progress" ? "notify.statusInProgress" : "notify.statusPending";
+}
+
+function noticeKindKey(
+  notice: NotifyNotice,
+): "notify.noticeStarted" | "notify.noticeProgress" | "notify.noticeOverdue" | null {
+  const kind = noticeKind(notice);
+  if (kind === "todo.started") return "notify.noticeStarted";
+  if (kind === "todo.progress") return "notify.noticeProgress";
+  if (kind === "todo.overdue") return "notify.noticeOverdue";
+  return null;
+}
+
 export function NotifyBell({ session, className, onWriteTodo, onOpenPage }: Props) {
   const { t, i18n } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -68,6 +88,7 @@ export function NotifyBell({ session, className, onWriteTodo, onOpenPage }: Prop
   const [error, setError] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<NotifySnapshot | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<TodoDetailTarget | null>(null);
 
   const refresh = useCallback(async () => {
     if (!session) {
@@ -178,129 +199,170 @@ export function NotifyBell({ session, className, onWriteTodo, onOpenPage }: Prop
     }
   }
 
+  function openDetail(todo: NotifyTodo) {
+    setDetail({ mode: "edit", todo });
+    setOpen(false);
+  }
+
+  function patchTodoInSnapshot(next: NotifyTodo) {
+    setSnapshot((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        todos: prev.todos.map((item) => (item.id === next.id ? { ...item, ...next } : item)),
+      };
+    });
+    setDetail((prev) => (prev?.mode === "edit" && prev.todo.id === next.id ? { mode: "edit", todo: { ...prev.todo, ...next } } : prev));
+  }
+
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          className={cn("relative", className)}
-          aria-label={t("notify.title")}
+    <>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className={cn("relative", className)}
+            aria-label={t("notify.title")}
+          >
+            <Remind {...iconParkOutline} size={16} />
+            {badge > 0 ? <span className="absolute top-1 right-1 size-1.5 rounded-full bg-red-500" /> : null}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="end"
+          className="w-[min(17rem,calc(100vw-1.5rem))] origin-top-right overflow-hidden p-0 duration-200 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 motion-reduce:animate-none"
         >
-          <Remind {...iconParkOutline} size={16} />
-          {badge > 0 ? <span className="absolute top-1 right-1 size-1.5 rounded-full bg-red-500" /> : null}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        className="w-[min(22rem,calc(100vw-1.5rem))] origin-top-right overflow-hidden p-0 duration-200 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 motion-reduce:animate-none"
-      >
-        <div className="relative m-2 grid grid-cols-2 rounded-lg bg-muted/60 p-1">
-          <span
-            aria-hidden
-            className="absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-md bg-background shadow-sm transition-transform duration-300 ease-out motion-reduce:transition-none"
-            style={{ transform: tab === "notices" ? "translateX(100%)" : "translateX(0)" }}
-          />
-          <TabButton active={tab === "todos"} count={openTodos} onClick={() => setTab("todos")}>
-            <CheckOne {...iconParkOutline} size={14} />
-            {t("notify.todos")}
-          </TabButton>
-          <TabButton active={tab === "notices"} count={unread} onClick={() => setTab("notices")}>
-            <Remind {...iconParkOutline} size={14} />
-            {t("notify.notices")}
-          </TabButton>
-        </div>
-        {error ? <div className="px-3 pb-2 text-xs text-destructive">{error}</div> : null}
-        <SoftScrollbar key={tab} className="max-h-96 bg-muted/30" contentClassName="space-y-1.5 p-2.5 pt-1">
-          {tab === "todos" ? (
-            todos.length === 0 ? (
-              <Empty>{t("notify.emptyTodos")}</Empty>
-            ) : (
-              todos.map((todo, index) => {
-                const due = todoDue(todo, i18n.language);
-                const writing = busyId === `write:${todo.id}`;
-                const finishing = busyId === todo.id;
-                return (
-                  <div
-                    key={todo.id}
-                    className={cn(
-                      "group relative rounded-xl border border-border/60 bg-background shadow-sm transition-[transform,opacity,box-shadow] duration-200 ease-out motion-reduce:transition-none",
-                      finishing ? "pointer-events-none scale-[0.98] opacity-0" : "hover:-translate-y-0.5 hover:shadow-md",
-                    )}
-                    style={{ animation: "notify-card-in 220ms ease-out backwards", animationDelay: `${Math.min(index, 6) * 35}ms` }}
-                  >
-                    <button
-                      type="button"
-                      className="flex min-h-16 w-full flex-col justify-between px-3 pt-2 pb-2.5 pr-9 text-left disabled:opacity-50"
-                      disabled={writing || !onWriteTodo}
-                      onClick={() => void onWrite(todo)}
+          <div className="relative m-2 grid grid-cols-2 rounded-lg bg-muted/60 p-1">
+            <span
+              aria-hidden
+              className="absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-md bg-background shadow-sm transition-transform duration-300 ease-out motion-reduce:transition-none"
+              style={{ transform: tab === "notices" ? "translateX(100%)" : "translateX(0)" }}
+            />
+            <TabButton active={tab === "todos"} count={openTodos} onClick={() => setTab("todos")}>
+              <CheckOne {...iconParkOutline} size={14} />
+              {t("notify.todos")}
+            </TabButton>
+            <TabButton active={tab === "notices"} count={unread} onClick={() => setTab("notices")}>
+              <Remind {...iconParkOutline} size={14} />
+              {t("notify.notices")}
+            </TabButton>
+          </div>
+          {error ? <div className="px-3 pb-2 text-xs text-destructive">{error}</div> : null}
+          <SoftScrollbar key={tab} className="max-h-96 bg-muted/30" contentClassName="space-y-1.5 p-2 pt-1">
+            {tab === "todos" ? (
+              todos.length === 0 ? (
+                <Empty>{t("notify.emptyTodos")}</Empty>
+              ) : (
+                todos.map((todo, index) => {
+                  const due = todoDue(todo, i18n.language);
+                  const status = t(todoStatusKey(todo));
+                  const preview = todoContentPreview(todo);
+                  const finishing = busyId === todo.id;
+                  return (
+                    <div
+                      key={todo.id}
+                      className={cn(
+                        "group relative rounded-xl border border-border/60 bg-background shadow-sm transition-[transform,opacity,box-shadow] duration-200 ease-out motion-reduce:transition-none",
+                        finishing ? "pointer-events-none scale-[0.98] opacity-0" : "hover:-translate-y-0.5 hover:shadow-md",
+                      )}
+                      style={{ animation: "notify-card-in 220ms ease-out backwards", animationDelay: `${Math.min(index, 6) * 35}ms` }}
                     >
-                      {due ? <span className="text-muted-foreground text-[10px] leading-none tabular-nums">{due}</span> : <span />}
-                      <span className="block truncate pt-3 text-[13px] leading-5 font-medium">{todo.title.trim() || t("notify.untitled")}</span>
-                    </button>
+                      <button
+                        type="button"
+                        className="flex min-h-16 w-full flex-col justify-between px-2.5 pt-2 pb-2.5 pr-8 text-left"
+                        onClick={() => openDetail(todo)}
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">{status}</span>
+                          {due ? <span className="text-muted-foreground text-[10px] leading-none tabular-nums">{due}</span> : null}
+                        </span>
+                        <span className="block truncate pt-2.5 text-[13px] leading-5 font-medium">{todo.title.trim() || t("notify.untitled")}</span>
+                        {preview ? <span className="mt-0.5 line-clamp-1 text-[11px] leading-4 text-muted-foreground">{preview}</span> : null}
+                      </button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        className="text-muted-foreground absolute right-1.5 bottom-1.5 transition-transform duration-200 hover:scale-110 active:scale-90 motion-reduce:transition-none"
+                        disabled={finishing}
+                        aria-label={t("notify.markDone")}
+                        onClick={() => void onDone(todo)}
+                      >
+                        <CheckOne {...iconParkOutline} size={16} />
+                      </Button>
+                    </div>
+                  );
+                })
+              )
+            ) : notices.length === 0 ? (
+              <Empty>{t("notify.emptyNotices")}</Empty>
+            ) : (
+              <>
+                {unread > 0 ? (
+                  <div className="flex justify-end px-0.5">
                     <Button
                       type="button"
                       variant="ghost"
-                      size="icon-xs"
-                      className="text-muted-foreground absolute right-1.5 bottom-1.5 transition-transform duration-200 hover:scale-110 active:scale-90 motion-reduce:transition-none"
-                      disabled={finishing}
-                      aria-label={t("notify.markDone")}
-                      onClick={() => void onDone(todo)}
+                      size="xs"
+                      className="text-muted-foreground h-6 px-2 text-[11px]"
+                      disabled={busyId === "all"}
+                      onClick={() => void onReadAll()}
                     >
-                      <CheckOne {...iconParkOutline} size={16} />
+                      {t("notify.readAll")}
                     </Button>
                   </div>
-                );
-              })
-            )
-          ) : notices.length === 0 ? (
-            <Empty>{t("notify.emptyNotices")}</Empty>
-          ) : (
-            <>
-              {unread > 0 ? (
-                <div className="flex justify-end px-0.5">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    className="text-muted-foreground h-6 px-2 text-[11px]"
-                    disabled={busyId === "all"}
-                    onClick={() => void onReadAll()}
-                  >
-                    {t("notify.readAll")}
-                  </Button>
-                </div>
-              ) : null}
-              {notices.map((notice, index) => {
-                const line = notice.title.trim() || notice.content.trim() || t("notify.untitled");
-                const when = formatWhen(notice.createdAt, i18n.language);
-                const reading = busyId === notice.id;
-                return (
-                  <button
-                    key={notice.id}
-                    type="button"
-                    className={cn(
-                      "flex min-h-16 w-full flex-col justify-between rounded-xl border border-border/60 bg-background px-3 pt-2 pb-2.5 text-left shadow-sm transition-[transform,opacity,box-shadow] duration-200 ease-out motion-reduce:transition-none",
-                      reading ? "pointer-events-none scale-[0.98] opacity-0" : "hover:-translate-y-0.5 hover:shadow-md",
-                    )}
-                    style={{ animation: "notify-card-in 220ms ease-out backwards", animationDelay: `${Math.min(index, 6) * 35}ms` }}
-                    disabled={reading}
-                    onClick={() => void onRead(notice)}
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <span className="size-1.5 shrink-0 rounded-full bg-red-500" />
-                      {when ? <span className="text-muted-foreground text-[10px] leading-none tabular-nums">{when}</span> : null}
-                    </span>
-                    <span className="block truncate pt-3 text-[13px] leading-5 font-medium">{line}</span>
-                  </button>
-                );
-              })}
-            </>
-          )}
-        </SoftScrollbar>
-      </PopoverContent>
-    </Popover>
+                ) : null}
+                {notices.map((notice, index) => {
+                  const line = notice.title.trim() || notice.content.trim() || t("notify.untitled");
+                  const when = formatWhen(notice.createdAt, i18n.language);
+                  const kindKey = noticeKindKey(notice);
+                  const kind = kindKey ? t(kindKey) : "";
+                  const reading = busyId === notice.id;
+                  return (
+                    <button
+                      key={notice.id}
+                      type="button"
+                      className={cn(
+                        "flex min-h-16 w-full flex-col justify-between rounded-xl border border-border/60 bg-background px-2.5 pt-2 pb-2.5 text-left shadow-sm transition-[transform,opacity,box-shadow] duration-200 ease-out motion-reduce:transition-none",
+                        reading ? "pointer-events-none scale-[0.98] opacity-0" : "hover:-translate-y-0.5 hover:shadow-md",
+                      )}
+                      style={{ animation: "notify-card-in 220ms ease-out backwards", animationDelay: `${Math.min(index, 6) * 35}ms` }}
+                      disabled={reading}
+                      onClick={() => void onRead(notice)}
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <span className="size-1.5 shrink-0 rounded-full bg-red-500" />
+                        {kind ? <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">{kind}</span> : null}
+                        {when ? <span className="text-muted-foreground text-[10px] leading-none tabular-nums">{when}</span> : null}
+                      </span>
+                      <span className="block truncate pt-2.5 text-[13px] leading-5 font-medium">{line}</span>
+                    </button>
+                  );
+                })}
+              </>
+            )}
+          </SoftScrollbar>
+        </PopoverContent>
+      </Popover>
+
+      <TodoDetailDialog
+        session={activeSession}
+        target={detail}
+        dueLabel={detail?.mode === "edit" ? todoDue(detail.todo, i18n.language) : ""}
+        onClose={() => setDetail(null)}
+        onSaved={(todo) => {
+          patchTodoInSnapshot(todo);
+          void refresh();
+        }}
+        onDone={() => {
+          setDetail(null);
+          void refresh();
+        }}
+        onOpenPage={onWriteTodo ? (todo) => onWrite(todo) : undefined}
+      />
+    </>
   );
 }
 

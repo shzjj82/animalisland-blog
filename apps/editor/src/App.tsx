@@ -5,6 +5,7 @@ import { CloudStorage, CloseSmall, Delete, Download, Export, HamburgerButton, Ha
 import type { EditorJsBlock, EditorJsDocument } from "@myblog/shared";
 import { BlockEditor, type EditorHistoryApi } from "@/components/block-editor";
 import type { PageLinkData } from "@/components/block-editor/tools/PageLinkTool";
+import type { TodoBlockDetailRequest } from "@/components/block-editor/tools/TodoBlockTool";
 import { ChangePasswordDialog } from "@/components/change-password-dialog";
 import { EditorSpotlight, type SpotlightAction } from "@/components/editor-spotlight";
 import { EmptyState } from "@/components/empty-state";
@@ -16,6 +17,7 @@ import { WorkDesk } from "@/components/work-desk";
 import { ImportDialog, type ImportChoice } from "@/components/import-dialog";
 import { LanguageSwitch } from "@/components/language-switch";
 import { NotifyBell } from "@/components/notify-bell";
+import { TodoDetailDialog, type TodoDetailTarget } from "@/components/notify-bell/TodoDetailDialog";
 import { PageTree } from "@/components/page-tree";
 import { AppUpdateProvider } from "@/components/app-update";
 import { isDesktopApp } from "@/lib/ai/skills";
@@ -229,6 +231,7 @@ export function App() {
   const [importBusy, setImportBusy] = useState(false);
   const [queuedDrop, setQueuedDrop] = useState<File[] | null>(null);
   const [viewing, setViewing] = useState<{ data: AttachmentData; replace: (next: AttachmentData) => void } | null>(null);
+  const [todoDetail, setTodoDetail] = useState<TodoDetailTarget | null>(null);
   const [fileDeleteAsk, setFileDeleteAsk] = useState<{ name: string; resolve: (ok: boolean) => void } | null>(null);
   const [spotlightOpen, setSpotlightOpen] = useState(false);
   const [wikiOpen, setWikiOpen] = useState(false);
@@ -1599,6 +1602,7 @@ export function App() {
               onHistory={bindHistory}
               barSlot={barSlot}
               reveal={reveal}
+              onTodoDetail={(request: TodoBlockDetailRequest) => setTodoDetail({ mode: "block", request })}
             />
           ) : (
             <EmptyState hasPages={nodes.length > 0} onCreate={() => void createPage(null)} />
@@ -1607,6 +1611,12 @@ export function App() {
         {/* 底栏挂在滚动区之后：滚动区到这里结束，底栏不会盖正文，也滚不动 */}
         <div ref={setBarSlot} className="shrink-0" />
       </main>
+      <TodoDetailDialog
+        session={session}
+        target={todoDetail}
+        dueLabel=""
+        onClose={() => setTodoDetail(null)}
+      />
       {viewing ? (
         <FileViewer
           key={viewing.data.fileId}
