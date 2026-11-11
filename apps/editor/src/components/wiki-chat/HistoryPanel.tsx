@@ -83,13 +83,15 @@ export function HistoryPanel({ threads, activeId, onNew, onOpen, onDelete }: Pro
           <Plus {...iconParkOutline} size={14} />
         </Button>
       </div>
-      <SoftScrollbar className="min-h-0 flex-1" contentClassName="px-2.5 pb-3">
-        {groups.length === 0 ? (
-          <p className="text-muted-foreground rounded-xl border border-dashed border-border/70 bg-background/60 px-3 py-8 text-center text-xs">
+      {groups.length === 0 ? (
+        <div className="flex min-h-0 flex-1 flex-col px-2.5 pt-3 pb-3">
+          <p className="text-muted-foreground flex flex-1 items-center justify-center rounded-xl border border-dashed border-border/70 bg-background/60 px-3 text-center text-xs">
             {t(query.trim() ? "wikiAsk.historyNoMatch" : "wikiAsk.historyEmpty")}
           </p>
-        ) : (
-          groups.map((group) => (
+        </div>
+      ) : (
+        <SoftScrollbar className="min-h-0 flex-1" contentClassName="px-2.5 pb-3">
+          {groups.map((group) => (
             <section key={group.id} className="mt-3">
               <h2 className="text-muted-foreground px-1 pb-1.5 text-[10px] font-medium tracking-wide">{t(GROUP_KEY[group.id])}</h2>
               <ul className="space-y-1.5">
@@ -113,7 +115,7 @@ export function HistoryPanel({ threads, activeId, onNew, onOpen, onDelete }: Pro
                           type="button"
                           variant="ghost"
                           size="icon-xs"
-                          className="text-muted-foreground absolute top-1 right-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                          className="absolute top-1 right-1 text-destructive opacity-0 hover:bg-destructive/10 hover:text-destructive focus-visible:text-destructive group-hover:opacity-100 group-focus-within:opacity-100"
                           aria-label={t("wikiAsk.deleteChat")}
                           onClick={() => onDelete(thread.id)}
                         >
@@ -125,9 +127,9 @@ export function HistoryPanel({ threads, activeId, onNew, onOpen, onDelete }: Pro
                 })}
               </ul>
             </section>
-          ))
-        )}
-      </SoftScrollbar>
+          ))}
+        </SoftScrollbar>
+      )}
     </aside>
   );
 }

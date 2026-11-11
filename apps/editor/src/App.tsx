@@ -55,8 +55,10 @@ import {
   type SyncPlan,
 } from "@/store/localSync";
 import {
+  bindTodoPage,
   pageIdFromTodo,
   rememberTodoPage,
+  todoNeedsPageBind,
   type NotifyTodo,
 } from "@/store/notifyStore";
 import {
@@ -719,15 +721,21 @@ export function App() {
     }
   }
 
-  /** 从远程待办打开/新建 wiki 页，带入标题与说明，继续填写内容 */
+  /** 打开待办关联的文档。历史无页待办先补绑当前页或本机记住的页面，再跳转 */
   async function writeTodoPage(todo: NotifyTodo) {
     if (!session) {
       throw new Error(t("notify.actionFailed"));
     }
     setError("");
-    const pageId = pageIdFromTodo(todo);
+    let pageId = pageIdFromTodo(todo);
+    if (!pageId && todo.data?.legacyWithoutPage) {
+      pageId = pageRef.current?.id ?? null;
+    }
     if (!pageId) {
       throw new Error(t("notify.pageMissing"));
+    }
+    if (todoNeedsPageBind(todo)) {
+      await bindTodoPage(session, todo.id, pageId);
     }
     rememberTodoPage(todo.id, pageId);
     await openPage(pageId);
@@ -1466,7 +1474,7 @@ export function App() {
               <Delete {...iconProps} />
               {t("common.delete")}
             </Button>
-            <NotifyBell session={session} onWriteTodo={(todo) => writeTodoPage(todo)} />
+            <NotifyBell session={session} onWriteTodo={(todo) => writeTodoPage(todo)} onOpenPage={(id) => openPage(id)} />
             <Button type="button" variant="outline" size="icon" aria-label={t("wikiAsk.title")} onClick={openWiki}>
               <span className="text-[11px] font-semibold leading-none tracking-wide">AI</span>
             </Button>
@@ -1548,7 +1556,7 @@ export function App() {
                 </div>
               </PopoverContent>
             </Popover>
-            <NotifyBell session={session} onWriteTodo={(todo) => writeTodoPage(todo)} />
+            <NotifyBell session={session} onWriteTodo={(todo) => writeTodoPage(todo)} onOpenPage={(id) => openPage(id)} />
             <Button type="button" variant="outline" size="icon" aria-label={t("wikiAsk.title")} onClick={openWiki}>
               <span className="text-[11px] font-semibold leading-none tracking-wide">AI</span>
             </Button>

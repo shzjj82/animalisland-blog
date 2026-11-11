@@ -1,7 +1,7 @@
 import type { EditorJsBlock, EditorJsDocument } from "@myblog/shared";
 import { t } from "@/i18n";
 import { MAX_ATTACHMENT_BYTES } from "@/lib/document/fileKinds";
-import { gatewayUrl, listRemote, loadRemote, prepareSession, saveRemote, type RemoteSession } from "./remoteStore";
+import { gatewayUrl, listRemote, loadRemote, prepareSession, saveRemote, WIKI_APP_CODE, type RemoteSession } from "./remoteStore";
 
 /** 附件块里保存的数据；文件本体不进文档。远程文件的 fileId 是对象键，url 是公开地址 */
 export type AttachmentData = {
@@ -110,6 +110,7 @@ async function uploadRemote(session: RemoteSession, file: File): Promise<Uploade
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${ready.token}`,
+        "X-App-Code": WIKI_APP_CODE,
       },
       body: form,
     });

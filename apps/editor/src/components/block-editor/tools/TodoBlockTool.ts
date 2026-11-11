@@ -120,15 +120,16 @@ function dueAtFromItem(item: TodoItem): string | null {
 function upsertPayload(item: TodoItem, pageId: string): UpsertTodoInput | null {
   const title = item.text.trim().slice(0, 120);
   if (!title) return null;
+  if (!pageId) return null;
   return {
     title,
     content: title,
-    category: "wiki",
+    pageId,
+    category: "page",
     source: "wiki",
     dueAt: dueAtFromItem(item),
     data: {
       localItemId: item.id,
-      pageId: pageId || null,
       start: item.start || null,
       end: item.end || null,
     },

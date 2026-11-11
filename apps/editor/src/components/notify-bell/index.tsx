@@ -10,6 +10,7 @@ import {
   markAllNoticesRead,
   markNoticeRead,
   markTodoDone,
+  pageIdFromNotice,
   type NotifyNotice,
   type NotifySnapshot,
   type NotifyTodo,
@@ -24,6 +25,7 @@ type Props = {
   session: RemoteSession | null;
   className?: string;
   onWriteTodo?: (todo: NotifyTodo) => void | Promise<void>;
+  onOpenPage?: (pageId: string) => void | Promise<void>;
 };
 
 function formatDay(value: string, locale: string): string {
@@ -59,7 +61,7 @@ function todoDue(todo: NotifyTodo, locale: string): string {
   return formatWhen(todo.dueAt, locale);
 }
 
-export function NotifyBell({ session, className, onWriteTodo }: Props) {
+export function NotifyBell({ session, className, onWriteTodo, onOpenPage }: Props) {
   const { t, i18n } = useTranslation();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("todos");
@@ -151,6 +153,11 @@ export function NotifyBell({ session, className, onWriteTodo }: Props) {
     setBusyId(notice.id);
     try {
       await markNoticeRead(activeSession, notice.id);
+      const pageId = pageIdFromNotice(notice);
+      if (pageId && onOpenPage) {
+        await onOpenPage(pageId);
+        setOpen(false);
+      }
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : t("notify.actionFailed"));

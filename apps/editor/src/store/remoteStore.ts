@@ -13,6 +13,8 @@ export type RemoteSession = {
   baseUrl: string;
   token: string;
   username: string;
+  /** 登录用户的账号 id。权限和作者判断用它，不用 user.id */
+  accountId?: string;
   refreshToken?: string;
   /** access token 到期时间（毫秒时间戳） */
   expiresAt?: number;
@@ -52,6 +54,7 @@ function emitSession(session: RemoteSession | null): void {
 function wikiHeaders(extra?: Record<string, string>): Record<string, string> {
   return {
     Accept: "application/json",
+    "X-App-Code": WIKI_APP_CODE,
     ...extra,
   };
 }
@@ -100,6 +103,7 @@ function saveSession(session: RemoteSession): void {
     baseUrl: GATEWAY_BASE_URL,
     token: session.token,
     username: session.username,
+    accountId: session.accountId,
     refreshToken: session.refreshToken,
     expiresAt: session.expiresAt,
   };
@@ -121,19 +125,21 @@ type AuthPayload = {
   token?: string;
   refreshToken?: string;
   expiresIn?: number;
-  user?: { username?: string };
+  user?: { username?: string; accountId?: string; id?: string };
 };
 
-function sessionFromAuth(data: AuthPayload, fallbackUsername: string): RemoteSession {
+function sessionFromAuth(data: AuthPayload, fallbackUsername: string, previousAccountId?: string): RemoteSession {
   const token = data.token?.trim() ?? "";
   if (!token) {
     throw new Error(t("common.loginFailed"));
   }
   const expiresIn = Number(data.expiresIn);
+  const accountId = data.user?.accountId?.trim() || previousAccountId;
   return {
     baseUrl: GATEWAY_BASE_URL,
     token,
     username: data.user?.username || fallbackUsername,
+    accountId: accountId || undefined,
     refreshToken: data.refreshToken?.trim() || undefined,
     expiresAt: Number.isFinite(expiresIn) && expiresIn > 0 ? Date.now() + expiresIn * 1000 : undefined,
   };
@@ -161,7 +167,7 @@ export function refreshSession(): Promise<RemoteSession | null> {
       clearSession();
       return null;
     }
-    const next = sessionFromAuth(json.data, current.username);
+    const next = sessionFromAuth(json.data, current.username, current.accountId);
     if (!next.refreshToken) {
       next.refreshToken = current.refreshToken;
     }
