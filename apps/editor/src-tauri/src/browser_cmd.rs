@@ -16,7 +16,11 @@ struct KnownBrowser {
     id: &'static str,
     name: &'static str,
     supported: bool,
+    /// 只在 macOS 上读取；其它平台保留数据，避免拆两套浏览器表。
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     mac_app: &'static str,
+    /// 只在 Windows 上读取。
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     win_exes: &'static [&'static str],
 }
 
