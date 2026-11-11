@@ -301,10 +301,16 @@ function cmdRelease(ver, flags) {
   const cur = localVersion();
   if (next === cur && !flags.force) die(`当前已经是 ${cur}，换个版本号或用 --force`);
 
+  const versionFiles = [
+    "apps/editor/package.json",
+    "apps/editor/src-tauri/tauri.conf.json",
+    "apps/editor/public/download.html",
+    "apps/editor/public/work-extension/manifest.json",
+  ];
   const dirty = capture("git", ["status", "--porcelain"]).out
     .split("\n")
     .filter(Boolean)
-    .filter((l) => !/apps\/editor\/(package\.json|src-tauri\/tauri\.conf\.json)$/.test(l));
+    .filter((l) => !versionFiles.some((file) => l.endsWith(file)));
   if (dirty.length && !flags.force) {
     warn("工作区有未提交改动，先处理掉（或用 --force 跳过检查）：");
     for (const l of dirty) info(l);
@@ -314,9 +320,9 @@ function cmdRelease(ver, flags) {
   step(`版本号 ${cur} → ${next}`);
   run("node", [path.join(EDITOR_DIR, "scripts/set-version.mjs"), next], { stdio: "inherit" });
 
-  const changed = capture("git", ["status", "--porcelain", "apps/editor/package.json", "apps/editor/src-tauri/tauri.conf.json"]).out;
+  const changed = capture("git", ["status", "--porcelain", ...versionFiles]).out;
   if (changed) {
-    run("git", ["add", "apps/editor/package.json", "apps/editor/src-tauri/tauri.conf.json"]);
+    run("git", ["add", ...versionFiles]);
     run("git", ["commit", "-m", `chore(editor): 版本号升到 ${next}`]);
   } else {
     info(dim("版本号文件无变化，跳过 commit"));

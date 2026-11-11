@@ -21,6 +21,7 @@ const tauriConfFile = path.join(root, "src-tauri/tauri.conf.json");
 // 下载页里 JS 没跑起来时的兜底内容（文件名、OSS 直链、页脚版本）是写死的，
 // 跟着版本号一起换，不然发完新版页面还挂着上个版本的链接
 const downloadPageFile = path.join(root, "public/download.html");
+const extensionManifestFile = path.join(root, "public/work-extension/manifest.json");
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
@@ -56,6 +57,15 @@ if (fs.existsSync(downloadPageFile)) {
   if (html.includes(current)) {
     fs.writeFileSync(downloadPageFile, html.replaceAll(current, next));
     console.log(`public/download.html 里的 ${current} 已同步为 ${next}`);
+  }
+}
+
+if (fs.existsSync(extensionManifestFile)) {
+  const text = fs.readFileSync(extensionManifestFile, "utf8");
+  const updated = text.replace(/"version":\s*"[^"]+"/, `"version": "${next}"`);
+  if (updated !== text) {
+    fs.writeFileSync(extensionManifestFile, updated);
+    console.log(`work-extension/manifest.json 里的版本已同步为 ${next}`);
   }
 }
 
