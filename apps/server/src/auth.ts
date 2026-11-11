@@ -21,7 +21,10 @@ export const ACCESS_COOKIE = "token";
 export const REFRESH_COOKIE = "refresh_token";
 
 export type AuthUser = {
+  /** 登录用户 id（user.id），不用于文档作者校验 */
   id: string;
+  /** 账号 id。文档 authorId 存的是这个值 */
+  accountId: string;
   username: string;
   nickname: string;
   role: string;
@@ -62,11 +65,38 @@ export function clearAuthCookies(res: Response): void {
   res.clearCookie(REFRESH_COOKIE, base);
 }
 
+function asId(value: unknown): string {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return "";
+}
+
+/** 用户中心账号 id。文档作者字段对的是它，不是 user.id。本机登录没有独立账号时退回 user.id。 */
+function readAccountId(user: UcUser): string {
+  const direct = asId(user.accountId);
+  if (direct) {
+    return direct;
+  }
+  const account = user.account;
+  if (account && typeof account === "object") {
+    const nested = asId((account as { id?: unknown }).id);
+    if (nested) {
+      return nested;
+    }
+  }
+  return String(user.id);
+}
+
 function toAuthUser(user: UcUser): AuthUser {
   const roles = Array.isArray(user.roles) ? user.roles.map(String) : [];
   const role = String(user.role || (roles.includes("admin") ? "admin" : "user"));
   return {
     id: String(user.id),
+    accountId: readAccountId(user),
     username: displayUsername(user),
     nickname: String(user.nickname || displayUsername(user)),
     role,

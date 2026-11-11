@@ -112,7 +112,7 @@ export function createPost(input: PostWriteInput): Post {
       : input.tags !== undefined
         ? propsWithTags(input.props, input.tags)
         : propsWithTags(input.props, tagsFromProps(input.props));
-  const authorId = getAuthUser()?.id ?? null;
+  const authorId = getAuthUser()?.accountId ?? null;
 
   db.prepare(
     `INSERT INTO posts
@@ -201,7 +201,7 @@ export function updatePost(id: string, input: PostWriteInput): Post | undefined 
     throw new Error("EMPTY_BODY");
   }
 
-  const actorId = getAuthUser()?.id;
+  const actorId = getAuthUser()?.accountId;
   if (existing.authorId && actorId && existing.authorId !== actorId) {
     throw new Error("FORBIDDEN");
   }
@@ -390,7 +390,7 @@ export function deletePost(id: string): boolean {
     if (!existing) {
       return false;
     }
-    const actorId = getAuthUser()?.id;
+    const actorId = getAuthUser()?.accountId;
     if (existing.authorId && actorId && existing.authorId !== actorId) {
       throw new Error("FORBIDDEN");
     }

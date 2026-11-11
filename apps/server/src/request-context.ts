@@ -4,6 +4,7 @@ export type RequestStore = {
   accessToken?: string;
   user?: {
     id: string;
+    accountId: string;
     username: string | null;
     nickname: string;
     role: string;

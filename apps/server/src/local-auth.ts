@@ -66,6 +66,7 @@ export function ensureLocalAuthSchema(): void {
 function toUcUser(row: LocalUserRow): UcUser {
   return {
     id: row.id,
+    accountId: row.id,
     username: row.username,
     nickname: row.nickname,
     role: row.role,

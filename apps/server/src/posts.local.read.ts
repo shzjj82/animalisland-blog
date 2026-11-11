@@ -30,7 +30,7 @@ export function listPosts(opts: {
   treeOrder?: boolean;
 }): { posts: PostListItem[]; total: number } {
   const scope = opts.scope ?? "public";
-  const viewerId = getAuthUser()?.id;
+  const viewerId = getAuthUser()?.accountId;
   const clauses: string[] = [];
   const params: unknown[] = [];
 
@@ -167,7 +167,7 @@ export function getPostBySlug(
   }
   // feed：公开可见；私有仅作者（或无作者旧文，首次打开后认领）
   if (post.visibility === "private" || hasPrivateAncestor(post.id)) {
-    const viewerId = getAuthUser()?.id;
+    const viewerId = getAuthUser()?.accountId;
     if (!viewerId) {
       return undefined;
     }

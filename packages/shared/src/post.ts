@@ -33,7 +33,7 @@ export type Post = {
   props: Record<string, unknown>;
   /** 文章所属分类（多选），存的是 category.slug */
   tags: string[];
-  /** Nest 用户 id */
+  /** 文档作者的账号 id（accountId），不是登录用户 user.id */
   authorId?: string | null;
   body: EditorJsDocument;
   visibility: PostVisibility;

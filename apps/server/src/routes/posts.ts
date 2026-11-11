@@ -194,8 +194,9 @@ postsRouter.get("/id/:id", requireAuth, async (req, res, next) => {
       fail(res, "NOT_FOUND", 404);
       return;
     }
-    // 仅作者可进工作区编辑
-    if (post.authorId && req.authUser?.id && post.authorId !== req.authUser.id) {
+    // 仅作者可进工作区编辑。authorId 是账号 id，不是登录用户 user.id
+    const accountId = req.authUser?.accountId;
+    if (post.authorId && accountId && post.authorId !== accountId) {
       fail(res, "FORBIDDEN", 403, "只能编辑自己的文章");
       return;
     }
@@ -218,9 +219,10 @@ postsRouter.get("/:slug", optionalAuth, async (req, res, next) => {
       return;
     }
     // 私有文仅作者可见（feed 可能混入，再兜底）
+    const accountId = req.authUser?.accountId;
     if (
       post.visibility === "private" &&
-      (!req.authUser?.id || (post.authorId && post.authorId !== req.authUser.id))
+      (!accountId || (post.authorId && post.authorId !== accountId))
     ) {
       fail(res, "NOT_FOUND", 404);
       return;
@@ -228,7 +230,7 @@ postsRouter.get("/:slug", optionalAuth, async (req, res, next) => {
     if (!req.authed) {
       res.set("Cache-Control", "public, max-age=60");
     }
-    const viewerId = req.authUser?.id;
+    const viewerId = req.authUser?.accountId;
     ok(res, {
       post,
       ancestors: page.ancestors,
