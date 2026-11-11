@@ -346,6 +346,7 @@ export const en: Messages = {
     checking: "Checking for updates",
     upToDate: "You're up to date",
     upToDateHint: "This install is the latest published version.",
+    currentVersion: "Current version {{version}}.",
     available: "Version {{version}} is available",
     notes: "The app will restart after the update is installed.",
     later: "Later",

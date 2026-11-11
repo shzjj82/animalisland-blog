@@ -344,6 +344,7 @@ export const zh = {
     checking: "正在检查更新",
     upToDate: "已是最新版本",
     upToDateHint: "当前安装的就是已发布的最新版本。",
+    currentVersion: "当前版本 {{version}}。",
     available: "发现新版本 {{version}}",
     notes: "下载并安装后会重启应用。",
     later: "稍后",

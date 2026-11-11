@@ -31,7 +31,7 @@ const CheckContext = createContext<(() => void) | null>(null);
 
 /**
  * 桌面安装包里检查 OSS 上的 latest.json。
- * 入口不画在页面上，由菜单栏和用户菜单调用 check。发现新版本时才弹出安装对话框。
+ * 不在启动时检查。入口不画在页面上，只有菜单栏或用户菜单点了「检查更新」才查询并显示版本。
  */
 export function AppUpdateProvider({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
@@ -40,6 +40,7 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [update, setUpdate] = useState<UpdateHandle | null>(null);
   const updateRef = useRef<UpdateHandle | null>(null);
+  const [currentVersion, setCurrentVersion] = useState("");
   const [percent, setPercent] = useState(0);
   const [gotBytes, setGotBytes] = useState(0);
   const [totalBytes, setTotalBytes] = useState(0);
@@ -72,6 +73,8 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
     try {
       const found = await lookForUpdate();
       if (!found) {
+        const { getVersion } = await import("@tauri-apps/api/app");
+        setCurrentVersion(await getVersion().catch(() => ""));
         setPhase("current");
         return;
       }
@@ -82,28 +85,6 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
       setPhase("error");
     }
   }, [remember, t]);
-
-  useEffect(() => {
-    if (!desktop) {
-      return;
-    }
-    let cancelled = false;
-    void lookForUpdate()
-      .then((found) => {
-        if (cancelled || !found) {
-          return;
-        }
-        remember(found);
-        setPhase("ready");
-        setOpen(true);
-      })
-      .catch(() => {
-        // 启动时连不上更新清单就保持安静，手动检查再提示
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [desktop, remember]);
 
   useEffect(() => {
     if (!desktop) {
@@ -186,7 +167,11 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
               <DialogDescription>
                 {phase === "ready" ? update?.body || t("appUpdate.notes") : null}
                 {phase === "error" ? message : null}
-                {phase === "current" ? t("appUpdate.upToDateHint") : null}
+                {phase === "current"
+                  ? currentVersion
+                    ? t("appUpdate.currentVersion", { version: currentVersion })
+                    : t("appUpdate.upToDateHint")
+                  : null}
                 {phase === "downloading"
                   ? totalBytes > 0
                     ? t("appUpdate.downloadingHint", { got: formatBytes(gotBytes), total: formatBytes(totalBytes) })
