@@ -96,12 +96,40 @@ function attach(image, readonly = false) {
   return mountPoint;
 }
 
+function sleep(seconds) {
+  spawnSync("sleep", [String(seconds)], { stdio: "ignore" });
+}
+
+/**
+ * 弹出镜像。CI 上刚拷完 app，fsevents / Spotlight 还会占着磁盘，
+ * 一次 detach 经常得到 exit 16（Resource busy）。先重试，仍忙再强制卸载。
+ */
 function detach(mountPoint) {
-  const result = spawnSync("hdiutil", ["detach", mountPoint], { stdio: "pipe" });
-  if (result.status !== 0) {
-    const detail = `${result.stderr?.toString() || ""}${result.stdout?.toString() || ""}`.trim();
-    throw new Error(`hdiutil detach 失败（${result.status}）${detail ? `：${detail}` : ""}`);
+  spawnSync("sync", [], { stdio: "ignore" });
+  tryRun("mdutil", ["-i", "off", mountPoint]);
+  let lastStatus = 1;
+  let lastDetail = "";
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    const args = attempt >= 4 ? ["detach", "-force", mountPoint] : ["detach", mountPoint];
+    const result = spawnSync("hdiutil", args, { stdio: "pipe" });
+    if (result.status === 0) {
+      return;
+    }
+    lastStatus = result.status ?? 1;
+    lastDetail = `${result.stderr?.toString() || ""}${result.stdout?.toString() || ""}`.trim();
+    if (/not currently (attached|mounted)|No such file or directory|No mount point/i.test(lastDetail)) {
+      return;
+    }
+    sleep(2);
   }
+  const forced = spawnSync("diskutil", ["unmount", "force", mountPoint], { stdio: "pipe" });
+  if (forced.status === 0) {
+    return;
+  }
+  const forcedDetail = `${forced.stderr?.toString() || ""}${forced.stdout?.toString() || ""}`.trim();
+  throw new Error(
+    `hdiutil detach 失败（${lastStatus}）${lastDetail ? `：${lastDetail}` : ""}${forcedDetail ? `；diskutil：${forcedDetail}` : ""}`,
+  );
 }
 
 /** 校验镜像里确实带上了窗口排版，没带上就直接失败，别等用户挂载才发现 */
@@ -133,7 +161,11 @@ function assertWindow(image) {
     }
     return { dsStore: size };
   } finally {
-    spawnSync("hdiutil", ["detach", mountPoint], { stdio: "ignore" });
+    try {
+      detach(mountPoint);
+    } catch (err) {
+      console.warn(err instanceof Error ? err.message : String(err));
+    }
   }
 }
 
