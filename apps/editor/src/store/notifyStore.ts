@@ -303,6 +303,7 @@ export function reopenTodo(session: RemoteSession, id: string): Promise<NotifyTo
 
 /**
  * 按目标状态同步远程。优先专用接口；失败时回退 PATCH（线上 status 只能是 open/done/cancelled）。
+ * pending / in_progress 在 /start|/reopen 未上线时不再二次 PATCH status（细态已在 data.localStatus）。
  */
 export async function syncTodoStatus(
   session: RemoteSession,
@@ -326,7 +327,23 @@ export async function syncTodoStatus(
   } catch {
     // start / cancel / reopen 未上线时回退
   }
-  // 线上尚无 in_progress：与 pending 一样写成 open，细态在 data.localStatus
+  // 活跃细态：调用方通常已 PATCH 过 open + localStatus，避免再打一遍触发校验错误
+  if (status === "pending" || status === "in_progress") {
+    return getTodo(session, id).catch(() => {
+      if (!fallback?.title) {
+        return Promise.reject(new Error("todo status sync failed"));
+      }
+      return updateTodo(session, id, {
+        title: fallback.title,
+        ...(fallback.content !== undefined ? { content: fallback.content } : {}),
+        pageId: fallback.pageId,
+        status: "pending",
+        startsAt: fallback.startsAt,
+        dueAt: fallback.dueAt,
+        data: { ...(fallback.data ?? {}), localStatus: status },
+      });
+    });
+  }
   return updateTodo(session, id, {
     title: fallback?.title ?? "",
     ...(fallback?.content !== undefined ? { content: fallback.content } : {}),

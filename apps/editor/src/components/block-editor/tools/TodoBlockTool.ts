@@ -396,10 +396,10 @@ export class TodoBlockTool implements BlockTool {
     if (!this.readOnly && this.data.notify) {
       queueMicrotask(() => {
         if (!this.wrapper.isConnected) return;
-        if (this.reconcileLocalStatuses()) {
-          this.commit();
-          this.paint();
-        }
+        // 仅状态真有推进时才同步；切页签不该打 PATCH
+        if (!this.reconcileLocalStatuses()) return;
+        this.commit();
+        this.paint();
         void this.syncRemoteTodos();
       });
     }
@@ -654,7 +654,6 @@ export class TodoBlockTool implements BlockTool {
     button.addEventListener("click", () => {
       this.tab = tab;
       this.paint();
-      void this.syncRemoteTodos();
     });
     return button;
   }
