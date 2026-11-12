@@ -97,7 +97,10 @@ export type NotifySnapshot = {
   openTodoCount: number;
   unreadNoticeCount: number;
   todos: NotifyTodo[];
+  /** 未读通知 */
   notices: NotifyNotice[];
+  /** 已读通知 */
+  readNotices: NotifyNotice[];
 };
 
 /** 挂在 todo.data.attachments；与文档附件块同结构 */
@@ -356,21 +359,38 @@ export function fineTodoStatus(todo: Pick<NotifyTodo, "status" | "startedAt" | "
   return normalizeTodoStatus(todo.status);
 }
 
+async function fetchNoticePage(session: RemoteSession, unread: boolean): Promise<Page<NotifyNotice>> {
+  return request<Page<NotifyNotice>>(
+    session,
+    "GET",
+    `/wiki/notifications?unread=${unread ? 1 : 0}&page=1&pageSize=20`,
+  );
+}
+
 export async function fetchNotifySnapshot(session: RemoteSession): Promise<NotifySnapshot> {
-  const [todos, unreadNotice, notices] = await Promise.all([
+  const [todos, unreadNotice, unreadPage, readPage] = await Promise.all([
     request<Page<NotifyTodo>>(session, "GET", "/wiki/todos?status=pending,in_progress&page=1&pageSize=100"),
     request<{ count: number }>(session, "GET", "/wiki/notifications/unread-count"),
-    request<Page<NotifyNotice>>(session, "GET", "/wiki/notifications?unread=1&page=1&pageSize=20"),
+    fetchNoticePage(session, true),
+    fetchNoticePage(session, false).catch(async () => {
+      // 旧网关若不支持 unread=0：拉全量再按 readAt 拆
+      const all = await request<Page<NotifyNotice>>(session, "GET", "/wiki/notifications?page=1&pageSize=40");
+      const items = (all.items ?? []).filter((notice) => Boolean(notice.readAt));
+      return { ...all, items, total: items.length };
+    }),
   ]);
   const raw = todos.items ?? [];
   const items = raw.filter((todo) => todo?.id && isActiveTodoStatus(todo.status) && !isTodoListRecord(todo));
   for (const todo of items) publishTodo(todo);
   const listCount = raw.filter(isTodoListRecord).length;
+  const unreadItems = unreadPage.items ?? [];
   return {
     openTodoCount: Math.max(0, (todos.total ?? items.length) - listCount),
-    unreadNoticeCount: unreadNotice.count ?? notices.total ?? notices.items?.length ?? 0,
+    unreadNoticeCount: unreadNotice.count ?? unreadPage.total ?? unreadItems.length,
     todos: items,
-    notices: notices.items ?? [],
+    notices: unreadItems,
+    // unread=0 成功时直接用；全量回退里已按 readAt 过滤
+    readNotices: readPage.items ?? [],
   };
 }
 

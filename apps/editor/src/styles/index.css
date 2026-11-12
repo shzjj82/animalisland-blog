@@ -433,6 +433,22 @@
   }
 }
 
+@keyframes notify-dot-blink {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.25;
+    transform: scale(0.75);
+  }
+}
+
+.notify-bell-dot {
+  animation: notify-dot-blink 1.15s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   @keyframes notify-card-in {
     from,
@@ -440,5 +456,9 @@
       opacity: 1;
       transform: none;
     }
+  }
+
+  .notify-bell-dot {
+    animation: none;
   }
 }

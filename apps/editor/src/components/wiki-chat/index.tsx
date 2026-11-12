@@ -48,6 +48,8 @@ import { iconParkOutline } from "@/lib/iconPark";
 import { t } from "@/i18n";
 import { useTranslation } from "react-i18next";
 import { SoftScrollbar } from "@/components/soft-scrollbar";
+import { useIsMobile } from "@/lib/useMediaQuery";
+import { cn } from "@/lib/utils";
 import { HistoryPanel, HISTORY_SIDEBAR_W } from "./HistoryPanel";
 
 type Props = {
@@ -228,6 +230,7 @@ function userContent(question: string, files: LocalAttachment[] | undefined, upl
 export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLogin }: Props) {
   const { t: tr } = useTranslation();
   const desktop = isDesktopApp();
+  const isMobile = useIsMobile();
   const [frame, setFrame] = useState<Frame>(() => (typeof window === "undefined" ? { x: 24, y: 24, w: 400, h: DEFAULT_H } : loadFrame()));
   const [prompt, setPrompt] = useState("");
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
@@ -243,6 +246,8 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
   const [grants, setGrants] = useState<SkillGrants>(() => loadSkillGrants());
   const [permOpen, setPermOpen] = useState(false);
   const [pendingSkills, setPendingSkills] = useState<SkillCall[]>([]);
+  const [sheetPresent, setSheetPresent] = useState(open);
+  const [sheetEntered, setSheetEntered] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -251,6 +256,23 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
   const dragRef = useRef<{ pointer: number; x: number; y: number; start: Frame; mode: DragMode } | null>(null);
   const sendingRef = useRef(false);
   sendingRef.current = sending;
+
+  useEffect(() => {
+    if (open) {
+      setSheetPresent(true);
+      const enter = window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => setSheetEntered(true));
+      });
+      return () => window.cancelAnimationFrame(enter);
+    }
+    setSheetEntered(false);
+    if (!isMobile) {
+      setSheetPresent(false);
+      return;
+    }
+    const leave = window.setTimeout(() => setSheetPresent(false), 320);
+    return () => window.clearTimeout(leave);
+  }, [open, isMobile]);
 
   useEffect(() => {
     if (!open) {
@@ -359,7 +381,7 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
     };
   }, [open, loggedIn, historyOpen, tr]);
 
-  if (!open) {
+  if (!sheetPresent) {
     return null;
   }
 
@@ -392,6 +414,9 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
     setThreadId(null);
     saveActiveThreadId(null);
     setPermOpen(false);
+    if (isMobile) {
+      setHistoryOpen(false);
+    }
   };
 
   const openThread = (id: string) => {
@@ -401,6 +426,9 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
     setError("");
     setPrompt("");
     setAttachments([]);
+    if (isMobile) {
+      setHistoryOpen(false);
+    }
     rememberConversation(id);
     void (async () => {
       try {
@@ -674,20 +702,29 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
   };
 
   const canSend = loggedIn && !sending && !uploading && Boolean(prompt.trim() || attachments.length);
-  const box = windowBox(frame, historyOpen);
+  const box = windowBox(frame, historyOpen && !isMobile);
 
   return (
     <aside
-      className="fixed z-50 flex flex-col overflow-hidden rounded-2xl border border-border/50 bg-background shadow-[0_18px_50px_rgb(0_0_0/0.14)]"
-      style={{ left: box.left, top: frame.y, width: box.width, height: frame.h }}
-      onPointerMove={onDragMove}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
+      className={cn(
+        "fixed z-50 flex flex-col overflow-hidden bg-background",
+        isMobile
+          ? "inset-0 h-[100dvh] w-full rounded-none border-0 shadow-none transition-transform duration-300 ease-out will-change-transform motion-reduce:transition-none"
+          : "rounded-2xl border border-border/50 shadow-[0_18px_50px_rgb(0_0_0/0.14)]",
+        isMobile && (sheetEntered ? "translate-y-0" : "translate-y-full"),
+      )}
+      style={isMobile ? undefined : { left: box.left, top: frame.y, width: box.width, height: frame.h }}
+      onPointerMove={isMobile ? undefined : onDragMove}
+      onPointerUp={isMobile ? undefined : endDrag}
+      onPointerCancel={isMobile ? undefined : endDrag}
     >
       <header
-        className="flex shrink-0 cursor-grab items-center gap-1 border-b border-border/40 px-3 py-2 active:cursor-grabbing"
+        className={cn(
+          "flex shrink-0 items-center gap-1 border-b border-border/40 px-3 py-2",
+          !isMobile && "cursor-grab active:cursor-grabbing",
+        )}
         onPointerDown={(event) => {
-          if ((event.target as HTMLElement).closest("button")) {
+          if (isMobile || (event.target as HTMLElement).closest("button")) {
             return;
           }
           beginDrag(event, "move");
@@ -708,7 +745,7 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
       </header>
 
       <div className="flex min-h-0 flex-1">
-      {historyOpen ? (
+      {historyOpen && !isMobile ? (
         <HistoryPanel
           threads={threads}
           activeId={threadId}
@@ -865,14 +902,51 @@ export function WikiChat({ open, focusToken, loggedIn, loadPages, onClose, onLog
             </Button>
           </div>
         </div>
-        <p className="text-muted-foreground mt-1.5 px-1 text-[11px]">{tr("wikiAsk.hint")}</p>
+        {!isMobile ? <p className="text-muted-foreground mt-1.5 px-1 text-[11px]">{tr("wikiAsk.hint")}</p> : null}
       </form>
       </div>
       </div>
-      <ResizeHandle corner="nw" label={tr("wikiAsk.resize")} onPointerDown={(event) => beginDrag(event, "nw")} />
-      <ResizeHandle corner="ne" label={tr("wikiAsk.resize")} onPointerDown={(event) => beginDrag(event, "ne")} />
-      <ResizeHandle corner="sw" label={tr("wikiAsk.resize")} onPointerDown={(event) => beginDrag(event, "sw")} />
-      <ResizeHandle corner="se" label={tr("wikiAsk.resize")} onPointerDown={(event) => beginDrag(event, "se")} />
+      {!isMobile ? (
+        <>
+          <ResizeHandle corner="nw" label={tr("wikiAsk.resize")} onPointerDown={(event) => beginDrag(event, "nw")} />
+          <ResizeHandle corner="ne" label={tr("wikiAsk.resize")} onPointerDown={(event) => beginDrag(event, "ne")} />
+          <ResizeHandle corner="sw" label={tr("wikiAsk.resize")} onPointerDown={(event) => beginDrag(event, "sw")} />
+          <ResizeHandle corner="se" label={tr("wikiAsk.resize")} onPointerDown={(event) => beginDrag(event, "se")} />
+        </>
+      ) : null}
+      {isMobile ? (
+        <>
+          <button
+            type="button"
+            className={cn(
+              "absolute inset-0 z-40 bg-foreground/25 backdrop-blur-[1px] transition-opacity duration-200 ease-out motion-reduce:transition-none",
+              historyOpen ? "opacity-100" : "pointer-events-none opacity-0",
+            )}
+            aria-label={tr("wikiAsk.close")}
+            aria-hidden={!historyOpen}
+            tabIndex={historyOpen ? 0 : -1}
+            onClick={() => setHistoryOpen(false)}
+          />
+          <div
+            className={cn(
+              "absolute inset-y-0 left-0 z-50 w-[min(84vw,320px)]",
+              "transition-transform duration-200 ease-out will-change-transform motion-reduce:transition-none",
+              historyOpen ? "translate-x-0 shadow-[12px_0_32px_rgb(0_0_0/0.14)]" : "pointer-events-none -translate-x-full shadow-none",
+            )}
+            aria-hidden={!historyOpen}
+          >
+            <HistoryPanel
+              threads={threads}
+              activeId={threadId}
+              onNew={startNewChat}
+              onOpen={openThread}
+              onDelete={removeThread}
+              width="100%"
+              className="bg-background"
+            />
+          </div>
+        </>
+      ) : null}
     </aside>
   );
 }

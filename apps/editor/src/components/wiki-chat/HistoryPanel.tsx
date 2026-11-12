@@ -16,6 +16,9 @@ type Props = {
   onNew: () => void;
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
+  className?: string;
+  /** 不传则用桌面侧栏固定宽度 */
+  width?: number | string;
 };
 
 const GROUP_ORDER: HistoryGroupId[] = ["today", "yesterday", "week", "older"];
@@ -48,7 +51,7 @@ function formatChatTime(value: number, locale: string, group: HistoryGroupId, ye
   }
 }
 
-export function HistoryPanel({ threads, activeId, onNew, onOpen, onDelete }: Props) {
+export function HistoryPanel({ threads, activeId, onNew, onOpen, onDelete, className, width = HISTORY_SIDEBAR_W }: Props) {
   const { t, i18n } = useTranslation();
   const [query, setQuery] = useState("");
   const groups = useMemo(() => {
@@ -63,7 +66,10 @@ export function HistoryPanel({ threads, activeId, onNew, onOpen, onDelete }: Pro
   }, [threads, query]);
 
   return (
-    <aside className="flex h-full shrink-0 flex-col border-r border-border/40 bg-muted/30" style={{ width: HISTORY_SIDEBAR_W }}>
+    <aside
+      className={cn("flex h-full shrink-0 flex-col border-r border-border/40 bg-muted/30", className)}
+      style={{ width }}
+    >
       <div className="flex shrink-0 items-center gap-1 px-2.5 pt-2.5">
         <div className="relative min-w-0 flex-1">
           <Search
@@ -115,7 +121,7 @@ export function HistoryPanel({ threads, activeId, onNew, onOpen, onDelete }: Pro
                           type="button"
                           variant="ghost"
                           size="icon-xs"
-                          className="absolute top-1 right-1 text-destructive opacity-0 hover:bg-destructive/10 hover:text-destructive focus-visible:text-destructive group-hover:opacity-100 group-focus-within:opacity-100"
+                          className="absolute top-1 right-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:text-destructive"
                           aria-label={t("wikiAsk.deleteChat")}
                           onClick={() => onDelete(thread.id)}
                         >
