@@ -20,9 +20,10 @@ import { cn } from "@/lib/utils";
 import {
   contentDocumentFromTodo,
   encodeTodoContent,
+  fineTodoStatus,
   getTodo,
   markTodoDone,
-  normalizeTodoStatus,
+  syncTodoStatus,
   todoAttachments,
   updateTodo,
   type NotifyTodo,
@@ -30,7 +31,7 @@ import {
 } from "@/store/notifyStore";
 import { saveAttachment, type AttachmentData } from "@/store/fileStore";
 import type { RemoteSession } from "@/store/remoteStore";
-import type { TodoBlockDetailRequest } from "@/components/block-editor/tools/TodoBlockTool";
+import type { TodoBlockDetailRequest, TodoStatus } from "@/components/block-editor/tools/TodoBlockTool";
 
 export type TodoDetailTarget =
   | { mode: "edit"; todo: NotifyTodo }
@@ -94,7 +95,9 @@ export function TodoDetailDialog({ session, target, dueLabel, onClose, onSaved, 
   const [title, setTitle] = useState("");
   const [body, setBody] = useState<EditorJsDocument>(() => emptyEditorDocument());
   const [editorReady, setEditorReady] = useState(false);
-  const [busy, setBusy] = useState<"save" | "done" | "page" | null>(null);
+  const [busy, setBusy] = useState<"save" | "done" | "page" | "start" | null>(null);
+  const [flowStatus, setFlowStatus] = useState<TodoStatus>("pending");
+  const statusTouched = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const bodyRef = useRef(body);
   bodyRef.current = body;
@@ -107,9 +110,11 @@ export function TodoDetailDialog({ session, target, dueLabel, onClose, onSaved, 
     let cancelled = false;
     setError(null);
     setBusy(null);
+    statusTouched.current = false;
 
     if (target.mode === "block") {
       setTitle(target.request.draft.title ?? "");
+      setFlowStatus(target.request.draft.status ?? "pending");
       setBody(contentDocumentFromTodo({ content: target.request.draft.content ?? "" }));
       setEditorReady(true);
       return;
@@ -117,11 +122,13 @@ export function TodoDetailDialog({ session, target, dueLabel, onClose, onSaved, 
 
     setEditorReady(false);
     setTitle(target.todo.title ?? "");
+    setFlowStatus(fineTodoStatus(target.todo));
 
     const apply = (row: NotifyTodo) => {
       if (cancelled) return;
       const nextTitle = row.title ?? "";
       setTitle(nextTitle);
+      if (!statusTouched.current) setFlowStatus(fineTodoStatus(row));
       setBody(
         withoutDuplicateTitle(
           withLegacyAttachments(contentDocumentFromTodo(row), todoAttachments(row)),
@@ -141,20 +148,17 @@ export function TodoDetailDialog({ session, target, dueLabel, onClose, onSaved, 
   }, [session, target]);
 
   const open = Boolean(target);
-  const blockStatus = isBlock ? target.request.draft.status : undefined;
-  const detailStatus = editing
-    ? normalizeTodoStatus(editing.status)
-    : blockStatus === "in_progress" || blockStatus === "done" || blockStatus === "cancelled" || blockStatus === "pending"
-      ? blockStatus
-      : "pending";
   const status =
-    detailStatus === "in_progress"
+    flowStatus === "in_progress"
       ? t("notify.statusInProgress")
-      : detailStatus === "done"
+      : flowStatus === "done"
         ? t("todo.done")
-        : detailStatus === "cancelled"
+        : flowStatus === "cancelled"
           ? t("todo.cancelled")
           : t("notify.statusPending");
+  const blockRequest = target?.mode === "block" ? target.request : null;
+  const canStart = !creating && flowStatus === "pending" && (Boolean(editing) || Boolean(blockRequest?.onStatus));
+  const canFinish = !creating && flowStatus === "in_progress" && (Boolean(editing) || Boolean(blockRequest?.onStatus));
 
   async function uploadFile(file: File): Promise<AttachmentData> {
     const { data } = await saveAttachment(session, file);
@@ -197,11 +201,51 @@ export function TodoDetailDialog({ session, target, dueLabel, onClose, onSaved, 
     }
   }
 
+  async function onStart() {
+    if (!target || creating || flowStatus !== "pending") return;
+    setBusy("start");
+    setError(null);
+    try {
+      if (target.mode === "block") {
+        statusTouched.current = true;
+        await target.request.onStatus?.("in_progress");
+        setFlowStatus("in_progress");
+        return;
+      }
+      if (!session || !editing) throw new Error(t("notify.actionFailed"));
+      const content = encodeTodoContent(bodyRef.current);
+      const prev = editing.data && typeof editing.data === "object" ? { ...editing.data } : {};
+      const { attachments: _drop, ...rest } = prev as Record<string, unknown> & { attachments?: unknown };
+      const saved = await updateTodo(session, editing.id, {
+        title: title.trim() || t("notify.untitled"),
+        ...(content ? { content } : {}),
+        startsAt: editing.startsAt ?? (typeof rest.start === "string" ? rest.start : null),
+        dueAt: editing.dueAt,
+        status: "in_progress",
+        data: rest,
+      });
+      const started = await syncTodoStatus(session, editing.id, "in_progress").catch(() => saved);
+      statusTouched.current = true;
+      setFlowStatus("in_progress");
+      onSaved?.(started);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("notify.actionFailed"));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function onMarkDone() {
-    if (!editing || !session) return;
     setBusy("done");
     setError(null);
     try {
+      if (target?.mode === "block") {
+        statusTouched.current = true;
+        await target.request.onStatus?.("done");
+        setFlowStatus("done");
+        return;
+      }
+      if (!editing || !session) return;
       const content = encodeTodoContent(bodyRef.current);
       const prev = editing.data && typeof editing.data === "object" ? { ...editing.data } : {};
       const { attachments: _drop, ...rest } = prev as Record<string, unknown> & { attachments?: unknown };
@@ -263,20 +307,34 @@ export function TodoDetailDialog({ session, target, dueLabel, onClose, onSaved, 
               </span>
               {dueLabel ? <span className="tabular-nums text-muted-foreground/90">{dueLabel}</span> : null}
             </DialogDescription>
-            {editing ? (
+            {canStart || canFinish || (editing && onOpenPage) ? (
               <div className="flex shrink-0 items-center gap-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-foreground"
-                  disabled={Boolean(busy)}
-                  onClick={() => void onMarkDone()}
-                >
-                  <CheckOne {...iconParkOutline} size={14} />
-                  {t("notify.markDone")}
-                </Button>
-                {onOpenPage ? (
+                {canStart ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+                    disabled={Boolean(busy)}
+                    onClick={() => void onStart()}
+                  >
+                    {busy === "start" ? t("notify.saving") : t("todo.startTask")}
+                  </Button>
+                ) : null}
+                {canFinish ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+                    disabled={Boolean(busy)}
+                    onClick={() => void onMarkDone()}
+                  >
+                    <CheckOne {...iconParkOutline} size={14} />
+                    {t("todo.finishTask")}
+                  </Button>
+                ) : null}
+                {editing && onOpenPage ? (
                   <Button
                     type="button"
                     variant="ghost"

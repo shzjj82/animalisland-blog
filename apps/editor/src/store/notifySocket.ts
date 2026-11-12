@@ -150,3 +150,31 @@ export function connectNotifySocket(
     socket = null;
   };
 }
+
+const sharedSocketListeners = new Set<Listener>();
+let sharedSocketStop: (() => void) | null = null;
+let sharedSocketUsers = 0;
+let sharedSocketKey = "";
+
+/** 页头桌面和移动端各有一个铃铛，共用一条 socket */
+export function retainNotifySocket(session: RemoteSession, onEvent: Listener): () => void {
+  const key = session.token;
+  sharedSocketListeners.add(onEvent);
+  if (!sharedSocketStop || sharedSocketKey !== key) {
+    sharedSocketStop?.();
+    sharedSocketKey = key;
+    sharedSocketStop = connectNotifySocket(session, (event) => {
+      for (const listener of sharedSocketListeners) listener(event);
+    });
+  }
+  sharedSocketUsers += 1;
+  return () => {
+    sharedSocketListeners.delete(onEvent);
+    sharedSocketUsers -= 1;
+    if (sharedSocketUsers > 0) return;
+    sharedSocketStop?.();
+    sharedSocketStop = null;
+    sharedSocketKey = "";
+    sharedSocketUsers = 0;
+  };
+}

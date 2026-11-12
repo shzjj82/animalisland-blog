@@ -1,12 +1,17 @@
 import type { API, BlockAPI, BlockTool, BlockToolConstructorOptions } from "@editorjs/editorjs";
 import { appLocale, t } from "@/i18n";
 import {
+  cachedListTasks,
   createTodo,
+  deleteTodo,
+  ensureTodoList,
   fineTodoStatus,
-  getTodo,
+  loadListTasks,
   rememberTodoPage,
+  subscribeListTasks,
   syncTodoStatus,
   updateTodoMergingData,
+  type NotifyTodo,
   type UpsertTodoInput,
 } from "@/store/notifyStore";
 import { loadSession } from "@/store/remoteStore";
@@ -34,10 +39,17 @@ export type TodoBlockDetailRequest = {
   pageId: string;
   draft: { title: string; content?: string; status?: TodoStatus };
   onSubmit: (data: { title: string; content: string }) => void | Promise<void>;
+  /** 详情里确认后才改状态：未开始 → 进行中，进行中 → 已完成 */
+  onStatus?: (status: "in_progress" | "done") => void | Promise<void>;
 };
 
 export type TodoData = {
-  items: TodoItem[];
+  /** 服务端待办列表 id，与 pageId 绑定。页面只留这个 id */
+  listId?: string;
+  /** 运行时从 store 填上。写回文档时不再带正文，只留任务 id */
+  items?: TodoItem[];
+  /** 属于这份列表的任务 id */
+  ids?: string[];
   /** 整块待办共用，不跟某一条绑定 */
   notify: boolean;
 };
@@ -136,42 +148,14 @@ function asDate(value: unknown): string {
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
 }
 
-/** 取消完成 / 恢复终止时，按开始日回到 pending 或 in_progress */
-function reopenStatus(item: Pick<TodoItem, "start">): TodoStatus {
-  const today = todayIso();
-  if (item.start && item.start <= today) {
-    return "in_progress";
-  }
+/** 取消完成 / 恢复终止时回到未开始，状态只由用户确认 */
+function reopenStatus(_item: Pick<TodoItem, "start">): TodoStatus {
   return "pending";
 }
 
-/**
- * 展示态：通知关闭时，到了开始日把 pending 看成进行中（不改持久化）；
- * 通知开启时以块内 status 为准（会由 advanceDueStatuses / 远端拉回写入）。
- */
-function displayStatus(item: TodoItem, notifyOn: boolean): TodoStatus {
-  if (item.status !== "pending") {
-    return item.status;
-  }
-  if (notifyOn) {
-    return item.status;
-  }
-  if (item.start && item.start <= todayIso()) {
-    return "in_progress";
-  }
-  return "pending";
-}
-
-/** 到了开始日的 pending → in_progress（通知开启时写入块内并随后 sync） */
-function advanceDueItem(item: TodoItem): boolean {
-  if (item.status !== "pending") {
-    return false;
-  }
-  if (!item.start || item.start > todayIso()) {
-    return false;
-  }
-  item.status = "in_progress";
-  return true;
+/** 展示态就是用户确认过的状态。开始日只用于通知，不把任务改成进行中 */
+function displayStatus(item: TodoItem, _notifyOn?: boolean): TodoStatus {
+  return item.status;
 }
 
 function statusLabel(status: TodoStatus): string {
@@ -211,10 +195,9 @@ function dueAtFromItem(item: TodoItem): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-function upsertPayload(item: TodoItem, pageId: string, notify: boolean): UpsertTodoInput | null {
+function upsertPayload(item: TodoItem, pageId: string, listId: string, notify: boolean): UpsertTodoInput | null {
   const title = item.text.trim().slice(0, 120);
-  if (!title) return null;
-  if (!pageId) return null;
+  if (!title || !pageId || !listId) return null;
   return {
     title,
     ...(item.content?.trim() ? { content: item.content.trim() } : {}),
@@ -225,7 +208,9 @@ function upsertPayload(item: TodoItem, pageId: string, notify: boolean): UpsertT
     startsAt: item.start || null,
     dueAt: dueAtFromItem(item),
     data: {
-      localItemId: item.id,
+      kind: "task",
+      listId,
+      ...(item.remoteId ? {} : { localItemId: item.id }),
       start: item.start || null,
       end: item.end || null,
       notify,
@@ -233,15 +218,42 @@ function upsertPayload(item: TodoItem, pageId: string, notify: boolean): UpsertT
   };
 }
 
-function normalize(data: Partial<TodoData> | undefined): TodoData {
+function dayOf(value: unknown): string {
+  const text = String(value ?? "").trim();
+  return /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10) : "";
+}
+
+function todoToItem(todo: NotifyTodo): TodoItem {
+  const content = typeof todo.content === "string" && todo.content.trim() ? todo.content : undefined;
+  return {
+    id: todo.id,
+    remoteId: todo.id,
+    text: todo.title ?? "",
+    status: fineTodoStatus(todo),
+    start: dayOf(todo.data?.start) || dayOf(todo.startsAt),
+    end: dayOf(todo.data?.end) || dayOf(todo.dueAt),
+    ...(content ? { content } : {}),
+  };
+}
+
+function normalize(data: Partial<TodoData> | undefined): TodoData & { items: TodoItem[] } {
   const rawItems = Array.isArray(data?.items) ? data.items : [];
   const items = rawItems.map(normalizeItem).filter((item): item is TodoItem => item !== null);
+  const ids = Array.isArray(data?.ids) ? data.ids.filter((id): id is string => typeof id === "string" && Boolean(id.trim())) : [];
+  for (const id of ids) {
+    if (!items.some((item) => item.remoteId === id || item.id === id)) {
+      items.push({ id, remoteId: id, text: "", status: "pending", start: "", end: "" });
+    }
+  }
   const legacyNotify = rawItems.some(
     (raw) => Boolean(raw && typeof raw === "object" && (raw as { notify?: unknown }).notify),
   );
+  const linked = Array.isArray(data?.ids);
+  const listId = typeof data?.listId === "string" && data.listId.trim() ? data.listId.trim() : undefined;
   return {
-    items: items.length ? items : [blankItem()],
+    items: items.length || linked ? items : [blankItem()],
     notify: Boolean(data?.notify) || legacyNotify,
+    ...(listId ? { listId } : {}),
   };
 }
 
@@ -337,7 +349,7 @@ export class TodoBlockTool implements BlockTool {
     };
   }
 
-  private data: TodoData;
+  private data: TodoData & { items: TodoItem[] };
   private readOnly: boolean;
   private api: API;
   private block?: BlockAPI;
@@ -353,6 +365,10 @@ export class TodoBlockTool implements BlockTool {
   private leaveTimers: number[] = [];
   private heightFrame = 0;
   private syncing = false;
+  private booting = false;
+  private listReady: Promise<string> | null = null;
+  private watchedPage = "";
+  private stopWatch: (() => void) | null = null;
   private getPageId: () => string;
   private onOpenDetail?: (request: TodoBlockDetailRequest) => void;
 
@@ -393,40 +409,33 @@ export class TodoBlockTool implements BlockTool {
       this.wrapper.append(this.header(), fallback, this.footer());
     }
     // 勿在 render 同步里 dispatchChange：Editor.js 会当成块渲染失败
-    if (!this.readOnly && this.data.notify) {
-      queueMicrotask(() => {
-        if (!this.wrapper.isConnected) return;
-        // 仅状态真有推进时才同步；切页签不该打 PATCH
-        if (!this.reconcileLocalStatuses()) return;
-        this.commit();
-        this.paint();
-        void this.syncRemoteTodos();
-      });
-    }
+    this.watchPage();
     return this.wrapper;
   }
 
   save(): TodoData {
+    const ids = [...new Set(this.data.items.map((item) => item.remoteId).filter((id): id is string => Boolean(id)))];
+    const pending = this.data.items
+      .filter((item) => item.text.trim() && !item.remoteId)
+      .map((item) => ({
+        id: item.id,
+        text: item.text.trim(),
+        status: item.status,
+        start: item.start,
+        end: item.end,
+        ...(item.content?.trim() ? { content: item.content.trim() } : {}),
+      }));
     return {
       notify: this.data.notify,
-      items: this.data.items
-        .map((item) => ({
-          id: item.id,
-          text: item.text.trim(),
-          status: item.status,
-          start: item.start,
-          end: item.end,
-          ...(item.content?.trim() ? { content: item.content.trim() } : {}),
-          ...(item.remoteId ? { remoteId: item.remoteId } : {}),
-        }))
-        .filter(
-          (item) =>
-            item.text || item.start || item.end || item.content || item.status !== "pending" || item.remoteId,
-        ),
+      ...(this.data.listId ? { listId: this.data.listId } : {}),
+      ids,
+      ...(pending.length ? { items: pending } : {}),
     };
   }
 
   destroy() {
+    this.stopWatch?.();
+    this.stopWatch = null;
     this.closeCalendar();
     for (const timer of this.leaveTimers) {
       window.clearTimeout(timer);
@@ -442,68 +451,108 @@ export class TodoBlockTool implements BlockTool {
     this.block?.dispatchChange?.();
   }
 
-  /** 通知开启时：到开始日的 pending 升为 in_progress */
-  private reconcileLocalStatuses(): boolean {
-    if (this.readOnly || !this.data.notify) {
-      return false;
-    }
-    let changed = false;
-    for (const item of this.data.items) {
-      if (advanceDueItem(item)) {
-        changed = true;
-      }
-    }
-    return changed;
+  /** 打开待办块：没有列表就向服务端申请，再只拉取这份列表里的任务 */
+  private watchPage() {
+    const pageId = this.getPageId().trim();
+    if (!pageId || this.listReady) return;
+    if (this.data.listId && this.watchedPage === this.data.listId) return;
+    this.listReady = this.bootList();
   }
 
-  /** 通知开启时：未同步则创建；已有 remoteId 则先拉远端状态，再按状态走 start/done/cancel/reopen 或 PATCH */
+  private readyListId(): Promise<string> {
+    if (this.data.listId) return Promise.resolve(this.data.listId);
+    if (!this.listReady) this.listReady = this.bootList();
+    return this.listReady;
+  }
+
+  private applyListTasks() {
+    const listId = this.data.listId;
+    if (!listId) return;
+    const remote = cachedListTasks(listId).map(todoToItem);
+    const remoteIds = new Set(remote.map((item) => item.remoteId));
+    const pending = this.data.items.filter((item) => item.text.trim() && !item.remoteId && !remoteIds.has(item.id));
+    this.data.items = [...remote, ...pending];
+    if (this.leaveTimers.length) return;
+    this.paint();
+  }
+
+  private async bootList(): Promise<string> {
+    if (this.booting) return this.data.listId ?? "";
+    const session = loadSession();
+    const pageId = this.getPageId().trim();
+    if (!session || !pageId) return "";
+    if (!this.data.listId && this.readOnly) return "";
+    this.booting = true;
+    const unsynced = this.data.items.filter((item) => item.text.trim() && !item.remoteId);
+    try {
+      const list = await ensureTodoList(session, pageId, this.data.listId);
+      this.data.listId = list.id;
+      this.stopWatch?.();
+      this.watchedPage = list.id;
+      this.stopWatch = subscribeListTasks(list.id, () => {
+        if (!this.wrapper.isConnected) return;
+        this.applyListTasks();
+      });
+      if (!this.readOnly) this.commit();
+      await loadListTasks(session, pageId, list.id);
+      if (this.readOnly) return list.id;
+      for (const item of unsynced) {
+        const payload = upsertPayload(item, pageId, list.id, this.data.notify);
+        if (!payload) continue;
+        try {
+          const created = await createTodo(session, payload);
+          if (item.status !== "pending") {
+            await syncTodoStatus(session, created.id, item.status, payload);
+          }
+        } catch (err) {
+          console.warn("[todo-migrate]", err);
+          if (!this.data.items.some((entry) => entry.id === item.id)) {
+            this.data.items.push(item);
+            this.paint();
+          }
+        }
+      }
+      return list.id;
+    } catch (err) {
+      console.warn("[todo-list]", err);
+      this.listReady = null;
+      return "";
+    } finally {
+      this.booting = false;
+    }
+  }
+
+  /** 把用户确认过的状态、正文和时间提交到所属列表。时间只用于通知，不改状态 */
   private async syncRemoteTodos() {
-    if (this.readOnly || !this.data.notify || this.syncing) {
+    if (this.readOnly || this.syncing) {
       return;
     }
     const session = loadSession();
-    if (!session) {
+    const pageId = this.getPageId().trim();
+    const listId = (this.data.listId || (await this.readyListId())).trim();
+    if (!session || !pageId || !listId) {
       return;
     }
     this.syncing = true;
-    let changed = this.reconcileLocalStatuses();
     try {
-      for (const item of this.data.items) {
-        const pageId = this.getPageId().trim();
-        const payload = upsertPayload(item, pageId, this.data.notify);
+      for (const item of [...this.data.items]) {
+        const payload = upsertPayload(item, pageId, listId, this.data.notify);
         if (!payload) continue;
         try {
           if (item.remoteId) {
-            try {
-              const remote = await getTodo(session, item.remoteId);
-              const remoteStatus = fineTodoStatus(remote);
-              // 远端已推进而本地仍 pending：以远端为准（cron /start）
-              if (item.status === "pending" && remoteStatus !== "pending") {
-                item.status = remoteStatus;
-                changed = true;
-              }
-            } catch {
-              // 读失败则继续按本地推
-            }
-            const nextPayload = upsertPayload(item, pageId, this.data.notify) ?? payload;
-            await updateTodoMergingData(session, item.remoteId, nextPayload);
-            // 专用状态接口优先；未上线时 syncTodoStatus 会回退 PATCH
+            await updateTodoMergingData(session, item.remoteId, payload);
             if (item.status !== "pending") {
-              await syncTodoStatus(session, item.remoteId, item.status, nextPayload);
+              await syncTodoStatus(session, item.remoteId, item.status, payload);
             }
-            if (pageId) {
-              rememberTodoPage(item.remoteId, pageId);
-            }
+            rememberTodoPage(item.remoteId, pageId);
           } else {
             const created = await createTodo(session, payload);
             item.remoteId = created.id;
+            item.id = created.id;
             if (item.status !== "pending") {
               await syncTodoStatus(session, created.id, item.status, payload);
             }
-            if (pageId) {
-              rememberTodoPage(created.id, pageId);
-            }
-            changed = true;
+            rememberTodoPage(created.id, pageId);
           }
         } catch (err) {
           console.warn("[todo-sync]", err);
@@ -511,10 +560,6 @@ export class TodoBlockTool implements BlockTool {
       }
     } finally {
       this.syncing = false;
-      if (changed) {
-        this.commit();
-        this.paint();
-      }
     }
   }
 
@@ -673,14 +718,9 @@ export class TodoBlockTool implements BlockTool {
     button.append(knob, caption);
     button.addEventListener("click", () => {
       this.data.notify = !this.data.notify;
-      if (this.data.notify) {
-        this.reconcileLocalStatuses();
-      }
       this.commit();
       this.paint();
-      if (this.data.notify) {
-        void this.syncRemoteTodos();
-      }
+      void this.syncRemoteTodos();
     });
     return button;
   }
@@ -716,7 +756,14 @@ export class TodoBlockTool implements BlockTool {
     const shown = displayStatus(item, this.data.notify);
     const ended = isEnded(item.status);
     const row = document.createElement("div");
-    row.className = `cdx-todo__item is-${item.status}${shown === "in_progress" && item.status === "pending" ? " is-due-start" : ""}`;
+    row.className = `cdx-todo__item is-${item.status}${shown === "in_progress" && item.status === "pending" ? " is-due-start" : ""}${this.onOpenDetail && !this.readOnly && item.status !== "cancelled" ? " is-openable" : ""}`;
+    if (this.onOpenDetail && !this.readOnly && item.status !== "cancelled") {
+      row.addEventListener("click", (event) => {
+        const target = event.target;
+        if (!(target instanceof Element) || target.closest("button, input, a")) return;
+        this.openEditDetail(item);
+      });
+    }
 
     const check = document.createElement("button");
     check.type = "button";
@@ -724,7 +771,10 @@ export class TodoBlockTool implements BlockTool {
     check.disabled = this.readOnly;
     check.innerHTML = CHECK_ICON;
     check.setAttribute("aria-pressed", item.status === "done" ? "true" : "false");
-    check.setAttribute("aria-label", item.status === "done" ? t("todo.reopen") : t("todo.markDone"));
+    check.setAttribute(
+      "aria-label",
+      item.status === "done" ? t("todo.reopen") : item.status === "pending" ? t("todo.startTask") : t("todo.finishTask"),
+    );
     check.addEventListener("click", () => {
       if (row.classList.contains("is-striking") || row.classList.contains("is-leaving")) {
         return;
@@ -740,14 +790,15 @@ export class TodoBlockTool implements BlockTool {
         this.paint();
         return;
       }
-      if (this.tab !== "ended") {
-        this.finishItem(item, row, check);
+      if (item.status === "pending") {
+        item.status = "in_progress";
+        this.tab = "in_progress";
+        this.commit();
+        void this.syncRemoteTodos();
+        this.paint();
         return;
       }
-      item.status = "done";
-      this.commit();
-      void this.syncRemoteTodos();
-      this.paint();
+      this.finishItem(item, row, check);
     });
 
     const body = document.createElement("div");
@@ -837,6 +888,8 @@ export class TodoBlockTool implements BlockTool {
       cancelOrRestore.hidden = true;
     }
 
+    const flow = this.flowButton(item, row, check);
+
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "cdx-todo__remove";
@@ -852,7 +905,36 @@ export class TodoBlockTool implements BlockTool {
 
     body.append(titleRow, actions);
     row.append(check, body);
+    if (flow) row.append(flow);
     return row;
+  }
+
+  /** 未开始 → 开始任务；进行中 → 完成任务。状态只在点击后改变 */
+  private flowButton(item: TodoItem, row: HTMLElement, check: HTMLButtonElement): HTMLButtonElement | null {
+    if (this.readOnly || isEnded(item.status)) return null;
+    const button = document.createElement("button");
+    button.type = "button";
+    if (item.status === "pending") {
+      button.className = "cdx-todo__flow";
+      button.textContent = t("todo.startTask");
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        item.status = "in_progress";
+        this.tab = "in_progress";
+        this.commit();
+        void this.syncRemoteTodos();
+        this.paint();
+      });
+      return button;
+    }
+    button.className = "cdx-todo__flow is-finish";
+    button.textContent = t("todo.finishTask");
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (row.classList.contains("is-striking") || row.classList.contains("is-leaving")) return;
+      this.finishItem(item, row, check);
+    });
+    return button;
   }
 
   private finishItem(item: TodoItem, row: HTMLElement, check: HTMLButtonElement) {
@@ -1013,16 +1095,11 @@ export class TodoBlockTool implements BlockTool {
         }
         item.start = draftStart;
         item.end = draftEnd;
-        if (this.data.notify) {
-          advanceDueItem(item);
-        }
         settled = true;
         this.commit();
         this.closeCalendar();
         this.paint();
-        if (this.data.notify) {
-          void this.syncRemoteTodos();
-        }
+        void this.syncRemoteTodos();
       };
       const panels = document.createElement("div");
       panels.className = "cdx-todo__cal-panels";
@@ -1039,13 +1116,8 @@ export class TodoBlockTool implements BlockTool {
       }
       item.start = draftStart;
       item.end = draftStart;
-      if (this.data.notify) {
-        advanceDueItem(item);
-      }
       this.commit();
-      if (this.data.notify) {
-        void this.syncRemoteTodos();
-      }
+      void this.syncRemoteTodos();
     };
 
     anchor.classList.add("is-open");
@@ -1391,32 +1463,39 @@ export class TodoBlockTool implements BlockTool {
     return button;
   }
 
-  private openCreateDetail(afterId: string | undefined) {
+  private openCreateDetail(_afterId: string | undefined) {
     if (this.readOnly) {
       return;
     }
     if (!this.onOpenDetail) {
-      this.insertBlank(afterId);
+      this.insertBlank(_afterId);
       return;
     }
     this.onOpenDetail({
       creating: true,
       pageId: this.getPageId(),
       draft: { title: "", content: "" },
-      onSubmit: ({ title, content }) => {
-        const item: TodoItem = {
+      onSubmit: async ({ title, content }) => {
+        const session = loadSession();
+        const pageId = this.getPageId().trim();
+        if (!session || !pageId) {
+          throw new Error(t("notify.actionFailed"));
+        }
+        const draft: TodoItem = {
           ...blankItem(),
           text: title.trim(),
           ...(content.trim() ? { content: content.trim() } : {}),
         };
-        const index = afterId ? this.data.items.findIndex((entry) => entry.id === afterId) : -1;
-        this.data.items.splice(index + 1, 0, item);
+        const listId = (this.data.listId || (await this.readyListId())).trim();
+        const payload = upsertPayload(draft, pageId, listId, this.data.notify);
+        if (!payload) {
+          throw new Error(t("notify.actionFailed"));
+        }
+        const created = await createTodo(session, payload);
         this.tab = "pending";
         this.gantt = false;
-        this.pendingScrollId = item.id;
+        this.pendingScrollId = created.id;
         this.commit();
-        this.paint();
-        void this.syncRemoteTodos();
       },
     });
   }
@@ -1432,12 +1511,32 @@ export class TodoBlockTool implements BlockTool {
       creating: false,
       pageId: this.getPageId(),
       draft: { title: item.text, content: item.content ?? "", status: displayStatus(item, this.data.notify) },
-      onSubmit: ({ title, content }) => {
-        item.text = title.trim();
-        item.content = content.trim() || undefined;
+      onStatus: async (status) => {
+        item.status = status;
+        this.tab = status === "in_progress" ? "in_progress" : "ended";
         this.commit();
+        await this.syncRemoteTodos();
         this.paint();
-        void this.syncRemoteTodos();
+      },
+      onSubmit: async ({ title, content }) => {
+        const session = loadSession();
+        const pageId = this.getPageId().trim();
+        const listId = (this.data.listId || (await this.readyListId())).trim();
+        const remoteId = item.remoteId;
+        if (!session || !pageId || !listId || !remoteId) {
+          throw new Error(t("notify.actionFailed"));
+        }
+        const payload = upsertPayload(
+          { ...item, text: title.trim(), content: content.trim() || undefined },
+          pageId,
+          listId,
+          this.data.notify,
+        );
+        if (!payload) {
+          throw new Error(t("notify.actionFailed"));
+        }
+        await updateTodoMergingData(session, remoteId, payload);
+        this.commit();
       },
     });
   }
@@ -1482,15 +1581,25 @@ export class TodoBlockTool implements BlockTool {
     if (index < 0) {
       return;
     }
+    const item = this.data.items[index];
     const previous = this.data.items[index - 1];
     this.data.items.splice(index, 1);
     this.commit();
     this.paint();
-    // 删掉一条后把光标交还给上一条，不然焦点掉到 body，键盘会收起来
     if (previous) {
       this.wrapper
         .querySelector<HTMLInputElement>(`[data-todo-focus="${CSS.escape(previous.id)}"]`)
         ?.focus({ preventScroll: true });
     }
+    const session = loadSession();
+    const remoteId = item.remoteId;
+    if (!session || !remoteId) return;
+    void deleteTodo(session, remoteId).catch((err) => {
+      console.warn("[todo-delete]", err);
+      if (!this.wrapper.isConnected) return;
+      if (this.data.items.some((entry) => entry.id === item.id || entry.remoteId === remoteId)) return;
+      this.data.items.splice(Math.min(index, this.data.items.length), 0, item);
+      this.paint();
+    });
   }
 }

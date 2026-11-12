@@ -6,19 +6,23 @@ import { SoftScrollbar } from "@/components/soft-scrollbar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import {
-  fetchNotifySnapshot,
+  cachedTodoTasks,
+  fineTodoStatus,
+  loadNotifySnapshot,
   markAllNoticesRead,
   markNoticeRead,
   markTodoDone,
-  normalizeTodoStatus,
   noticeKind,
   pageIdFromNotice,
+  peekNotifySnapshot,
+  subscribeNotifySnapshot,
+  subscribeTodoTasks,
   todoContentPreview,
   type NotifyNotice,
   type NotifySnapshot,
   type NotifyTodo,
 } from "@/store/notifyStore";
-import { connectNotifySocket } from "@/store/notifySocket";
+import { retainNotifySocket } from "@/store/notifySocket";
 import { iconParkOutline } from "@/lib/iconPark";
 import type { RemoteSession } from "@/store/remoteStore";
 import { TodoDetailDialog, type TodoDetailTarget } from "./TodoDetailDialog";
@@ -68,7 +72,7 @@ function todoDue(todo: NotifyTodo, locale: string): string {
 }
 
 function todoStatusKey(todo: NotifyTodo): "notify.statusInProgress" | "notify.statusPending" {
-  return normalizeTodoStatus(todo.status) === "in_progress" ? "notify.statusInProgress" : "notify.statusPending";
+  return fineTodoStatus(todo) === "in_progress" ? "notify.statusInProgress" : "notify.statusPending";
 }
 
 function noticeKindKey(
@@ -96,7 +100,7 @@ export function NotifyBell({ session, className, onWriteTodo, onOpenPage }: Prop
       return;
     }
     try {
-      setSnapshot(await fetchNotifySnapshot(session));
+      setSnapshot(await loadNotifySnapshot(session));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("notify.loadFailed"));
@@ -108,29 +112,32 @@ export function NotifyBell({ session, className, onWriteTodo, onOpenPage }: Prop
       setSnapshot(null);
       return;
     }
-    void refresh();
-    const stopSocket = connectNotifySocket(session, (event) => {
-      if (event.type === "ready") {
-        void refresh();
-        return;
+    void loadNotifySnapshot(session).catch((err: unknown) => {
+      setError(err instanceof Error ? err.message : t("notify.loadFailed"));
+    });
+    const stopLive = subscribeNotifySnapshot(() => {
+      const next = peekNotifySnapshot();
+      if (next) setSnapshot(next);
+    });
+    const stopTasks = subscribeTodoTasks(() => {
+      setSnapshot((prev) => (prev ? { ...prev, todos: cachedTodoTasks() } : prev));
+    });
+    const stopSocket = retainNotifySocket(session, (event) => {
+      if (event.type !== "event") return;
+      if (event.kind === "notice" && event.action === "created") {
+        setTab("notices");
       }
-      if (event.type === "error") {
-        return;
+      if (event.kind === "todo" && event.action === "created") {
+        setTab("todos");
       }
-      if (event.type === "event") {
-        if (event.kind === "notice" && event.action === "created") {
-          setTab("notices");
-        }
-        if (event.kind === "todo" && event.action === "created") {
-          setTab("todos");
-        }
-        void refresh();
-      }
+      void loadNotifySnapshot(session);
     });
     return () => {
+      stopLive();
+      stopTasks();
       stopSocket();
     };
-  }, [session, refresh]);
+  }, [session, t]);
 
   if (!session) {
     return null;

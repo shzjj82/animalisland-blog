@@ -1477,7 +1477,6 @@ export function App() {
               <Delete {...iconProps} />
               {t("common.delete")}
             </Button>
-            <NotifyBell session={session} onWriteTodo={(todo) => writeTodoPage(todo)} onOpenPage={(id) => openPage(id)} />
             <Button type="button" variant="outline" size="icon" aria-label={t("wikiAsk.title")} onClick={openWiki}>
               <span className="text-[11px] font-semibold leading-none tracking-wide">AI</span>
             </Button>
@@ -1487,6 +1486,7 @@ export function App() {
               </Button>
             ) : null}
             <LanguageSwitch onChange={(locale) => void switchLocale(locale)} />
+            <NotifyBell session={session} onWriteTodo={(todo) => writeTodoPage(todo)} onOpenPage={(id) => openPage(id)} />
           </span>
           {/* 移动端：更多菜单 + AI */}
           <span className="inline-flex shrink-0 items-center gap-1 sm:hidden">
@@ -1559,7 +1559,6 @@ export function App() {
                 </div>
               </PopoverContent>
             </Popover>
-            <NotifyBell session={session} onWriteTodo={(todo) => writeTodoPage(todo)} onOpenPage={(id) => openPage(id)} />
             <Button type="button" variant="outline" size="icon" aria-label={t("wikiAsk.title")} onClick={openWiki}>
               <span className="text-[11px] font-semibold leading-none tracking-wide">AI</span>
             </Button>
@@ -1568,6 +1567,7 @@ export function App() {
                 {t("work.title")}
               </Button>
             ) : null}
+            <NotifyBell session={session} onWriteTodo={(todo) => writeTodoPage(todo)} onOpenPage={(id) => openPage(id)} />
           </span>
         </header>
         <FileDropZone

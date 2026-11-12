@@ -5,28 +5,25 @@ import { request, type RemoteSession } from "@/store/remoteStore";
 /**
  * 网关 `/wiki/todos` 契约
  *
- * 线上 Nest 目前仍校验：status ∈ open | done | cancelled。
- * 编辑器本地四态：pending | in_progress | done | cancelled。
- * 出入站用 toWireTodoStatus / normalizeTodoStatus 互转：
- *   pending / in_progress → 线上 open；open → 本地 pending（细态以文档块为准）。
+ * 状态只有四态：pending | in_progress | done | cancelled。
+ * 不再使用 open，也不再把细态写进 data.localStatus。
+ * 开始日、截止日只驱动通知，不改变状态。
  *
- * 目标契约（Nest 升级后）：
- * - 状态 pending | in_progress | done | cancelled
- * - POST /wiki/todos（pageId、title 必填；content 非必填；可带 startsAt/dueAt/status）
- * - PATCH /wiki/todos/:id（content 非必填）
- * - POST …/start | …/done | …/cancel | …/reopen
- * - GET ?status=pending,in_progress；open-count 计活跃态
+ * - POST /wiki/todos（pageId、title 必填；可带 status / startsAt / dueAt）
+ * - PATCH /wiki/todos/:id
+ * - POST …/start | …/done | …/cancel | …/reopen 直接改 status
+ * - DELETE /wiki/todos/:id 删除任务，不是改成 cancelled
+ * - GET ?status=pending,in_progress 可逗号分隔多个状态
  *
- * 定时通知（通知表，不新建第二条 todo；source=wiki 且 data.notify）：
- * - todo.started / todo.progress / todo.overdue
- * 通知 data：{ todoId, pageId, kind, localItemId? }
+ * 待办块在服务端对应一条列表记录：data.kind = "list"，与 pageId 绑定。
+ * 任务是另一条记录：data.kind = "task"、data.listId = 列表 id。
+ * 铃铛待办栏只取 pending 与 in_progress 的任务，不含列表记录。
  */
 
-/** 本地 / 目标契约四态，另含线上旧值 open */
+/** 四态。open 只可能出现在尚未刷完的旧数据里，读到后按 pending 处理，不再写出 */
 export type WikiTodoStatus = "pending" | "in_progress" | "done" | "cancelled" | "open";
 
-/** 当前线上可写入的 status */
-export type WikiTodoWireStatus = "open" | "done" | "cancelled";
+export type TodoRecordStatus = Exclude<WikiTodoStatus, "open">;
 
 export type WikiTodoPage = {
   id: string;
@@ -121,7 +118,7 @@ export type UpsertTodoInput = {
   pageId?: string;
   category?: string;
   source?: string;
-  status?: Exclude<WikiTodoStatus, "open">;
+  status?: TodoRecordStatus;
   startsAt?: string | null;
   dueAt?: string | null;
   data?: Record<string, unknown> | null;
@@ -129,59 +126,250 @@ export type UpsertTodoInput = {
 
 const TODO_PAGE_KEY = "editor:todo-pages";
 
-/** 活跃态：铃铛待办列表与 open-count 只计这两态（含旧 open） */
+/**
+ * 待办正文只活在这里，按服务端 id 索引。
+ * 页面文档只留 id；打开页面时用 pageId 把这一页的任务灌进来。
+ * 铃铛和块里的写入都会 publish，订阅方再重绘。
+ */
+const todosById = new Map<string, NotifyTodo>();
+const idsByList = new Map<string, string[]>();
+const listListeners = new Set<(listId: string) => void>();
+const taskListeners = new Set<() => void>();
+
+export function isTodoListRecord(todo: NotifyTodo | null | undefined): boolean {
+  if (!todo) return false;
+  return todo.category === "list" || todo.data?.kind === "list";
+}
+
+export function taskListId(todo: NotifyTodo | null | undefined): string {
+  const raw = todo?.data?.listId;
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
+function emitListTasks(listId: string) {
+  for (const listener of listListeners) {
+    listener(listId);
+  }
+}
+
+function emitTodoTasks() {
+  for (const listener of taskListeners) {
+    listener();
+  }
+}
+
+function rememberTodo(todo: NotifyTodo, extra?: Record<string, unknown> | null): NotifyTodo {
+  const prev = todosById.get(todo.id);
+  const data = {
+    ...(prev?.data ?? {}),
+    ...(todo.data ?? {}),
+    ...(extra ?? {}),
+  };
+  const next: NotifyTodo = {
+    ...prev,
+    ...todo,
+    ...(Object.keys(data).length ? { data } : {}),
+  };
+  todosById.set(todo.id, next);
+  return next;
+}
+
+export function cachedListTasks(listId: string): NotifyTodo[] {
+  const ids = idsByList.get(listId) ?? [];
+  const out: NotifyTodo[] = [];
+  for (const id of ids) {
+    const todo = todosById.get(id);
+    if (todo && !isTodoListRecord(todo)) out.push(todo);
+  }
+  return out;
+}
+
+export function subscribeListTasks(listId: string, listener: () => void): () => void {
+  const wrapped = (changed: string) => {
+    if (changed === listId) listener();
+  };
+  listListeners.add(wrapped);
+  return () => listListeners.delete(wrapped);
+}
+
+/** 铃铛待办栏：全部任务，不含待办列表本身 */
+export function cachedTodoTasks(): NotifyTodo[] {
+  return [...todosById.values()].filter((todo) => !isTodoListRecord(todo) && isActiveTodoStatus(todo.status));
+}
+
+export function subscribeTodoTasks(listener: () => void): () => void {
+  taskListeners.add(listener);
+  return () => taskListeners.delete(listener);
+}
+
+/** 写入一条任务或列表。列表本身不进任务清单，任务按 listId 通知对应页面块 */
+export function publishTodo(todo: NotifyTodo, extra?: Record<string, unknown> | null) {
+  if (!todo?.id) return;
+  const next = rememberTodo(todo, extra);
+  if (isTodoListRecord(next)) return;
+  const listId = taskListId(next);
+  if (listId) {
+    const ids = idsByList.get(listId) ?? [];
+    if (!ids.includes(next.id)) {
+      idsByList.set(listId, [...ids, next.id]);
+    }
+    emitListTasks(listId);
+  }
+  emitTodoTasks();
+}
+
+/** 从页面块和铃铛里拿掉一条任务 */
+export function forgetTodo(id: string) {
+  const todoId = id.trim();
+  if (!todoId) return;
+  const todo = todosById.get(todoId);
+  todosById.delete(todoId);
+  const lists = new Set<string>();
+  const known = taskListId(todo);
+  if (known) lists.add(known);
+  for (const [listId, ids] of idsByList) {
+    if (ids.includes(todoId)) lists.add(listId);
+  }
+  for (const listId of lists) {
+    idsByList.set(
+      listId,
+      (idsByList.get(listId) ?? []).filter((itemId) => itemId !== todoId),
+    );
+    emitListTasks(listId);
+  }
+  emitTodoTasks();
+}
+
+/** 删除任务记录。终止仍走 /cancel，不在这里改状态 */
+export async function deleteTodo(session: RemoteSession, id: string): Promise<void> {
+  const prev = todosById.get(id);
+  forgetTodo(id);
+  try {
+    await request<unknown>(session, "DELETE", `/wiki/todos/${encodeURIComponent(id)}`);
+  } catch (err) {
+    if (prev) publishTodo(prev);
+    throw err;
+  }
+}
+
+/** 打开页面上的待办块时，一次取回这份列表的四态任务 */
+export async function loadListTasks(session: RemoteSession, pageId: string, listId: string): Promise<NotifyTodo[]> {
+  const page = pageId.trim();
+  const list = listId.trim();
+  if (!page || !list) return [];
+  const result = await request<Page<NotifyTodo>>(
+    session,
+    "GET",
+    `/wiki/todos?pageId=${encodeURIComponent(page)}&status=pending,in_progress,done,cancelled&page=1&pageSize=100`,
+  );
+  const seen = new Set<string>();
+  const items = (result.items ?? []).filter((todo) => {
+    if (!todo?.id || seen.has(todo.id) || taskListId(todo) !== list || isTodoListRecord(todo)) return false;
+    seen.add(todo.id);
+    return true;
+  });
+  for (const todo of items) rememberTodo(todo);
+  idsByList.set(list, items.map((todo) => todo.id));
+  emitListTasks(list);
+  emitTodoTasks();
+  return items;
+}
+
+/** 创建待办块时向服务端申请一份列表，id 与 pageId 绑定 */
+export async function ensureTodoList(session: RemoteSession, pageId: string, listId?: string): Promise<NotifyTodo> {
+  const page = pageId.trim();
+  const existing = listId?.trim() ?? "";
+  if (existing) {
+    try {
+      const current = await getTodo(session, existing);
+      publishTodo(current);
+      return current;
+    } catch {
+      // 列表已被删掉时重新申请
+    }
+  }
+  return createTodo(session, {
+    title: "待办",
+    pageId: page,
+    category: "page",
+    status: "pending",
+    data: { kind: "list", pageId: page },
+  });
+}
+
+/** 铃铛待办：未开始和进行中。不含列表记录，也不把 open 当成一种状态 */
 export function isActiveTodoStatus(status: string | undefined | null): boolean {
-  return status === "pending" || status === "in_progress" || status === "open" || !status;
+  return status === "pending" || status === "in_progress";
 }
 
-/** 本地四态 / open → 线上可写入的 open|done|cancelled */
-export function toWireTodoStatus(status: string | undefined | null): WikiTodoWireStatus {
-  if (status === "done") return "done";
-  if (status === "cancelled") return "cancelled";
-  return "open";
-}
-
-export function normalizeTodoStatus(status: string | undefined | null): Exclude<WikiTodoStatus, "open"> {
+/** 写出四态。旧值 open 不再提交，落到 pending */
+export function toWireTodoStatus(status: string | undefined | null): TodoRecordStatus {
   if (status === "in_progress" || status === "done" || status === "cancelled" || status === "pending") {
     return status;
   }
-  if (status === "open") {
-    return "pending";
+  return "pending";
+}
+
+export function normalizeTodoStatus(status: string | undefined | null): TodoRecordStatus {
+  if (status === "in_progress" || status === "done" || status === "cancelled" || status === "pending") {
+    return status;
   }
   return "pending";
 }
 
-/** 远程细态：优先 data.localStatus；否则用 status / startedAt 推断 */
-export function fineTodoStatus(todo: Pick<NotifyTodo, "status" | "startedAt" | "data">): Exclude<WikiTodoStatus, "open"> {
-  const local = todo.data?.localStatus;
-  if (local === "pending" || local === "in_progress" || local === "done" || local === "cancelled") {
-    return local;
-  }
-  const normalized = normalizeTodoStatus(todo.status);
-  if (normalized === "done" || normalized === "cancelled" || normalized === "in_progress") {
-    return normalized;
-  }
-  if (todo.startedAt) {
-    return "in_progress";
-  }
-  return "pending";
+/** 只看 status。开始时间和 data.localStatus 不参与判断 */
+export function fineTodoStatus(todo: Pick<NotifyTodo, "status" | "startedAt" | "data">): TodoRecordStatus {
+  return normalizeTodoStatus(todo.status);
 }
 
 export async function fetchNotifySnapshot(session: RemoteSession): Promise<NotifySnapshot> {
-  const [openTodo, unreadNotice, todos, notices] = await Promise.all([
-    request<{ count: number }>(session, "GET", "/wiki/todos/open-count"),
+  const [todos, unreadNotice, notices] = await Promise.all([
+    request<Page<NotifyTodo>>(session, "GET", "/wiki/todos?status=pending,in_progress&page=1&pageSize=100"),
     request<{ count: number }>(session, "GET", "/wiki/notifications/unread-count"),
-    // 线上目前只认 open；升级四态后仍兼容 pending/in_progress
-    request<Page<NotifyTodo>>(session, "GET", "/wiki/todos?status=open&page=1&pageSize=30"),
     request<Page<NotifyNotice>>(session, "GET", "/wiki/notifications?unread=1&page=1&pageSize=20"),
   ]);
-  const items = (todos.items ?? []).filter((todo) => isActiveTodoStatus(todo.status));
+  const raw = todos.items ?? [];
+  const items = raw.filter((todo) => todo?.id && isActiveTodoStatus(todo.status) && !isTodoListRecord(todo));
+  for (const todo of items) publishTodo(todo);
+  const listCount = raw.filter(isTodoListRecord).length;
   return {
-    openTodoCount: openTodo.count ?? todos.total ?? items.length,
+    openTodoCount: Math.max(0, (todos.total ?? items.length) - listCount),
     unreadNoticeCount: unreadNotice.count ?? notices.total ?? notices.items?.length ?? 0,
     todos: items,
     notices: notices.items ?? [],
   };
+}
+
+let liveSnapshot: NotifySnapshot | null = null;
+const snapshotListeners = new Set<() => void>();
+let snapshotInflight: Promise<NotifySnapshot> | null = null;
+
+export function peekNotifySnapshot(): NotifySnapshot | null {
+  return liveSnapshot;
+}
+
+export function subscribeNotifySnapshot(listener: () => void): () => void {
+  snapshotListeners.add(listener);
+  return () => snapshotListeners.delete(listener);
+}
+
+function emitNotifySnapshot() {
+  for (const listener of snapshotListeners) listener();
+}
+
+/** 多个铃铛同时刷新时共用这一次请求 */
+export function loadNotifySnapshot(session: RemoteSession): Promise<NotifySnapshot> {
+  if (snapshotInflight) return snapshotInflight;
+  snapshotInflight = fetchNotifySnapshot(session)
+    .then((next) => {
+      liveSnapshot = next;
+      emitNotifySnapshot();
+      return next;
+    })
+    .finally(() => {
+      snapshotInflight = null;
+    });
+  return snapshotInflight;
 }
 
 function wireUpsertBody(input: UpsertTodoInput, pageId?: string) {
@@ -201,11 +389,9 @@ function wireUpsertBody(input: UpsertTodoInput, pageId?: string) {
     patch.status = toWireTodoStatus(input.status);
   }
   if (input.data !== undefined) {
-    // 调用方负责带上需保留的字段（如 attachments）
-    patch.data = {
-      ...(input.data ?? {}),
-      ...(input.status !== undefined ? { localStatus: input.status } : {}),
-    };
+    const data = { ...(input.data ?? {}) };
+    delete data.localStatus;
+    patch.data = data;
   }
   if (pageId) {
     patch.pageId = pageId;
@@ -240,12 +426,12 @@ export function createTodo(session: RemoteSession, input: UpsertTodoInput): Prom
   if (!pageId) {
     return Promise.reject(new Error("pageId 必填且须为有效文档 id"));
   }
-  return request<NotifyTodo>(
-    session,
-    "POST",
-    "/wiki/todos",
-    wireUpsertBody({ ...input, status: input.status ?? "pending", startsAt: input.startsAt ?? null }, pageId),
-  );
+  const body = wireUpsertBody({ ...input, status: input.status ?? "pending", startsAt: input.startsAt ?? null }, pageId);
+  const sent = body.data && typeof body.data === "object" ? (body.data as Record<string, unknown>) : undefined;
+  return request<NotifyTodo>(session, "POST", "/wiki/todos", body).then((todo) => {
+    publishTodo(todo, sent);
+    return todosById.get(todo.id) ?? todo;
+  });
 }
 
 export function getTodo(session: RemoteSession, id: string): Promise<NotifyTodo> {
@@ -257,7 +443,10 @@ export function updateTodo(session: RemoteSession, id: string, input: UpsertTodo
   const body = wireUpsertBody(input, pageId || undefined);
   // PATCH 时 source 可省略
   const { source: _source, ...rest } = body;
-  return request<NotifyTodo>(session, "PATCH", `/wiki/todos/${id}`, rest);
+  return request<NotifyTodo>(session, "PATCH", `/wiki/todos/${id}`, rest).then((todo) => {
+    publishTodo(todo);
+    return todo;
+  });
 }
 
 /** 块同步更新时合并 data，避免冲掉详情里的 attachments / content 附属字段 */
@@ -281,34 +470,38 @@ export async function updateTodoMergingData(
 }
 
 /** 给还没有页面的历史待办补绑或改绑文档 */
+function publishResult(todo: NotifyTodo): NotifyTodo {
+  publishTodo(todo);
+  return todo;
+}
+
 export function bindTodoPage(session: RemoteSession, id: string, pageId: string): Promise<NotifyTodo> {
-  return request<NotifyTodo>(session, "POST", `/wiki/todos/${id}/page`, { pageId });
+  return request<NotifyTodo>(session, "POST", `/wiki/todos/${id}/page`, { pageId }).then(publishResult);
 }
 
 export function markTodoDone(session: RemoteSession, id: string): Promise<NotifyTodo> {
-  return request<NotifyTodo>(session, "POST", `/wiki/todos/${id}/done`);
+  return request<NotifyTodo>(session, "POST", `/wiki/todos/${id}/done`).then(publishResult);
 }
 
 export function markTodoStart(session: RemoteSession, id: string): Promise<NotifyTodo> {
-  return request<NotifyTodo>(session, "POST", `/wiki/todos/${id}/start`);
+  return request<NotifyTodo>(session, "POST", `/wiki/todos/${id}/start`).then(publishResult);
 }
 
 export function markTodoCancel(session: RemoteSession, id: string): Promise<NotifyTodo> {
-  return request<NotifyTodo>(session, "POST", `/wiki/todos/${id}/cancel`);
+  return request<NotifyTodo>(session, "POST", `/wiki/todos/${id}/cancel`).then(publishResult);
 }
 
 export function reopenTodo(session: RemoteSession, id: string): Promise<NotifyTodo> {
-  return request<NotifyTodo>(session, "POST", `/wiki/todos/${id}/reopen`);
+  return request<NotifyTodo>(session, "POST", `/wiki/todos/${id}/reopen`).then(publishResult);
 }
 
 /**
- * 按目标状态同步远程。优先专用接口；失败时回退 PATCH（线上 status 只能是 open/done/cancelled）。
- * pending / in_progress 在 /start|/reopen 未上线时不再二次 PATCH status（细态已在 data.localStatus）。
+ * 按目标状态同步远程。优先 /start /done /cancel /reopen，失败时用 PATCH 写回四态 status。
  */
 export async function syncTodoStatus(
   session: RemoteSession,
   id: string,
-  status: Exclude<WikiTodoStatus, "open">,
+  status: TodoRecordStatus,
   fallback?: UpsertTodoInput,
 ): Promise<NotifyTodo> {
   try {
@@ -321,37 +514,21 @@ export async function syncTodoStatus(
     if (status === "cancelled") {
       return await markTodoCancel(session, id);
     }
-    if (status === "pending") {
-      return await reopenTodo(session, id);
-    }
+    return await reopenTodo(session, id);
   } catch {
-    // start / cancel / reopen 未上线时回退
+    // 专用接口未上线时直接改 status
   }
-  // 活跃细态：调用方通常已 PATCH 过 open + localStatus，避免再打一遍触发校验错误
-  if (status === "pending" || status === "in_progress") {
-    return getTodo(session, id).catch(() => {
-      if (!fallback?.title) {
-        return Promise.reject(new Error("todo status sync failed"));
-      }
-      return updateTodo(session, id, {
-        title: fallback.title,
-        ...(fallback.content !== undefined ? { content: fallback.content } : {}),
-        pageId: fallback.pageId,
-        status: "pending",
-        startsAt: fallback.startsAt,
-        dueAt: fallback.dueAt,
-        data: { ...(fallback.data ?? {}), localStatus: status },
-      });
-    });
+  if (!fallback?.title) {
+    return Promise.reject(new Error("todo status sync failed"));
   }
   return updateTodo(session, id, {
-    title: fallback?.title ?? "",
-    ...(fallback?.content !== undefined ? { content: fallback.content } : {}),
-    pageId: fallback?.pageId,
+    title: fallback.title,
+    ...(fallback.content !== undefined ? { content: fallback.content } : {}),
+    pageId: fallback.pageId,
     status,
-    startsAt: fallback?.startsAt,
-    dueAt: fallback?.dueAt,
-    data: fallback?.data,
+    startsAt: fallback.startsAt,
+    dueAt: fallback.dueAt,
+    data: fallback.data,
   });
 }
 
