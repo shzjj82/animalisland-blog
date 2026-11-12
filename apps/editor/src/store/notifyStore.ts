@@ -275,6 +275,40 @@ export async function loadListTasks(session: RemoteSession, pageId: string, list
   return items;
 }
 
+/** 文档里记下的任务 id。没有 listId 的历史任务不会出现在列表查询里，按 id 取回真实状态 */
+export async function attachSavedTasks(
+  session: RemoteSession,
+  pageId: string,
+  listId: string,
+  ids: string[],
+  persist = true,
+): Promise<void> {
+  const list = listId.trim();
+  const page = pageId.trim();
+  if (!list) return;
+  const known = new Set(cachedListTasks(list).map((todo) => todo.id));
+  const missing = [...new Set(ids.map((id) => id.trim()).filter(Boolean))].filter((id) => !known.has(id));
+  await Promise.all(
+    missing.map(async (id) => {
+      try {
+        const todo = await getTodo(session, id);
+        if (!todo?.id || isTodoListRecord(todo)) return;
+        publishTodo(todo, { kind: "task", listId: list });
+        if (!persist || taskListId(todo) === list) return;
+        await updateTodoMergingData(session, todo.id, {
+          title: todo.title?.trim() || "待办",
+          pageId: page || undefined,
+          startsAt: todo.startsAt ?? null,
+          dueAt: todo.dueAt,
+          data: { kind: "task", listId: list },
+        });
+      } catch (err) {
+        console.warn("[todo-attach]", err);
+      }
+    }),
+  );
+}
+
 /** 创建待办块时向服务端申请一份列表，id 与 pageId 绑定 */
 export async function ensureTodoList(session: RemoteSession, pageId: string, listId?: string): Promise<NotifyTodo> {
   const page = pageId.trim();

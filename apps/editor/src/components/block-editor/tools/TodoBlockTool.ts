@@ -7,6 +7,7 @@ import {
   ensureTodoList,
   fineTodoStatus,
   loadListTasks,
+  attachSavedTasks,
   rememberTodoPage,
   subscribeListTasks,
   syncTodoStatus,
@@ -240,19 +241,14 @@ function normalize(data: Partial<TodoData> | undefined): TodoData & { items: Tod
   const rawItems = Array.isArray(data?.items) ? data.items : [];
   const items = rawItems.map(normalizeItem).filter((item): item is TodoItem => item !== null);
   const ids = Array.isArray(data?.ids) ? data.ids.filter((id): id is string => typeof id === "string" && Boolean(id.trim())) : [];
-  for (const id of ids) {
-    if (!items.some((item) => item.remoteId === id || item.id === id)) {
-      items.push({ id, remoteId: id, text: "", status: "pending", start: "", end: "" });
-    }
-  }
   const legacyNotify = rawItems.some(
     (raw) => Boolean(raw && typeof raw === "object" && (raw as { notify?: unknown }).notify),
   );
-  const linked = Array.isArray(data?.ids);
   const listId = typeof data?.listId === "string" && data.listId.trim() ? data.listId.trim() : undefined;
   return {
-    items: items.length || linked ? items : [blankItem()],
+    items: items.length ? items : [blankItem()],
     notify: Boolean(data?.notify) || legacyNotify,
+    ...(ids.length ? { ids } : {}),
     ...(listId ? { listId } : {}),
   };
 }
@@ -483,6 +479,10 @@ export class TodoBlockTool implements BlockTool {
     if (!session || !pageId) return "";
     if (!this.data.listId && this.readOnly) return "";
     this.booting = true;
+    const savedIds = [
+      ...(this.data.ids ?? []),
+      ...this.data.items.map((item) => item.remoteId).filter((id): id is string => Boolean(id)),
+    ];
     const unsynced = this.data.items.filter((item) => item.text.trim() && !item.remoteId);
     try {
       const list = await ensureTodoList(session, pageId, this.data.listId);
@@ -495,6 +495,7 @@ export class TodoBlockTool implements BlockTool {
       });
       if (!this.readOnly) this.commit();
       await loadListTasks(session, pageId, list.id);
+      await attachSavedTasks(session, pageId, list.id, savedIds, !this.readOnly);
       if (this.readOnly) return list.id;
       for (const item of unsynced) {
         const payload = upsertPayload(item, pageId, list.id, this.data.notify);
