@@ -156,6 +156,7 @@ export function NotifyBell({ session, className, onWriteTodo, onOpenPage }: Prop
   const todos = snapshot?.todos ?? [];
   const unreadNotices = snapshot?.notices ?? [];
   const readNotices = snapshot?.readNotices ?? [];
+  const noticeRows = tab === "unread" ? unreadNotices.length > 0 : tab === "read" ? readNotices.length > 0 : false;
 
   async function onWrite(todo: NotifyTodo) {
     if (!onWriteTodo) {
@@ -237,7 +238,7 @@ export function NotifyBell({ session, className, onWriteTodo, onOpenPage }: Prop
 
   const panel = (
     <>
-      <div className="border-border/50 flex shrink-0 items-end justify-start gap-1 border-b px-3 pt-1">
+      <div className="border-border/50 flex shrink-0 items-center gap-1 border-b px-3 pt-1">
         <LineTab active={tab === "unread"} count={unread} onClick={() => setTab("unread")}>
           {t("notify.unread")}
         </LineTab>
@@ -247,9 +248,25 @@ export function NotifyBell({ session, className, onWriteTodo, onOpenPage }: Prop
         <LineTab active={tab === "todos"} count={openTodos} onClick={() => setTab("todos")}>
           {t("notify.todos")}
         </LineTab>
+        {tab === "unread" && unread > 0 ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="text-muted-foreground ml-auto h-7 shrink-0 px-2 text-[11px]"
+            disabled={busyId === "all"}
+            onClick={() => void onReadAll()}
+          >
+            {t("notify.readAll")}
+          </Button>
+        ) : null}
       </div>
       {error ? <div className="shrink-0 px-3 py-2 text-xs text-destructive">{error}</div> : null}
-      <SoftScrollbar key={tab} className={cn(NOTIFY_LIST_H, "bg-muted/30")} contentClassName="min-h-full space-y-1.5 p-2">
+      <SoftScrollbar
+        key={tab}
+        className={cn(NOTIFY_LIST_H, noticeRows ? "bg-background" : "bg-muted/30")}
+        contentClassName={cn("min-h-full", noticeRows ? "" : "space-y-1.5 p-2")}
+      >
         {tab === "todos" ? (
           <TodoList todos={todos} locale={i18n.language} onOpen={openDetail} />
         ) : tab === "unread" ? (
@@ -260,9 +277,6 @@ export function NotifyBell({ session, className, onWriteTodo, onOpenPage }: Prop
             emptyKind="unread"
             empty={t("notify.emptyUnread")}
             unread
-            showReadAll={unread > 0}
-            readAllBusy={busyId === "all"}
-            onReadAll={() => void onReadAll()}
             onOpen={(notice) => void onOpenNotice(notice, true)}
           />
         ) : (
@@ -273,9 +287,6 @@ export function NotifyBell({ session, className, onWriteTodo, onOpenPage }: Prop
             emptyKind="read"
             empty={t("notify.emptyRead")}
             unread={false}
-            showReadAll={false}
-            readAllBusy={false}
-            onReadAll={() => undefined}
             onOpen={(notice) => void onOpenNotice(notice, false)}
           />
         )}
@@ -448,9 +459,6 @@ function NoticeList({
   emptyKind,
   empty,
   unread,
-  showReadAll,
-  readAllBusy,
-  onReadAll,
   onOpen,
 }: {
   notices: NotifyNotice[];
@@ -459,9 +467,6 @@ function NoticeList({
   emptyKind: EmptyKind;
   empty: string;
   unread: boolean;
-  showReadAll: boolean;
-  readAllBusy: boolean;
-  onReadAll: () => void;
   onOpen: (notice: NotifyNotice) => void;
 }) {
   const { t } = useTranslation();
@@ -470,21 +475,7 @@ function NoticeList({
   }
   return (
     <>
-      {showReadAll ? (
-        <div className="flex justify-end px-0.5">
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            className="text-muted-foreground h-6 px-2 text-[11px]"
-            disabled={readAllBusy}
-            onClick={onReadAll}
-          >
-            {t("notify.readAll")}
-          </Button>
-        </div>
-      ) : null}
-      {notices.map((notice, index) => {
+      {notices.map((notice) => {
         const line = notice.title.trim() || notice.content.trim() || t("notify.untitled");
         const when = formatWhen(notice.createdAt, locale);
         const kindKey = noticeKindKey(notice);
@@ -495,21 +486,17 @@ function NoticeList({
             key={notice.id}
             type="button"
             className={cn(
-              NOTIFY_CARD_H,
-              "flex w-full flex-col justify-between rounded-xl border border-border/60 bg-background px-3 pt-2.5 pb-2 text-left shadow-sm transition-[opacity,box-shadow,border-color] duration-200 ease-out motion-reduce:transition-none",
-              reading ? "pointer-events-none opacity-0" : "hover:border-border hover:shadow-md",
-              !unread && "opacity-90",
+              "flex h-10 w-full items-center gap-2 border-b border-border/40 px-3 text-left transition-colors duration-150 last:border-b-0 motion-reduce:transition-none",
+              reading ? "pointer-events-none opacity-40" : "hover:bg-muted/50",
+              !unread && "opacity-80",
             )}
-            style={{ animation: "notify-card-in 220ms ease-out backwards", animationDelay: `${Math.min(index, 6) * 35}ms` }}
             disabled={reading}
             onClick={() => onOpen(notice)}
           >
-            <span className="flex items-center gap-1.5">
-              {unread ? <span className="size-1.5 shrink-0 rounded-full bg-red-500" /> : null}
-              {kind ? <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">{kind}</span> : null}
-              {when ? <span className="ml-auto text-[10px] leading-none tabular-nums text-muted-foreground">{when}</span> : null}
-            </span>
-            <span className="block truncate text-[13px] leading-5 font-medium">{line}</span>
+            {unread ? <span className="size-1.5 shrink-0 rounded-full bg-red-500" /> : <span className="size-1.5 shrink-0" />}
+            {kind ? <span className="shrink-0 text-[11px] leading-none text-muted-foreground">{kind}</span> : null}
+            <span className="min-w-0 flex-1 truncate text-[13px] leading-5 text-foreground">{line}</span>
+            {when ? <span className="shrink-0 text-[11px] leading-none tabular-nums text-muted-foreground">{when}</span> : null}
           </button>
         );
       })}
