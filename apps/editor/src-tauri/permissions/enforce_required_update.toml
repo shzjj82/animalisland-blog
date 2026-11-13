@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "allow-enforce-required-update"
+description = "让原生壳接手大版本强制更新。"
+commands.allow = ["enforce_required_update"]
+
+[[permission]]
+identifier = "deny-enforce-required-update"
+description = "禁止页面触发原生壳的大版本强制更新。"
+commands.deny = ["enforce_required_update"]

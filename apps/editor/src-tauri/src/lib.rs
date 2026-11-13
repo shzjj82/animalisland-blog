@@ -7,6 +7,9 @@ use std::time::{Duration, Instant};
 
 mod browser_cmd;
 mod export_cmd;
+mod required_update;
+
+use required_update::enforce_required_update;
 
 use serde::Deserialize;
 use tauri::Manager;
@@ -439,7 +442,7 @@ fn for_child_path(path: &std::path::Path) -> PathBuf {
     }
 }
 
-fn append_log(message: &str) {
+pub(crate) fn append_log(message: &str) {
     let dir = DATA_DIR.get().cloned().or_else(exe_dir);
     if let Some(dir) = dir {
         let path = dir.join("wiki-agent-desktop.log");
@@ -659,7 +662,7 @@ fn start_desktop_server(app: &tauri::App) -> Result<u16, String> {
     Ok(port)
 }
 
-fn stop_desktop_server(app: &tauri::AppHandle) {
+pub(crate) fn stop_desktop_server(app: &tauri::AppHandle) {
     let Some(state) = app.try_state::<DesktopServer>() else {
         return;
     };
@@ -698,6 +701,7 @@ pub fn run() {
             export_cmd::write_export_file,
             export_cmd::export_pdf,
             set_native_menu_locale,
+            enforce_required_update,
             run_ai_command,
             open_ai_target,
             read_ai_file,
@@ -712,6 +716,9 @@ pub fn run() {
             let Some(window) = app.get_webview_window("main") else {
                 return Ok(());
             };
+            if required_update::block_if_major(app.handle(), &window) {
+                return Ok(());
+            }
             #[cfg(not(debug_assertions))]
             {
                 match start_desktop_server(app) {

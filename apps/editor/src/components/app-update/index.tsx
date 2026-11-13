@@ -13,6 +13,18 @@ type UpdateHandle = {
 
 type Phase = "idle" | "checking" | "current" | "ready" | "downloading" | "installing" | "error";
 
+/** 版本是 major.minor.patch。只比较第一位，0.0.27 → 1.0.0 算大版本。 */
+function majorPart(version: string): number | null {
+  const match = /^\s*v?(\d+)\./i.exec(version);
+  return match ? Number(match[1]) : null;
+}
+
+function isMajorUpgrade(current: string, next: string): boolean {
+  const from = majorPart(current);
+  const to = majorPart(next);
+  return from !== null && to !== null && to > from;
+}
+
 function isDesktopApp(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
@@ -27,11 +39,20 @@ async function lookForUpdate(): Promise<UpdateHandle | null> {
   return check();
 }
 
+/** 大版本交给原生壳的系统对话框，页面不再拦住。 */
+async function enforceRequiredUpdate(): Promise<boolean> {
+  const internals = (window as Window & { __TAURI_INTERNALS__?: { invoke: (cmd: string) => Promise<unknown> } }).__TAURI_INTERNALS__;
+  if (!internals?.invoke) {
+    return false;
+  }
+  return Boolean(await internals.invoke("enforce_required_update"));
+}
+
 const CheckContext = createContext<(() => void) | null>(null);
 
 /**
- * 桌面安装包里检查 OSS 上的 latest.json。
- * 不在启动时检查。入口不画在页面上，只有菜单栏或用户菜单点了「检查更新」才查询并显示版本。
+ * 桌面安装包里的可选更新。小版本只在菜单点「检查更新」时提示。
+ * 大版本在原生壳里用系统对话框拦住，这里发现大版本就交给壳，不再弹页面。
  */
 export function AppUpdateProvider({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
@@ -40,6 +61,8 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [update, setUpdate] = useState<UpdateHandle | null>(null);
   const updateRef = useRef<UpdateHandle | null>(null);
+  const busyRef = useRef(false);
+  const pendingManualRef = useRef(false);
   const [currentVersion, setCurrentVersion] = useState("");
   const [percent, setPercent] = useState(0);
   const [gotBytes, setGotBytes] = useState(0);
@@ -61,7 +84,12 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
     }
   }, [remember]);
 
-  const checkNow = useCallback(async () => {
+  const checkForUpdate = useCallback(async () => {
+    if (busyRef.current) {
+      pendingManualRef.current = true;
+      return;
+    }
+    busyRef.current = true;
     setMessage("");
     setPhase("checking");
     setOpen(true);
@@ -72,17 +100,35 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
     }
     try {
       const found = await lookForUpdate();
+      if (found && isMajorUpgrade(found.currentVersion, found.version)) {
+        setOpen(false);
+        setPhase("idle");
+        const handled = await enforceRequiredUpdate();
+        if (handled) {
+          await found.close().catch(() => undefined);
+          return;
+        }
+      }
       if (!found) {
         const { getVersion } = await import("@tauri-apps/api/app");
         setCurrentVersion(await getVersion().catch(() => ""));
         setPhase("current");
+        setOpen(true);
         return;
       }
       remember(found);
       setPhase("ready");
+      setOpen(true);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : t("appUpdate.failed"));
       setPhase("error");
+      setOpen(true);
+    } finally {
+      busyRef.current = false;
+      if (pendingManualRef.current) {
+        pendingManualRef.current = false;
+        void checkForUpdate();
+      }
     }
   }, [remember, t]);
 
@@ -93,7 +139,7 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     void import("@tauri-apps/api/event")
-      .then(({ listen }) => listen("app-update-check", () => void checkNow()))
+      .then(({ listen }) => listen("app-update-check", () => void checkForUpdate()))
       .then((stop) => {
         if (cancelled) {
           void stop();
@@ -106,10 +152,11 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       unlisten?.();
     };
-  }, [checkNow, desktop]);
+  }, [checkForUpdate, desktop]);
 
   const install = async () => {
-    if (!update) {
+    const current = updateRef.current;
+    if (!current) {
       return;
     }
     setPhase("downloading");
@@ -119,7 +166,7 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
     try {
       let total = 0;
       let got = 0;
-      await update.downloadAndInstall((event) => {
+      await current.downloadAndInstall((event) => {
         if (event.event === "Started") {
           total = event.data?.contentLength ?? 0;
           setTotalBytes(total);
@@ -143,13 +190,16 @@ export function AppUpdateProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <CheckContext.Provider value={desktop ? () => void checkNow() : null}>
+    <CheckContext.Provider value={desktop ? () => void checkForUpdate() : null}>
       {children}
       {desktop ? (
         <Dialog
           open={open}
           onOpenChange={(next) => {
-            if (!next && phase !== "downloading" && phase !== "installing") {
+            if (!next && (phase === "downloading" || phase === "installing")) {
+              return;
+            }
+            if (!next) {
               void closeUpdate();
             }
           }}

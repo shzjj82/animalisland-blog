@@ -11,6 +11,7 @@
     "allow-write-export-file",
     "allow-export-pdf",
     "allow-set-native-menu-locale",
+    "allow-enforce-required-update",
     "allow-run-ai-command",
     "allow-open-ai-target",
     "allow-read-ai-file",
